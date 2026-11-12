@@ -1,0 +1,94 @@
+@import "tailwindcss";
+@config "../../tailwind.config.ts";
+
+@layer base {
+  :root {
+    /* ==========================================
+       PAPER MODERNIST (Light Mode Engine)
+       ========================================== */
+    --bg-canvas: #F6F5F2;
+    --surface-elevated: rgba(255, 255, 255, 0.85);
+    --surface-card: #FFFFFF;
+    --border-subtle: rgba(45, 45, 42, 0.08);
+    --border-active: rgba(45, 45, 42, 0.22);
+    --text-primary: #1A1A18;
+    --text-muted: #7C7A75;
+    --grid-dot: #D5D2CB;
+    --accent-primary: #C95A3B; /* Terracota técnico */
+    --accent-success: #4F6B58; /* Verde salvia precisión */
+
+    /* Curvas físicas de transición */
+    --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-out-micro: cubic-bezier(0.2, 0.8, 0.2, 1);
+    --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  html.dark {
+    /* ==========================================
+       OBSIDIAN MONOLITH (Dark Mode Engine)
+       ========================================== */
+    --bg-canvas: #0D0E11;
+    --surface-elevated: rgba(22, 24, 29, 0.80);
+    --surface-card: #16181D;
+    --border-subtle: rgba(255, 255, 255, 0.08);
+    --border-active: rgba(255, 255, 255, 0.22);
+    --text-primary: #EDEDEF;
+    --text-muted: #8B8D98;
+    --grid-dot: #1F222A;
+    --accent-primary: #3B82F6; /* Cobalto precisión */
+    --accent-success: #10B981; /* Esmeralda telemetría */
+  }
+
+  * {
+    border-color: var(--border-subtle);
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html,
+  body {
+    background-color: var(--bg-canvas);
+    color: var(--text-primary);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    overscroll-behavior: none;
+  }
+}
+
+@layer utilities {
+  /* Retícula radial del Lienzo Infinito (28px x 28px) */
+  .canvas-grid {
+    background-color: var(--bg-canvas);
+    background-image: radial-gradient(var(--grid-dot) 1.25px, transparent 1.25px);
+    background-size: 28px 28px;
+    transition: background-color 300ms var(--ease-spring);
+  }
+
+  /* Retícula compacta para el Mapa Miniatura 2D en Móvil */
+  .canvas-grid-mini {
+    background-color: var(--bg-canvas);
+    background-image: radial-gradient(var(--grid-dot) 1px, transparent 1px);
+    background-size: 14px 14px;
+  }
+
+  /* Transiciones elásticas estilo Linear / Raycast */
+  .spring-micro {
+    transition: all 180ms var(--ease-spring);
+  }
+
+  .spring-bounce {
+    transition: transform 250ms var(--ease-bounce);
+  }
+
+  /* Números tabulares estrictos para telemetría e ingeniería */
+  .tabular-telemetry {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Ocultar scrollbars en carruseles de filtros móviles */
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
