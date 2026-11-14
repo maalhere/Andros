@@ -2,6 +2,7 @@
 
 import React from "react";
 import { useDeviceLayout } from "@/hooks/useDeviceLayout";
+import { useCloudSync } from "@/hooks/useCloudSync";
 import { TopStatusBar } from "@/components/shared/TopStatusBar";
 import { OracleModal } from "@/components/shared/OracleModal";
 import { SpatialCanvas } from "@/components/desktop/SpatialCanvas";
@@ -12,6 +13,8 @@ import { MobileBottomSheet } from "@/components/mobile/MobileBottomSheet";
 
 export default function AndrosWorkspacePage() {
   const { isMobile, isMounted } = useDeviceLayout();
+  // Login con Google + guardado automático en Supabase (no hace nada en modo local).
+  useCloudSync();
 
   if (!isMounted) {
     return <div className="w-screen h-screen canvas-grid" />;

@@ -123,7 +123,10 @@ export interface FileNodePayload {
   lastModifiedMs?: number;
   /** Mensaje legible cuando `status` es "error". */
   errorMessage?: string;
-  /** Ruta en el bucket `workspace-files` (se llenará en la Etapa 4). */
+  /**
+   * Ruta del archivo en el bucket `print-files` de Supabase Storage. La llena
+   * `useCloudSync` al terminar la subida; vacía en modo local.
+   */
   storagePath?: string;
 }
 

@@ -4,6 +4,8 @@ import React from "react";
 import { RotateCcw } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
+import { useCloudStore } from "@/store/useCloudStore";
+import { GoogleAuthButton } from "@/components/auth/GoogleAuthButton";
 
 interface TopStatusBarProps {
   isMobile: boolean;
@@ -12,6 +14,7 @@ interface TopStatusBarProps {
 export const TopStatusBar: React.FC<TopStatusBarProps> = ({ isMobile }) => {
   const nodesCount = useWorkspaceStore((s) => s.nodes.length);
   const resetCanvasView = useWorkspaceStore((s) => s.resetCanvasView);
+  const isCloudActive = useCloudStore((s) => s.user !== null && s.status !== "error");
 
   return (
     <header className="fixed top-3 md:top-4 left-3 right-3 md:left-6 md:right-6 z-40 flex items-center justify-between pointer-events-none">
@@ -28,8 +31,10 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({ isMobile }) => {
           </span>
         </div>
         <div
-          className="w-1.5 h-1.5 rounded-full bg-andros-success animate-pulse ml-0.5"
-          title="Sincronización activa"
+          className={`w-1.5 h-1.5 rounded-full ml-0.5 ${
+            isCloudActive ? "bg-andros-success animate-pulse" : "bg-andros-muted"
+          }`}
+          title={isCloudActive ? "Sincronización con la nube activa" : "Modo local"}
         />
       </div>
 
@@ -48,18 +53,8 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({ isMobile }) => {
 
         <ThemeToggle />
 
-        {/* Colaboradores activos */}
-        <div className="flex items-center -space-x-2 bg-andros-surface backdrop-blur-md p-1 pl-2 rounded-xl border border-andros-border shadow-sm">
-          <div className="w-6 h-6 rounded-full bg-blue-500/20 border border-blue-400 text-blue-500 text-[10px] font-mono flex items-center justify-center font-bold">
-            ER
-          </div>
-          <div className="w-6 h-6 rounded-full bg-emerald-500/20 border border-emerald-400 text-emerald-500 text-[10px] font-mono flex items-center justify-center font-bold">
-            TU
-          </div>
-          <span className="hidden sm:inline-block pl-3 pr-2 text-[11px] font-mono text-andros-muted">
-            2 en línea
-          </span>
-        </div>
+        {/* Cuenta de Google + estado de guardado en la nube */}
+        <GoogleAuthButton isMobile={isMobile} />
       </div>
     </header>
   );

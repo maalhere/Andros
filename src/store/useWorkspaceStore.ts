@@ -56,6 +56,9 @@ interface WorkspaceState {
   updateNodePayload: (id: string, patch: NodePayloadPatch) => void;
   updateNodeMeta: (id: string, patch: NodeMetaPatch) => void;
 
+  /** Reemplaza el lienzo completo (lo usa la nube al cargar el workspace guardado). */
+  hydrateWorkspace: (nodes: EngineeringNodeData[], connections: NodeConnection[]) => void;
+
   // Acciones de Conexión
   startConnecting: (nodeId: string, port?: PortPosition) => void;
   cancelConnecting: () => void;
@@ -238,7 +241,7 @@ const DEMO_TENSILE_TEST_CSV = [
   "",
 ].join("\r\n");
 
-const INITIAL_NODES: EngineeringNodeData[] = [
+export const INITIAL_NODES: EngineeringNodeData[] = [
   // --- NODO TIPO 1: Archivo descargable -----------------------------------
   {
     id: "node-1",
@@ -402,7 +405,7 @@ const INITIAL_NODES: EngineeringNodeData[] = [
   },
 ];
 
-const INITIAL_CONNECTIONS: NodeConnection[] = [
+export const INITIAL_CONNECTIONS: NodeConnection[] = [
   {
     id: "conn-1",
     fromNodeId: "node-1",
@@ -619,6 +622,26 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
         node.id === id ? { ...node, ...patch, updatedAt: "Ahora mismo" } : node
       ),
     })),
+
+  hydrateWorkspace: (nodes, connections) =>
+    set((state) => {
+      // Libera los archivos locales del lienzo anterior que ya no se usan.
+      const nextUrls = new Set(
+        nodes.flatMap((n) => (n.type === "file-node" ? [n.fileData.downloadUrl] : []))
+      );
+      for (const node of state.nodes) {
+        if (node.type === "file-node" && !nextUrls.has(node.fileData.downloadUrl)) {
+          revokeLocalFileUrl(node.fileData.downloadUrl);
+        }
+      }
+      return {
+        nodes,
+        connections,
+        selectedNodeId: null,
+        selectedConnectionId: null,
+        connectingFrom: null,
+      };
+    }),
 
   // --------------------------------------------------------------------------
   // Acciones de Conexión

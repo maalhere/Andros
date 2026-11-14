@@ -212,6 +212,8 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
       checksum: undefined,
       errorMessage: undefined,
       lastModifiedMs: selected.lastModified,
+      // Archivo nuevo: `useCloudSync` lo subirá y escribirá su nueva ruta.
+      storagePath: undefined,
     });
 
     updateNodeMeta(node.id, {
@@ -291,6 +293,7 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
       checksum: undefined,
       errorMessage: undefined,
       lastModifiedMs: undefined,
+      storagePath: undefined,
     });
     updateNodeMeta(node.id, {
       codeTag: "FILE",
