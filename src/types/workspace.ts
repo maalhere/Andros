@@ -11,7 +11,49 @@ export type ThemeMode = "light" | "dark";
 
 export type ViewportMode = "desktop" | "mobile";
 
-export type ActiveTool = "pointer" | "add-node" | "connect" | "library" | "oracle";
+export type ActiveTool =
+  | "pointer"
+  | "add-node"
+  | "connect"
+  | "library"
+  | "oracle"
+  | "draw";
+
+// ----------------------------------------------------------------------------
+// 1b. Tinta libre sobre el lienzo (Lápiz D · estilo Samsung Notes)
+// ----------------------------------------------------------------------------
+
+/**
+ * Color de la tinta. "adaptive" es Grafito en modo claro y Blanco en modo
+ * oscuro (se pinta con `var(--text-primary)`); el resto son hexadecimales.
+ */
+export type CanvasInkColor = "adaptive" | "#C95A3B" | "#3B82F6" | "#10B981";
+
+/** Punta del lápiz: fino 2px, medio 4px o resaltador 10px semitransparente. */
+export type CanvasInkTip = "fine" | "medium" | "highlighter";
+
+/** Sub-herramienta activa mientras el Lápiz está encendido. */
+export type CanvasInkMode = "pen" | "eraser";
+
+/** Punto de un trazo libre en coordenadas del lienzo (no de la pantalla). */
+export interface CanvasStrokePoint {
+  x: number;
+  y: number;
+  /** Presión 0–1. Solo existe si el dispositivo la informa (S-Pen, Apple Pencil). */
+  p?: number;
+}
+
+/** Trazo libre dibujado directamente sobre el fondo infinito del lienzo. */
+export interface CanvasStroke {
+  id: string;
+  color: CanvasInkColor;
+  tip: CanvasInkTip;
+  /** Grosor base en unidades del lienzo (a 100 % de zoom equivale a píxeles). */
+  width: number;
+  /** `true` si el trazo se hizo con un stylus que informa presión. */
+  pressure: boolean;
+  points: CanvasStrokePoint[];
+}
 
 export type MobileSheetType =
   | "none"

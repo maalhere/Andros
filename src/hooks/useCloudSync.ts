@@ -28,6 +28,7 @@ import {
   MAX_FILE_SIZE_LABEL,
   useWorkspaceStore,
 } from "@/store/useWorkspaceStore";
+import { sanitizeCanvasStrokes } from "@/lib/canvas/inkGeometry";
 import type {
   CalcLatexPayload,
   EngineeringNodeBase,
@@ -83,6 +84,10 @@ const NODE_COLUMNS =
 const CONNECTION_COLUMNS = "id, from_node_id, to_node_id, from_port, to_port, label";
 
 const PORTS: readonly PortPosition[] = ["top", "right", "bottom", "left"];
+
+/** Mensaje si la base de datos todavía no tiene la columna `canvas_strokes`. */
+const STROKES_SETUP_HINT =
+  "Los dibujos a mano no se pudieron guardar. Ejecuta de nuevo supabase/schema.sql en el SQL Editor de Supabase";
 
 /**
  * Lo que se guarda del archivo en `workspace_nodes`: SOLO metadatos ligeros.
@@ -290,6 +295,8 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
 
   let nodeSnapshot = new Map<string, string>();
   let connectionSnapshot = new Map<string, string>();
+  /** JSON de los trazos de tinta ya guardados (null = aún no se guardaron). */
+  let strokesSnapshot: string | null = null;
   let syncedStoragePaths = new Set<string>();
 
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -317,6 +324,7 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
     workspaceId = null;
     nodeSnapshot = new Map();
     connectionSnapshot = new Map();
+    strokesSnapshot = null;
     syncedStoragePaths = new Set();
     failedUploads.clear();
     cloud().clearUploadErrors();
@@ -335,7 +343,9 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
     const ws = workspaceId;
     const uid = userId;
 
-    const { nodes, connections } = useWorkspaceStore.getState();
+    const { nodes, connections, canvasStrokes } = useWorkspaceStore.getState();
+    const nextStrokesSnapshot = JSON.stringify(canvasStrokes);
+    const strokesChanged = nextStrokesSnapshot !== strokesSnapshot;
     const nodeRows = buildNodeRows(nodes, ws, uid);
     const connectionRows = connections.map((c) => connectionToRow(c, ws, uid));
 
@@ -359,7 +369,8 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
       changedNodes.length === 0 &&
       changedConnections.length === 0 &&
       removedNodeIds.length === 0 &&
-      removedConnectionIds.length === 0;
+      removedConnectionIds.length === 0 &&
+      !strokesChanged;
 
     if (nothingChanged) {
       if (cloud().status !== "error") cloud().setStatus("saved");
@@ -409,6 +420,20 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
       syncedStoragePaths = currentPaths;
       if (orphanPaths.length > 0) {
         void supabase.storage.from(PRINT_FILES_BUCKET).remove(orphanPaths);
+      }
+
+      // Tinta libre del lienzo (Lápiz D): se guarda en el propio workspace.
+      if (strokesChanged) {
+        const { error } = await supabase
+          .from("workspaces")
+          .update({ canvas_strokes: canvasStrokes })
+          .eq("id", ws);
+        if (ep !== epoch) return;
+        if (error) {
+          cloud().setStatus("error", `${STROKES_SETUP_HINT} (${describeError(error)}).`);
+          return;
+        }
+        strokesSnapshot = nextStrokesSnapshot;
       }
 
       cloud().setStatus("saved", null);
@@ -616,14 +641,15 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
         wsId = (created as { id: string }).id;
       }
 
-      // 2. Nodos y cables guardados.
-      const [nodesResult, connectionsResult] = await Promise.all([
+      // 2. Nodos, cables y trazos de tinta guardados.
+      const [nodesResult, connectionsResult, strokesResult] = await Promise.all([
         supabase
           .from("workspace_nodes")
           .select(NODE_COLUMNS)
           .eq("workspace_id", wsId)
           .order("sort_order", { ascending: false }),
         supabase.from("workspace_connections").select(CONNECTION_COLUMNS).eq("workspace_id", wsId),
+        supabase.from("workspaces").select("canvas_strokes").eq("id", wsId).maybeSingle(),
       ]);
       if (nodesResult.error) throw nodesResult.error;
       if (connectionsResult.error) throw connectionsResult.error;
@@ -634,11 +660,19 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
 
       const nodeRows = (nodesResult.data ?? []) as unknown as NodeRow[];
       const connectionRows = (connectionsResult.data ?? []) as unknown as ConnectionRow[];
+      // Si falta la columna `canvas_strokes`, el lienzo carga igual (sin dibujos).
+      const strokesAvailable = !strokesResult.error;
+      const loadedStrokes = strokesAvailable
+        ? sanitizeCanvasStrokes(
+            (strokesResult.data as { canvas_strokes?: unknown } | null)?.canvas_strokes
+          )
+        : [];
 
-      if (nodeRows.length === 0 && connectionRows.length === 0) {
+      if (nodeRows.length === 0 && connectionRows.length === 0 && loadedStrokes.length === 0) {
         // Primera vez: el lienzo local actual se convierte en el lienzo en la nube.
         nodeSnapshot = new Map();
         connectionSnapshot = new Map();
+        strokesSnapshot = strokesAvailable ? "[]" : null;
         syncedStoragePaths = new Set();
         ready = true;
         await syncNow();
@@ -672,9 +706,13 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
         loadedConnections.map((c) => [c.id, JSON.stringify(connectionToRow(c, wsId, uid))])
       );
       syncedStoragePaths = storagePathsOf(loadedNodes);
+      strokesSnapshot = strokesAvailable ? JSON.stringify(loadedStrokes) : null;
 
       ready = true;
       useWorkspaceStore.getState().hydrateWorkspace(loadedNodes, loadedConnections);
+      if (strokesAvailable) {
+        useWorkspaceStore.getState().hydrateCanvasStrokes(loadedStrokes);
+      }
       await syncNow();
       // Archivos de versiones anteriores que aún estaban incrustados: al bucket.
       queueUploads();
@@ -718,7 +756,13 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
 
   // Cambios del lienzo → subida de archivos inmediata + guardado con debounce.
   const unsubscribeStore = useWorkspaceStore.subscribe((state, prev) => {
-    if (state.nodes === prev.nodes && state.connections === prev.connections) return;
+    if (
+      state.nodes === prev.nodes &&
+      state.connections === prev.connections &&
+      state.canvasStrokes === prev.canvasStrokes
+    ) {
+      return;
+    }
     queueUploads();
     scheduleSync();
   });
@@ -791,6 +835,7 @@ export async function signOutFromCloud(): Promise<void> {
   await supabase.auth.signOut();
 
   useWorkspaceStore.getState().hydrateWorkspace(INITIAL_NODES, INITIAL_CONNECTIONS);
+  useWorkspaceStore.getState().hydrateCanvasStrokes([]);
   useCloudStore.getState().setUser(null);
   useCloudStore.getState().setStatus("signed-out", null);
 }

@@ -76,6 +76,9 @@ export function useDeviceLayout(): DeviceLayoutResult {
         case "c":
           setActiveTool("connect");
           break;
+        case "d":
+          setActiveTool("draw");
+          break;
         case "b":
           setActiveTool("library");
           break;

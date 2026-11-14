@@ -1,6 +1,10 @@
 import { create } from "zustand";
 import {
   ActiveTool,
+  CanvasInkColor,
+  CanvasInkMode,
+  CanvasInkTip,
+  CanvasStroke,
   CalcLatexPayload,
   ChecklistItem,
   ConnectionDraft,
@@ -107,6 +111,35 @@ interface WorkspaceState {
   setActiveTool: (tool: ActiveTool) => void;
   setCanvasTransform: (transform: { x: number; y: number; scale: number }) => void;
   resetCanvasView: () => void;
+  /**
+   * Cambia el zoom (20 %–300 %) manteniendo fijo el punto `anchor` de la
+   * pantalla (coordenadas relativas al lienzo). Sin `anchor`: centro de la vista.
+   */
+  zoomCanvasAt: (scale: number, anchor?: { x: number; y: number }) => void;
+  /** Contador que el lienzo escucha para ejecutar "Zoom Extents". */
+  zoomExtentsRequest: number;
+  /** Pide al lienzo que encuadre todos los nodos y trazos (Zoom Extents). */
+  requestZoomExtents: () => void;
+
+  // --------------------------------------------------------------------------
+  // Tinta libre sobre el lienzo (Lápiz D)
+  // --------------------------------------------------------------------------
+  /** Trazos libres del lienzo (se guardan en Supabase con el workspace). */
+  canvasStrokes: CanvasStroke[];
+  inkColor: CanvasInkColor;
+  inkTip: CanvasInkTip;
+  inkMode: CanvasInkMode;
+  /** Historial local para "Deshacer" (no se guarda en la nube). */
+  inkHistory: InkHistoryEntry[];
+  setInkColor: (color: CanvasInkColor) => void;
+  setInkTip: (tip: CanvasInkTip) => void;
+  setInkMode: (mode: CanvasInkMode) => void;
+  addCanvasStroke: (stroke: CanvasStroke) => void;
+  eraseCanvasStrokes: (ids: string[]) => void;
+  /** Deshace el último trazo dibujado (o restaura lo último borrado). */
+  undoCanvasInk: () => void;
+  /** Reemplaza todos los trazos (lo usa la nube al cargar el workspace). */
+  hydrateCanvasStrokes: (strokes: CanvasStroke[]) => void;
   setOracleModalOpen: (isOpen: boolean) => void;
 
   // Acciones Exclusivas de Ergonomía Móvil
@@ -114,6 +147,30 @@ interface WorkspaceState {
   toggleMiniMap: () => void;
   setActiveMobileSheet: (sheet: MobileSheetType) => void;
 }
+
+/** Paso del historial de tinta: un trazo añadido o un grupo de trazos borrados. */
+export type InkHistoryEntry =
+  | { kind: "add"; strokeId: string }
+  | { kind: "erase"; strokes: { stroke: CanvasStroke; index: number }[] };
+
+/** Límites de zoom del lienzo (20 % a 300 %). */
+export const MIN_CANVAS_SCALE = 0.2;
+export const MAX_CANVAS_SCALE = 3;
+
+export function clampCanvasScale(scale: number): number {
+  if (!Number.isFinite(scale)) return 1;
+  return Math.min(MAX_CANVAS_SCALE, Math.max(MIN_CANVAS_SCALE, scale));
+}
+
+/** Grosor base de cada punta del lápiz (px a 100 % de zoom). */
+export const INK_TIP_WIDTHS: Record<CanvasInkTip, number> = {
+  fine: 2,
+  medium: 4,
+  highlighter: 10,
+};
+
+/** Máximo de pasos que recuerda "Deshacer". */
+const INK_HISTORY_LIMIT = 100;
 
 /** Zonas del ordenamiento humano del lienzo. */
 export type HumanLayoutZone = 1 | 2 | 3;
@@ -1000,7 +1057,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   activeTool: "pointer",
   canvasTransform: { x: 0, y: 0, scale: 1 },
+  zoomExtentsRequest: 0,
   isOracleModalOpen: false,
+
+  canvasStrokes: [],
+  inkColor: "adaptive",
+  inkTip: "medium",
+  inkMode: "pen",
+  inkHistory: [],
 
   mobileCategoryFilter: "all",
   isMiniMapVisible: false,
@@ -1488,6 +1552,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           connectingFrom: null,
         };
       }
+      if (tool === "draw") {
+        // El Lápiz no selecciona nodos ni cables: se limpia la selección.
+        return {
+          activeTool: tool,
+          connectingFrom: null,
+          selectedNodeId: null,
+          selectedConnectionId: null,
+        };
+      }
       // Al cambiar de herramienta se descarta cualquier cable a medio trazar.
       return { activeTool: tool, connectingFrom: null };
     }),
@@ -1495,6 +1568,93 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   setCanvasTransform: (transform) => set({ canvasTransform: transform }),
 
   resetCanvasView: () => set({ canvasTransform: { x: 0, y: 0, scale: 1 } }),
+
+  zoomCanvasAt: (scale, anchor) =>
+    set((state) => {
+      const current = state.canvasTransform;
+      const nextScale = clampCanvasScale(scale);
+      if (nextScale === current.scale) return {};
+      const point =
+        anchor ??
+        (typeof window !== "undefined"
+          ? { x: window.innerWidth / 2, y: window.innerHeight / 2 }
+          : { x: 0, y: 0 });
+      const ratio = nextScale / current.scale;
+      return {
+        canvasTransform: {
+          x: point.x - (point.x - current.x) * ratio,
+          y: point.y - (point.y - current.y) * ratio,
+          scale: nextScale,
+        },
+      };
+    }),
+
+  requestZoomExtents: () =>
+    set((state) => ({ zoomExtentsRequest: state.zoomExtentsRequest + 1 })),
+
+  // --------------------------------------------------------------------------
+  // Tinta libre sobre el lienzo (Lápiz D)
+  // --------------------------------------------------------------------------
+
+  // Elegir color o punta vuelve a la punta de dibujo (sale del Borrador).
+  setInkColor: (color) => set({ inkColor: color, inkMode: "pen" }),
+
+  setInkTip: (tip) => set({ inkTip: tip, inkMode: "pen" }),
+
+  setInkMode: (mode) => set({ inkMode: mode }),
+
+  addCanvasStroke: (stroke) =>
+    set((state) => {
+      if (stroke.points.length === 0) return {};
+      const entry: InkHistoryEntry = { kind: "add", strokeId: stroke.id };
+      return {
+        canvasStrokes: [...state.canvasStrokes, stroke],
+        inkHistory: [...state.inkHistory, entry].slice(-INK_HISTORY_LIMIT),
+      };
+    }),
+
+  eraseCanvasStrokes: (ids) =>
+    set((state) => {
+      const remove = new Set(ids);
+      const erased: { stroke: CanvasStroke; index: number }[] = [];
+      state.canvasStrokes.forEach((stroke, index) => {
+        if (remove.has(stroke.id)) erased.push({ stroke, index });
+      });
+      if (erased.length === 0) return {};
+      const entry: InkHistoryEntry = { kind: "erase", strokes: erased };
+      return {
+        canvasStrokes: state.canvasStrokes.filter((s) => !remove.has(s.id)),
+        inkHistory: [...state.inkHistory, entry].slice(-INK_HISTORY_LIMIT),
+      };
+    }),
+
+  undoCanvasInk: () =>
+    set((state) => {
+      const history = [...state.inkHistory];
+      // Salta pasos que ya no aplican (ej. trazos reemplazados al cargar la nube).
+      while (history.length > 0) {
+        const last = history.pop()!;
+        if (last.kind === "add") {
+          if (!state.canvasStrokes.some((s) => s.id === last.strokeId)) continue;
+          return {
+            canvasStrokes: state.canvasStrokes.filter((s) => s.id !== last.strokeId),
+            inkHistory: history,
+          };
+        }
+        const restored = [...state.canvasStrokes];
+        const sorted = [...last.strokes].sort((a, b) => a.index - b.index);
+        for (const { stroke, index } of sorted) {
+          if (restored.some((s) => s.id === stroke.id)) continue;
+          restored.splice(Math.min(index, restored.length), 0, stroke);
+        }
+        return { canvasStrokes: restored, inkHistory: history };
+      }
+      // Sin historial: deshace el último trazo de la lista (ej. tras recargar).
+      if (state.canvasStrokes.length === 0) return { inkHistory: [] };
+      return { canvasStrokes: state.canvasStrokes.slice(0, -1), inkHistory: [] };
+    }),
+
+  hydrateCanvasStrokes: (strokes) => set({ canvasStrokes: strokes, inkHistory: [] }),
 
   setOracleModalOpen: (isOpen) =>
     set({

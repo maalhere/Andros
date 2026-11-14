@@ -1,15 +1,31 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Check, Trash2, X } from "lucide-react";
-import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import {
+  clampCanvasScale,
+  INK_TIP_WIDTHS,
+  useWorkspaceStore,
+} from "@/store/useWorkspaceStore";
+import {
+  CanvasStroke,
+  CanvasStrokePoint,
   EngineeringNodeData,
   NodeConnection,
   PORT_POSITIONS,
   PortPosition,
 } from "@/types/workspace";
 import { EngineeringNode } from "@/components/shared/EngineeringNode";
+import {
+  Bounds,
+  buildPressureOutline,
+  buildSmoothPath,
+  getStrokeBounds,
+  inkColorToCss,
+  isPointNearStroke,
+  mergeBounds,
+  roundInkValue,
+} from "@/lib/canvas/inkGeometry";
 
 // ============================================================================
 // GEOMETRÍA DE PUERTOS Y CABLES
@@ -129,6 +145,89 @@ function isTypingTarget(target: EventTarget | null): boolean {
 }
 
 // ============================================================================
+// CÁMARA ESTILO AUTOCAD (zoom con rueda, paneo con botón central, extents)
+// ============================================================================
+
+/** Tamaño de la retícula de puntos a 100 % de zoom (igual que `.canvas-grid`). */
+const GRID_SIZE = 28;
+
+/** Ventana (ms) para considerar dos clics de rueda como "doble clic". */
+const MIDDLE_DOUBLE_CLICK_MS = 450;
+
+/** Zoom máximo al encuadrar con Zoom Extents (evita acercar en exceso un solo nodo). */
+const EXTENTS_MAX_SCALE = 1.5;
+
+/** Márgenes de pantalla que Zoom Extents respeta (barra superior y dock). */
+const EXTENTS_PADDING = { side: 80, top: 96, bottom: 132 };
+
+/**
+ * `true` si la rueda debe desplazar un contenido interno del nodo (ej. un
+ * cuaderno largo) en vez de hacer zoom. Con Ctrl presionado siempre es zoom.
+ */
+function canScrollInside(target: EventTarget | null, boundary: HTMLElement, deltaY: number): boolean {
+  let element = target instanceof HTMLElement ? target : null;
+  while (element && element !== boundary) {
+    const style = window.getComputedStyle(element);
+    const scrollable =
+      (style.overflowY === "auto" || style.overflowY === "scroll") &&
+      element.scrollHeight > element.clientHeight + 1;
+    if (scrollable) {
+      const canGoUp = element.scrollTop > 0;
+      const canGoDown = element.scrollTop + element.clientHeight < element.scrollHeight - 1;
+      if ((deltaY < 0 && canGoUp) || (deltaY > 0 && canGoDown)) return true;
+    }
+    element = element.parentElement;
+  }
+  return false;
+}
+
+// ============================================================================
+// TINTA LIBRE (Lápiz D)
+// ============================================================================
+
+/** Opacidad del resaltador (tinta semitransparente). */
+const HIGHLIGHTER_OPACITY = 0.35;
+
+interface LiveInkStyle {
+  color: string;
+  width: number;
+  pressure: boolean;
+  highlighter: boolean;
+}
+
+function newStrokeId(): string {
+  return `ink-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+/** Dibujo SVG de un trazo guardado (uniforme o con presión). */
+function renderStrokeShape(stroke: CanvasStroke): React.ReactElement {
+  const color = inkColorToCss(stroke.color);
+  const isHighlighter = stroke.tip === "highlighter";
+  const outline =
+    stroke.pressure && !isHighlighter ? buildPressureOutline(stroke.points, stroke.width) : "";
+
+  if (outline) {
+    return <path d={outline} fill={color} stroke="none" />;
+  }
+  return (
+    <path
+      d={buildSmoothPath(stroke.points)}
+      fill="none"
+      stroke={color}
+      strokeWidth={stroke.width}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      opacity={isHighlighter ? HIGHLIGHTER_OPACITY : undefined}
+    />
+  );
+}
+
+/** Trazo memorizado: solo se vuelve a calcular si ESE trazo cambia. */
+const InkStroke = React.memo(function InkStroke({ stroke }: { stroke: CanvasStroke }) {
+  return renderStrokeShape(stroke);
+});
+
+// ============================================================================
 // PANEL FLOTANTE DE UN CABLE (cambiar etiqueta o borrar)
 // ============================================================================
 
@@ -230,8 +329,26 @@ export const SpatialCanvas: React.FC = () => {
   const removeConnection = useWorkspaceStore((s) => s.removeConnection);
   const updateConnectionLabel = useWorkspaceStore((s) => s.updateConnectionLabel);
   const selectConnection = useWorkspaceStore((s) => s.selectConnection);
+  const setActiveTool = useWorkspaceStore((s) => s.setActiveTool);
+  const zoomExtentsRequest = useWorkspaceStore((s) => s.zoomExtentsRequest);
+
+  // Tinta libre
+  const canvasStrokes = useWorkspaceStore((s) => s.canvasStrokes);
+  const inkColor = useWorkspaceStore((s) => s.inkColor);
+  const inkTip = useWorkspaceStore((s) => s.inkTip);
+  const inkMode = useWorkspaceStore((s) => s.inkMode);
+  const setInkMode = useWorkspaceStore((s) => s.setInkMode);
+  const addCanvasStroke = useWorkspaceStore((s) => s.addCanvasStroke);
+  const eraseCanvasStrokes = useWorkspaceStore((s) => s.eraseCanvasStrokes);
+  const undoCanvasInk = useWorkspaceStore((s) => s.undoCanvasInk);
 
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
+  /** Paneo con el botón central (rueda): muestra la mano cerrada. */
+  const [isMiddlePanning, setIsMiddlePanning] = useState(false);
+  /** Animación suave de cámara (Zoom Extents). */
+  const [isViewAnimating, setIsViewAnimating] = useState(false);
+  /** Estilo del trazo que se está dibujando ahora mismo (null = no se dibuja). */
+  const [liveInk, setLiveInk] = useState<LiveInkStyle | null>(null);
   const [isPanningCanvas, setIsPanningCanvas] = useState(false);
   const [nodeSizes, setNodeSizes] = useState<Record<string, Size>>({});
   const [pointer, setPointer] = useState<Point | null>(null);
@@ -249,8 +366,32 @@ export const SpatialCanvas: React.FC = () => {
     active: false,
   });
 
+  /** Paneo con rueda: si se movió, el clic de rueda no cuenta para Zoom Extents. */
+  const middlePan = useRef<{ moved: boolean; x: number; y: number; lastClickAt: number }>({
+    moved: false,
+    x: 0,
+    y: 0,
+    lastClickAt: 0,
+  });
+  /** Trazo en curso: puntero que dibuja y puntos capturados. */
+  const inkDraft = useRef<{ pointerId: number; points: CanvasStrokePoint[]; style: LiveInkStyle } | null>(
+    null
+  );
+  /** Puntero que está borrando (Borrador) y trazos ya borrados en ese gesto. */
+  const eraserPointer = useRef<number | null>(null);
+  /** Ya se usó un stylus: a partir de ahí el dedo panea en vez de dibujar (rechazo de palma). */
+  const penSeen = useRef(false);
+  const livePathRef = useRef<SVGPathElement>(null);
+  const nodeSizesRef = useRef<Record<string, Size>>({});
+  const viewAnimationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const isConnectTool = activeTool === "connect";
+  const isDrawTool = activeTool === "draw";
   const nodeIdsKey = nodes.map((n) => n.id).join("|");
+
+  useEffect(() => {
+    nodeSizesRef.current = nodeSizes;
+  }, [nodeSizes]);
 
   // --------------------------------------------------------------------------
   // Medición real de cada nodo (para anclar los cables a sus puertos)
@@ -295,6 +436,23 @@ export const SpatialCanvas: React.FC = () => {
   // --------------------------------------------------------------------------
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Lápiz activo: Ctrl+Z deshace, E alterna el Borrador, Esc vuelve al Puntero.
+      if (isDrawTool && !isTypingTarget(e.target)) {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+          e.preventDefault();
+          undoCanvasInk();
+          return;
+        }
+        if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "e") {
+          setInkMode(inkMode === "eraser" ? "pen" : "eraser");
+          return;
+        }
+        if (e.key === "Escape") {
+          setActiveTool("pointer");
+          return;
+        }
+      }
+
       if (e.key === "Escape") {
         if (connectingFrom) cancelConnecting();
         if (selectedConnectionId) selectConnection(null);
@@ -319,7 +477,131 @@ export const SpatialCanvas: React.FC = () => {
     cancelConnecting,
     selectConnection,
     removeConnection,
+    isDrawTool,
+    inkMode,
+    setInkMode,
+    undoCanvasInk,
+    setActiveTool,
   ]);
+
+  // --------------------------------------------------------------------------
+  // Cámara estilo AutoCAD: rueda = zoom al cursor, botón central = paneo,
+  // doble clic de rueda = Zoom Extents. Se usan eventos nativos porque React
+  // registra la rueda como "pasiva" y no permitiría bloquear el scroll.
+  // --------------------------------------------------------------------------
+  useEffect(() => {
+    const main = mainRef.current;
+    if (!main) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      const { activeTool: tool } = useWorkspaceStore.getState();
+      if (!e.ctrlKey && tool !== "draw" && canScrollInside(e.target, main, e.deltaY)) {
+        return; // Deja desplazar el contenido interno de un nodo.
+      }
+      e.preventDefault();
+
+      const rect = main.getBoundingClientRect();
+      const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? rect.height : 1;
+      const delta = Math.max(-120, Math.min(120, e.deltaY * unit));
+      // Pellizco del touchpad llega con Ctrl y deltas pequeños: más sensibilidad.
+      const intensity = e.ctrlKey ? 0.01 : 0.0015;
+      const { canvasTransform: current, zoomCanvasAt } = useWorkspaceStore.getState();
+      zoomCanvasAt(current.scale * Math.exp(-delta * intensity), {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top,
+      });
+    };
+
+    // Bloquea el auto-scroll nativo del navegador al presionar la rueda.
+    const handleMouseDown = (e: MouseEvent) => {
+      if (e.button === 1) e.preventDefault();
+    };
+
+    // Doble clic con la rueda → Zoom Extents.
+    const handleAuxClick = (e: MouseEvent) => {
+      if (e.button !== 1) return;
+      e.preventDefault();
+      const state = middlePan.current;
+      if (state.moved) {
+        state.lastClickAt = 0;
+        return;
+      }
+      const now = performance.now();
+      if (e.detail >= 2 || now - state.lastClickAt < MIDDLE_DOUBLE_CLICK_MS) {
+        state.lastClickAt = 0;
+        useWorkspaceStore.getState().requestZoomExtents();
+      } else {
+        state.lastClickAt = now;
+      }
+    };
+
+    main.addEventListener("wheel", handleWheel, { passive: false });
+    main.addEventListener("mousedown", handleMouseDown);
+    main.addEventListener("auxclick", handleAuxClick);
+    return () => {
+      main.removeEventListener("wheel", handleWheel);
+      main.removeEventListener("mousedown", handleMouseDown);
+      main.removeEventListener("auxclick", handleAuxClick);
+    };
+  }, []);
+
+  // --------------------------------------------------------------------------
+  // Zoom Extents: encuadra todos los nodos y trazos visibles
+  // --------------------------------------------------------------------------
+  useEffect(() => {
+    if (zoomExtentsRequest === 0) return;
+    const main = mainRef.current;
+    if (!main) return;
+
+    const state = useWorkspaceStore.getState();
+    let bounds: Bounds | null = null;
+    for (const node of state.nodes) {
+      const size = nodeSizesRef.current[node.id] ?? FALLBACK_NODE_SIZE;
+      bounds = mergeBounds(bounds, {
+        minX: node.position.x,
+        minY: node.position.y,
+        maxX: node.position.x + size.width,
+        maxY: node.position.y + size.height,
+      });
+    }
+    for (const stroke of state.canvasStrokes) {
+      bounds = mergeBounds(bounds, getStrokeBounds(stroke));
+    }
+
+    let next = { x: 0, y: 0, scale: 1 };
+    if (bounds) {
+      const availableWidth = Math.max(120, main.clientWidth - EXTENTS_PADDING.side * 2);
+      const availableHeight = Math.max(
+        120,
+        main.clientHeight - EXTENTS_PADDING.top - EXTENTS_PADDING.bottom
+      );
+      const contentWidth = Math.max(1, bounds.maxX - bounds.minX);
+      const contentHeight = Math.max(1, bounds.maxY - bounds.minY);
+      const scale = Math.min(
+        EXTENTS_MAX_SCALE,
+        clampCanvasScale(Math.min(availableWidth / contentWidth, availableHeight / contentHeight))
+      );
+      const centerX = (bounds.minX + bounds.maxX) / 2;
+      const centerY = (bounds.minY + bounds.maxY) / 2;
+      next = {
+        x: EXTENTS_PADDING.side + availableWidth / 2 - centerX * scale,
+        y: EXTENTS_PADDING.top + availableHeight / 2 - centerY * scale,
+        scale,
+      };
+    }
+
+    setIsViewAnimating(true);
+    state.setCanvasTransform(next);
+    if (viewAnimationTimer.current) clearTimeout(viewAnimationTimer.current);
+    viewAnimationTimer.current = setTimeout(() => setIsViewAnimating(false), 420);
+  }, [zoomExtentsRequest]);
+
+  useEffect(
+    () => () => {
+      if (viewAnimationTimer.current) clearTimeout(viewAnimationTimer.current);
+    },
+    []
+  );
 
   // --------------------------------------------------------------------------
   // Utilidades dependientes del estado
@@ -497,7 +779,157 @@ export const SpatialCanvas: React.FC = () => {
     e.currentTarget.setPointerCapture(e.pointerId);
   };
 
+  // --------------------------------------------------------------------------
+  // Paneo (botón central o dedo con el Lápiz) y tinta libre
+  // --------------------------------------------------------------------------
+  const startPan = (e: React.PointerEvent<HTMLElement>) => {
+    setIsPanningCanvas(true);
+    panStart.current = {
+      x: e.clientX - canvasTransform.x,
+      y: e.clientY - canvasTransform.y,
+    };
+    try {
+      mainRef.current?.setPointerCapture(e.pointerId);
+    } catch {
+      // Puntero sintético: se sigue sin captura.
+    }
+  };
+
+  /** Convierte un evento (y sus eventos agrupados) en puntos de tinta. */
+  const collectInkPoints = (e: React.PointerEvent<HTMLElement>, withPressure: boolean) => {
+    const native = e.nativeEvent;
+    const events =
+      typeof native.getCoalescedEvents === "function" ? native.getCoalescedEvents() : [];
+    const source = events.length > 0 ? events : [native];
+    return source.map((ev) => {
+      const point = toCanvasPoint(ev.clientX, ev.clientY);
+      return withPressure
+        ? { x: point.x, y: point.y, p: Math.max(0.05, Math.min(1, ev.pressure || 0.5)) }
+        : point;
+    });
+  };
+
+  const updateLivePath = () => {
+    const draft = inkDraft.current;
+    const path = livePathRef.current;
+    if (!draft || !path) return;
+    const usesOutline = draft.style.pressure && !draft.style.highlighter && draft.points.length >= 3;
+    path.setAttribute(
+      "d",
+      usesOutline
+        ? buildPressureOutline(draft.points, draft.style.width)
+        : buildSmoothPath(draft.points)
+    );
+    path.setAttribute("fill", usesOutline ? draft.style.color : "none");
+    path.setAttribute("stroke", usesOutline ? "none" : draft.style.color);
+  };
+
+  const appendInkPoints = (points: CanvasStrokePoint[]) => {
+    const draft = inkDraft.current;
+    if (!draft) return;
+    // Filtra puntos casi repetidos (~0.75 px en pantalla) para aligerar el trazo.
+    const minGap = 0.75 / canvasTransform.scale;
+    for (const point of points) {
+      const last = draft.points[draft.points.length - 1];
+      if (last && Math.hypot(point.x - last.x, point.y - last.y) < minGap) continue;
+      draft.points.push(point);
+    }
+    updateLivePath();
+  };
+
+  const finishInkStroke = () => {
+    const draft = inkDraft.current;
+    inkDraft.current = null;
+    setLiveInk(null);
+    if (!draft || draft.points.length === 0) return;
+
+    const stroke: CanvasStroke = {
+      id: newStrokeId(),
+      color: inkColor,
+      tip: inkTip,
+      width: INK_TIP_WIDTHS[inkTip],
+      pressure: draft.style.pressure,
+      points: draft.points.map((p) =>
+        p.p !== undefined
+          ? { x: roundInkValue(p.x), y: roundInkValue(p.y), p: Math.round(p.p * 100) / 100 }
+          : { x: roundInkValue(p.x), y: roundInkValue(p.y) }
+      ),
+    };
+    addCanvasStroke(stroke);
+  };
+
+  /** Borra los trazos que toca el Borrador en este punto de la pantalla. */
+  const eraseAt = (clientX: number, clientY: number, pointerType: string) => {
+    const point = toCanvasPoint(clientX, clientY);
+    const tolerance = (pointerType === "touch" ? 12 : 6) / canvasTransform.scale;
+    const hits = canvasStrokes
+      .filter((stroke) => isPointNearStroke(point, stroke, tolerance))
+      .map((stroke) => stroke.id);
+    if (hits.length > 0) eraseCanvasStrokes(hits);
+  };
+
+  /**
+   * Fase de captura: se ejecuta ANTES que los nodos. Así el botón central
+   * panea incluso encima de un nodo y el Lápiz dibuja sobre todo el lienzo.
+   */
+  const handleCanvasPointerDownCapture = (e: React.PointerEvent<HTMLElement>) => {
+    // 1. Botón central (rueda) sostenido: paneo libre en cualquier lugar.
+    if (e.pointerType === "mouse" && e.button === 1) {
+      e.preventDefault();
+      e.stopPropagation();
+      middlePan.current.moved = false;
+      middlePan.current.x = e.clientX;
+      middlePan.current.y = e.clientY;
+      setIsMiddlePanning(true);
+      startPan(e);
+      return;
+    }
+
+    if (!isDrawTool) return;
+    // Clic derecho u otros botones no dibujan.
+    if (e.button !== 0 && e.button !== 5) return;
+
+    e.stopPropagation();
+    e.preventDefault();
+
+    if (e.pointerType === "pen") penSeen.current = true;
+
+    // Ya hay un trazo en curso (ej. segundo dedo): se ignora.
+    if (inkDraft.current || eraserPointer.current !== null) return;
+
+    // Rechazo de palma: si ya se usó un stylus, el dedo mueve el lienzo.
+    if (e.pointerType === "touch" && penSeen.current) {
+      startPan(e);
+      return;
+    }
+
+    try {
+      mainRef.current?.setPointerCapture(e.pointerId);
+    } catch {
+      // Sin captura el gesto sigue funcionando dentro del lienzo.
+    }
+
+    // Borrador: herramienta activa o botón borrador del stylus (button 5).
+    if (inkMode === "eraser" || e.button === 5) {
+      eraserPointer.current = e.pointerId;
+      eraseAt(e.clientX, e.clientY, e.pointerType);
+      return;
+    }
+
+    const isHighlighter = inkTip === "highlighter";
+    const style: LiveInkStyle = {
+      color: inkColorToCss(inkColor),
+      width: INK_TIP_WIDTHS[inkTip],
+      pressure: e.pointerType === "pen" && !isHighlighter,
+      highlighter: isHighlighter,
+    };
+    inkDraft.current = { pointerId: e.pointerId, points: [], style };
+    setLiveInk(style);
+    appendInkPoints(collectInkPoints(e, style.pressure));
+  };
+
   const handleCanvasPointerDown = (e: React.PointerEvent<HTMLElement>) => {
+    if (e.button === 1 || isDrawTool) return;
     if (e.target !== e.currentTarget) return;
     selectNode(null);
     if (selectedConnectionId) selectConnection(null);
@@ -517,6 +949,36 @@ export const SpatialCanvas: React.FC = () => {
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLElement>) => {
+    // Tinta: añadir puntos al trazo en curso.
+    if (inkDraft.current && inkDraft.current.pointerId === e.pointerId) {
+      appendInkPoints(collectInkPoints(e, inkDraft.current.style.pressure));
+      return;
+    }
+
+    // Borrador arrastrado: borra todo lo que toque en el camino.
+    if (eraserPointer.current === e.pointerId) {
+      eraseAt(e.clientX, e.clientY, e.pointerType);
+      return;
+    }
+
+    // Paneo (fondo, botón central o dedo con el Lápiz).
+    if (isPanningCanvas) {
+      if (
+        isMiddlePanning &&
+        !middlePan.current.moved &&
+        Math.hypot(e.clientX - middlePan.current.x, e.clientY - middlePan.current.y) >
+          DRAG_THRESHOLD
+      ) {
+        middlePan.current.moved = true;
+      }
+      setCanvasTransform({
+        ...canvasTransform,
+        x: e.clientX - panStart.current.x,
+        y: e.clientY - panStart.current.y,
+      });
+      return;
+    }
+
     if (connectingFrom) {
       const press = connectPress.current;
       if (
@@ -537,19 +999,25 @@ export const SpatialCanvas: React.FC = () => {
         point.x - dragOffset.current.x,
         point.y - dragOffset.current.y
       );
-      return;
-    }
-
-    if (isPanningCanvas) {
-      setCanvasTransform({
-        ...canvasTransform,
-        x: e.clientX - panStart.current.x,
-        y: e.clientY - panStart.current.y,
-      });
     }
   };
 
+  /** Cierra los gestos de tinta y paneo de un puntero. Devuelve `true` si había uno. */
+  const endInkOrPan = (pointerId: number): boolean => {
+    if (inkDraft.current && inkDraft.current.pointerId === pointerId) {
+      finishInkStroke();
+      return true;
+    }
+    if (eraserPointer.current === pointerId) {
+      eraserPointer.current = null;
+      return true;
+    }
+    if (isMiddlePanning) setIsMiddlePanning(false);
+    return false;
+  };
+
   const handlePointerUp = (e: React.PointerEvent<HTMLElement>) => {
+    if (endInkOrPan(e.pointerId)) return;
     const press = connectPress.current;
 
     if (connectingFrom && press.active) {
@@ -575,7 +1043,9 @@ export const SpatialCanvas: React.FC = () => {
     setIsPanningCanvas(false);
   };
 
-  const handlePointerCancel = () => {
+  const handlePointerCancel = (e: React.PointerEvent<HTMLElement>) => {
+    // Si el sistema cancela el gesto, se conserva lo ya dibujado.
+    if (endInkOrPan(e.pointerId)) return;
     if (connectingFrom && connectPress.current.active) {
       connectPress.current.active = false;
       cancelConnecting();
@@ -608,7 +1078,13 @@ export const SpatialCanvas: React.FC = () => {
     return { connection, mid: cable.mid, fromTitle: from.title, toTitle: to.title };
   };
 
-  const selectedPopover = getSelectedPopover();
+  const selectedPopover = isDrawTool ? null : getSelectedPopover();
+
+  // Pinta el primer punto del trazo en cuanto aparece la ruta en vivo.
+  useLayoutEffect(() => {
+    if (liveInk) updateLivePath();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveInk]);
 
   const hintText = connectingFrom
     ? "Suelta o haz clic sobre un puerto u otro nodo para conectar · Esc cancela"
@@ -616,18 +1092,47 @@ export const SpatialCanvas: React.FC = () => {
       ? "Modo Conectar: haz clic en el nodo de origen y luego en el de destino"
       : null;
 
+  // Cámara suave: transición corta para la rueda y larga para Zoom Extents.
+  // Se desactiva mientras se arrastra, panea o dibuja para que siga al dedo.
+  const isDirectManipulation =
+    isPanningCanvas || Boolean(draggingNodeId) || Boolean(liveInk) || Boolean(connectingFrom);
+  const cameraTransition = isViewAnimating
+    ? "380ms cubic-bezier(0.16, 1, 0.3, 1)"
+    : isDirectManipulation
+      ? null
+      : "90ms ease-out";
+
+  const cursorClass = isPanningCanvas
+    ? "cursor-grabbing"
+    : isDrawTool
+      ? inkMode === "eraser"
+        ? "cursor-cell"
+        : "cursor-crosshair"
+      : connectingFrom || isConnectTool
+        ? "cursor-crosshair"
+        : "cursor-default";
+
+  const gridSize = GRID_SIZE * canvasTransform.scale;
+
   return (
     <main
       ref={mainRef}
+      onPointerDownCapture={handleCanvasPointerDownCapture}
       onPointerDown={handleCanvasPointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerCancel}
-      className={`w-screen h-screen relative overflow-hidden canvas-grid select-none touch-none ${
-        connectingFrom || isConnectTool ? "cursor-crosshair" : "cursor-default"
-      }`}
+      onContextMenu={(e) => {
+        // Con el Lápiz, el botón lateral del stylus no debe abrir el menú.
+        if (isDrawTool) e.preventDefault();
+      }}
+      className={`w-screen h-screen relative overflow-hidden canvas-grid select-none touch-none ${cursorClass}`}
       style={{
         backgroundPosition: `${canvasTransform.x}px ${canvasTransform.y}px`,
+        backgroundSize: `${gridSize}px ${gridSize}px`,
+        transition: cameraTransition
+          ? `background-position ${cameraTransition}, background-size ${cameraTransition}, background-color 300ms`
+          : "background-color 300ms",
       }}
     >
       {/* Guía contextual de conexión */}
@@ -644,6 +1149,7 @@ export const SpatialCanvas: React.FC = () => {
         style={{
           transform: `translate3d(${canvasTransform.x}px, ${canvasTransform.y}px, 0) scale(${canvasTransform.scale})`,
           transformOrigin: "0 0",
+          transition: cameraTransition ? `transform ${cameraTransition}` : undefined,
         }}
       >
         {/* Conexiones Vectoriales SVG entre Nodos */}
@@ -716,7 +1222,7 @@ export const SpatialCanvas: React.FC = () => {
                   fill="none"
                   stroke="transparent"
                   strokeWidth={18}
-                  style={{ pointerEvents: "stroke", cursor: "pointer" }}
+                  style={{ pointerEvents: isDrawTool ? "none" : "stroke", cursor: "pointer" }}
                   onPointerDown={handleSelect}
                   onPointerEnter={() => setHoveredConnectionId(conn.id)}
                   onPointerLeave={() =>
@@ -737,7 +1243,7 @@ export const SpatialCanvas: React.FC = () => {
                     strokeLinejoin="round"
                     style={{
                       paintOrder: "stroke",
-                      pointerEvents: "auto",
+                      pointerEvents: isDrawTool ? "none" : "auto",
                       cursor: "pointer",
                     }}
                     onPointerDown={handleSelect}
@@ -774,8 +1280,8 @@ export const SpatialCanvas: React.FC = () => {
           )}
         </svg>
 
-        {/* Nodos Interactivos */}
-        <div className="pointer-events-auto">
+        {/* Nodos Interactivos (con el Lápiz activo quedan bloqueados para dibujar encima) */}
+        <div className={isDrawTool ? "pointer-events-none" : "pointer-events-auto"}>
           {nodes.map((node) => (
             <EngineeringNode
               key={node.id}
@@ -791,6 +1297,28 @@ export const SpatialCanvas: React.FC = () => {
             />
           ))}
         </div>
+
+        {/* Tinta libre (Lápiz D): sobre los nodos, sin capturar clics */}
+        <svg
+          className="absolute left-0 top-0 pointer-events-none overflow-visible"
+          style={{ zIndex: 35 }}
+          width="1"
+          height="1"
+          aria-hidden="true"
+        >
+          {canvasStrokes.map((stroke) => (
+            <InkStroke key={stroke.id} stroke={stroke} />
+          ))}
+          {liveInk && (
+            <path
+              ref={livePathRef}
+              strokeWidth={liveInk.width}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              opacity={liveInk.highlighter ? HIGHLIGHTER_OPACITY : undefined}
+            />
+          )}
+        </svg>
 
         {/* Panel flotante del cable seleccionado */}
         {selectedPopover && (

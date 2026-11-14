@@ -86,6 +86,11 @@ create table if not exists public.workspaces (
 
 create index if not exists workspaces_owner_idx on public.workspaces (owner_id);
 
+-- BLOQUE 2: trazos de tinta libre (Lápiz D) dibujados sobre el lienzo.
+-- Lista JSON de trazos: [{ id, color, tip, width, pressure, points: [{x, y, p?}] }]
+alter table public.workspaces
+  add column if not exists canvas_strokes jsonb not null default '[]'::jsonb;
+
 drop trigger if exists workspaces_set_updated_at on public.workspaces;
 create trigger workspaces_set_updated_at
   before update on public.workspaces
