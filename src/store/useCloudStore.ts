@@ -28,7 +28,11 @@ interface CloudState {
   /** Archivos de `file-node` que se están subiendo al bucket ahora mismo. */
   pendingUploads: number;
   errorMessage: string | null;
+  /** Subidas fallidas por nodo: id del nodo → motivo legible. */
+  uploadErrors: Record<string, string>;
 
+  setUploadError: (nodeId: string, message: string | null) => void;
+  clearUploadErrors: () => void;
   setStatus: (status: CloudStatus, errorMessage?: string | null) => void;
   setUser: (user: CloudUser | null) => void;
   setWorkspaceId: (id: string | null) => void;
@@ -42,7 +46,16 @@ export const useCloudStore = create<CloudState>((set) => ({
   workspaceId: null,
   pendingUploads: 0,
   errorMessage: null,
+  uploadErrors: {},
 
+  setUploadError: (nodeId, message) =>
+    set((state) => {
+      const next = { ...state.uploadErrors };
+      if (message) next[nodeId] = message;
+      else delete next[nodeId];
+      return { uploadErrors: next };
+    }),
+  clearUploadErrors: () => set({ uploadErrors: {} }),
   setStatus: (status, errorMessage) =>
     set((state) => ({
       status,

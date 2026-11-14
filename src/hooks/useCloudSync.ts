@@ -24,6 +24,8 @@ import {
   createEmptySketchNotePayload,
   INITIAL_CONNECTIONS,
   INITIAL_NODES,
+  MAX_FILE_SIZE_BYTES,
+  MAX_FILE_SIZE_LABEL,
   useWorkspaceStore,
 } from "@/store/useWorkspaceStore";
 import type {
@@ -41,8 +43,8 @@ import type {
 const SAVE_DEBOUNCE_MS = 1200;
 /** Duración de los enlaces de descarga firmados (7 días). */
 const SIGNED_URL_TTL_SECONDS = 60 * 60 * 24 * 7;
-/** Límite de subida del plan gratuito de Supabase. */
-const FREE_PLAN_UPLOAD_LIMIT_BYTES = 50 * 1024 * 1024;
+/** Esperas antes de reintentar una subida fallida (conexión lenta o cortada). */
+const UPLOAD_RETRY_DELAYS_MS = [2000, 6000];
 
 // ----------------------------------------------------------------------------
 // 1. Filas de la base de datos ↔ objetos del lienzo
@@ -82,11 +84,30 @@ const CONNECTION_COLUMNS = "id, from_node_id, to_node_id, from_port, to_port, la
 
 const PORTS: readonly PortPosition[] = ["top", "right", "bottom", "left"];
 
-/** Lo que se guarda del archivo: los enlaces `blob:` y firmados no sirven en otra sesión. */
+/**
+ * Lo que se guarda del archivo en `workspace_nodes`: SOLO metadatos ligeros.
+ * Nunca se guarda contenido (`data:` / base64) ni enlaces temporales (`blob:`
+ * o firmados): el contenido vive únicamente en el bucket `print-files`.
+ */
 function cloudFilePayload(file: FileNodePayload): FileNodePayload {
-  const keepInlineUrl = !file.storagePath && file.downloadUrl.startsWith("data:");
-  return { ...file, downloadUrl: keepInlineUrl ? file.downloadUrl : "" };
+  return {
+    fileName: file.fileName,
+    extension: file.extension,
+    fileSizeBytes: file.fileSizeBytes,
+    mimeType: file.mimeType,
+    downloadUrl: "",
+    status: file.status,
+    uploadProgress: file.uploadProgress,
+    ...(file.checksum ? { checksum: file.checksum } : {}),
+    ...(file.lastModifiedMs ? { lastModifiedMs: file.lastModifiedMs } : {}),
+    ...(file.status === "error" && file.errorMessage
+      ? { errorMessage: file.errorMessage.slice(0, 300) }
+      : {}),
+    ...(file.storagePath ? { storagePath: file.storagePath } : {}),
+  };
 }
+
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 function nodeToRow(
   node: EngineeringNodeData,
@@ -250,6 +271,8 @@ interface CloudEngine {
   /** Detiene la sincronización sin tocar el lienzo. */
   pause: () => void;
   stop: () => void;
+  /** Vuelve a intentar la subida fallida del archivo de un nodo. */
+  retryUpload: (nodeId: string) => void;
 }
 
 let activeEngine: CloudEngine | null = null;
@@ -295,6 +318,7 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
     connectionSnapshot = new Map();
     syncedStoragePaths = new Set();
     failedUploads.clear();
+    cloud().clearUploadErrors();
     if (timer) clearTimeout(timer);
     timer = null;
     cloud().setWorkspaceId(null);
@@ -425,44 +449,63 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
   // Subida de archivos de `file-node` al bucket `print-files`
   // --------------------------------------------------------------------------
 
-  const uploadFile = async (nodeId: string, file: FileNodePayload, key: string) => {
-    if (!userId || !workspaceId) return;
-    const ep = epoch;
-    const checksumHex = (file.checksum ?? "").replace(/^crc32:/, "") || "sin-crc";
-    const path = `${userId}/${workspaceId}/${safeStorageName(nodeId)}/${checksumHex}-${safeStorageName(file.fileName)}`;
+  /** `true` si el nodo todavía tiene exactamente ese archivo local sin subir. */
+  const stillNeedsUpload = (nodeId: string, file: FileNodePayload): boolean => {
+    const current = useWorkspaceStore.getState().nodes.find((n) => n.id === nodeId);
+    return (
+      current?.type === "file-node" &&
+      current.fileData.downloadUrl === file.downloadUrl &&
+      current.fileData.checksum === file.checksum &&
+      !current.fileData.storagePath
+    );
+  };
 
-    uploadsInFlight.add(key);
-    cloud().changePendingUploads(1);
+  /** Sube UN archivo. Nunca lanza errores: los deja anotados en el nodo. */
+  const uploadFile = async (
+    nodeId: string,
+    file: FileNodePayload,
+    key: string,
+    queuedEpoch: number
+  ) => {
     try {
+      if (queuedEpoch !== epoch || !userId || !workspaceId) return;
+      if (!stillNeedsUpload(nodeId, file)) return;
+
+      const checksumHex = (file.checksum ?? "").replace(/^crc32:/, "") || "sin-crc";
+      const path = `${userId}/${workspaceId}/${safeStorageName(nodeId)}/${checksumHex}-${safeStorageName(file.fileName)}`;
+
+      // `blob()` solo enlaza el archivo del disco: no lo copia a la memoria.
       const blob = await (await fetch(file.downloadUrl)).blob();
-      const { error } = await supabase.storage.from(PRINT_FILES_BUCKET).upload(path, blob, {
-        upsert: true,
-        contentType: file.mimeType || "application/octet-stream",
-      });
-      if (error) {
-        const hint =
-          blob.size > FREE_PLAN_UPLOAD_LIMIT_BYTES
-            ? " (el plan gratuito de Supabase admite archivos de hasta 50 MB)"
-            : "";
-        throw new Error(`${describeError(error)}${hint}`);
+      if (blob.size > MAX_FILE_SIZE_BYTES) {
+        throw new Error(`el límite actual por pieza es de ${MAX_FILE_SIZE_LABEL}`);
       }
 
-      if (ep !== epoch) return;
+      let lastError: unknown = null;
+      for (let attempt = 0; attempt <= UPLOAD_RETRY_DELAYS_MS.length; attempt += 1) {
+        if (attempt > 0) await wait(UPLOAD_RETRY_DELAYS_MS[attempt - 1]);
+        if (queuedEpoch !== epoch) return;
+        if (!stillNeedsUpload(nodeId, file)) return;
+
+        const { error } = await supabase.storage.from(PRINT_FILES_BUCKET).upload(path, blob, {
+          upsert: true,
+          contentType: file.mimeType || "application/octet-stream",
+        });
+        lastError = error;
+        if (!error) break;
+      }
+      if (lastError) throw lastError;
+      if (queuedEpoch !== epoch) return;
 
       // Solo se enlaza si el nodo todavía tiene ese mismo archivo.
-      const current = useWorkspaceStore.getState().nodes.find((n) => n.id === nodeId);
-      if (
-        current?.type === "file-node" &&
-        current.fileData.downloadUrl === file.downloadUrl &&
-        current.fileData.checksum === file.checksum
-      ) {
+      if (stillNeedsUpload(nodeId, file)) {
         useWorkspaceStore.getState().updateNodePayload(nodeId, { storagePath: path });
-      } else {
+      } else if (!storagePathsOf(useWorkspaceStore.getState().nodes).has(path)) {
         void supabase.storage.from(PRINT_FILES_BUCKET).remove([path]);
       }
     } catch (error) {
-      if (ep !== epoch) return;
+      if (queuedEpoch !== epoch) return;
       failedUploads.add(key);
+      cloud().setUploadError(nodeId, describeError(error));
       cloud().setStatus(
         "error",
         `No se pudo subir "${file.fileName}" a la nube: ${describeError(error)}`
@@ -473,17 +516,29 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
     }
   };
 
+  /**
+   * Cola de subidas: los archivos se suben DE UNO EN UNO. Varias piezas
+   * pesadas a la vez saturan la conexión y hacen fallar la sincronización.
+   */
+  let uploadChain: Promise<void> = Promise.resolve();
+
   const queueUploads = () => {
     if (!ready || disposed) return;
     for (const node of useWorkspaceStore.getState().nodes) {
       if (node.type !== "file-node") continue;
       const file = node.fileData;
-      const isLocalFile = file.downloadUrl.startsWith("blob:");
+      const isInline = file.downloadUrl.startsWith("data:");
+      const isLocalFile = file.downloadUrl.startsWith("blob:") || isInline;
       if (file.status !== "ready" || !isLocalFile || file.storagePath) continue;
 
-      const key = `${node.id}|${file.checksum ?? ""}|${file.downloadUrl}`;
+      const key = `${node.id}|${file.checksum ?? ""}|${isInline ? "inline" : file.downloadUrl}`;
       if (uploadsInFlight.has(key) || failedUploads.has(key)) continue;
-      void uploadFile(node.id, file, key);
+
+      uploadsInFlight.add(key);
+      cloud().changePendingUploads(1);
+      cloud().setUploadError(node.id, null);
+      const queuedEpoch = epoch;
+      uploadChain = uploadChain.then(() => uploadFile(node.id, file, key, queuedEpoch));
     }
   };
 
@@ -620,6 +675,8 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
       ready = true;
       useWorkspaceStore.getState().hydrateWorkspace(loadedNodes, loadedConnections);
       await syncNow();
+      // Archivos de versiones anteriores que aún estaban incrustados: al bucket.
+      queueUploads();
     } catch (error) {
       if (ep !== epoch) return;
       ready = false;
@@ -679,6 +736,13 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
     pause: () => {
       resetSession();
     },
+    retryUpload: (nodeId: string) => {
+      for (const key of [...failedUploads]) {
+        if (key.startsWith(`${nodeId}|`)) failedUploads.delete(key);
+      }
+      cloud().setUploadError(nodeId, null);
+      queueUploads();
+    },
     stop: () => {
       disposed = true;
       resetSession();
@@ -728,6 +792,26 @@ export async function signOutFromCloud(): Promise<void> {
   useWorkspaceStore.getState().hydrateWorkspace(INITIAL_NODES, INITIAL_CONNECTIONS);
   useCloudStore.getState().setUser(null);
   useCloudStore.getState().setStatus("signed-out", null);
+}
+
+/** Reintenta subir a la nube el archivo de un nodo cuya subida falló. */
+export function retryFileUpload(nodeId: string): void {
+  activeEngine?.retryUpload(nodeId);
+}
+
+/**
+ * Enlace temporal (1 hora) a un archivo guardado en la nube del usuario.
+ * Sirve para que un programa de impresión 3D lo abra directamente.
+ * Devuelve `null` si no hay sesión o el archivo no existe.
+ */
+export async function getCloudFileLink(storagePath: string): Promise<string | null> {
+  const supabase = getSupabaseBrowserClient();
+  if (!supabase || !storagePath) return null;
+  const { data, error } = await supabase.storage
+    .from(PRINT_FILES_BUCKET)
+    .createSignedUrl(storagePath, 60 * 60);
+  if (error || !data) return null;
+  return data.signedUrl;
 }
 
 // ----------------------------------------------------------------------------

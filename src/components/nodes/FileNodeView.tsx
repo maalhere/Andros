@@ -3,6 +3,8 @@
 import React, { useRef, useState } from "react";
 import {
   CircleAlert,
+  CloudCheck,
+  CloudUpload,
   Database,
   Download,
   File as FileIcon,
@@ -13,22 +15,35 @@ import {
   FileSpreadsheet,
   FileText,
   Film,
+  LogIn,
+  Printer,
   RefreshCw,
   Trash2,
   Upload,
+  X,
 } from "lucide-react";
 import { FileEngineeringNode } from "@/types/workspace";
 import {
   DEFAULT_FILE_NODE_TITLE,
+  MAX_FILE_SIZE_BYTES,
+  MAX_FILE_SIZE_LABEL,
   createEmptyFilePayload,
   revokeLocalFileUrl,
   useWorkspaceStore,
 } from "@/store/useWorkspaceStore";
+import { useCloudStore } from "@/store/useCloudStore";
+import { retryFileUpload } from "@/hooks/useCloudSync";
+import {
+  Model3DPreview,
+  isPreviewable3D,
+  type ModelDimensions,
+} from "@/components/nodes/Model3DPreview";
+import { Print3DModal, isPrintable3D } from "@/components/nodes/Print3DModal";
 
 // ============================================================================
 // NODO TIPO 1 — ARCHIVO DESCARGABLE UNIVERSAL
-// Adjunta cualquier archivo de la computadora o del teléfono (sin límite de
-// peso: el archivo nunca se carga completo en memoria), muestra nombre,
+// Adjunta cualquier archivo de la computadora o del teléfono (hasta 50 MB por
+// pieza; el archivo nunca se carga completo en memoria), muestra nombre,
 // extensión y peso exacto, y lo descarga con un clic.
 // ============================================================================
 
@@ -186,9 +201,37 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
   const kind = detectFileKind(file.extension, file.mimeType);
   const hasFile = file.status !== "empty";
 
+  // --- Nube, visor 3D e impresión -------------------------------------------
+  const isSignedIn = useCloudStore((s) => s.user !== null);
+  const cloudUploadError = useCloudStore((s) => s.uploadErrors[node.id]);
+
+  const [isPrintOpen, setIsPrintOpen] = useState(false);
+  /** Aviso cuando se intenta adjuntar un archivo por encima del límite. */
+  const [sizeNotice, setSizeNotice] = useState<string | null>(null);
+  const [measured, setMeasured] = useState<{ url: string; dimensions: ModelDimensions } | null>(
+    null
+  );
+
+  const isReady = file.status === "ready" && file.downloadUrl !== "";
+  const canPreview3D = isReady && isPreviewable3D(file.extension);
+  const canPrint3D = isReady && isPrintable3D(file.extension);
+  const isCloudWorthy = canPrint3D || file.extension === "pdf";
+  const isLocalOnly = file.downloadUrl.startsWith("blob:") && !file.storagePath;
+  const dimensions = measured?.url === file.downloadUrl ? measured.dimensions : null;
+
   const openFilePicker = () => inputRef.current?.click();
 
   const attachFile = async (selected: File) => {
+    // Límite por pieza: se avisa ANTES de leer o subir nada, y el archivo que
+    // ya tuviera el nodo se conserva intacto.
+    if (selected.size > MAX_FILE_SIZE_BYTES) {
+      setSizeNotice(
+        `"${selected.name}" pesa ${formatReadableSize(selected.size)}. El límite actual por pieza es de ${MAX_FILE_SIZE_LABEL}, así que no se adjuntó. Prueba con una versión más ligera del archivo (por ejemplo, exportando el modelo con menos detalle).`
+      );
+      return;
+    }
+    setSizeNotice(null);
+
     jobCounter += 1;
     const jobId = jobCounter;
     activeJobByNode.set(node.id, jobId);
@@ -196,7 +239,7 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
 
     // 1. Liberar el archivo local anterior (si lo había) y enlazar el nuevo.
     //    `createObjectURL` es instantáneo y no copia el archivo a memoria,
-    //    por eso no existe límite de peso.
+    //    por eso adjuntar es inmediato incluso con piezas pesadas.
     revokeLocalFileUrl(file.downloadUrl);
     const extension = getExtension(selected.name);
     const downloadUrl = URL.createObjectURL(selected);
@@ -315,7 +358,7 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
         isDragOver ? "ring-2 ring-andros-accent/60 bg-andros-accent/5" : ""
       }`}
     >
-      {/* Selector nativo: sin `accept` (cualquier formato) y sin límite de peso */}
+      {/* Selector nativo: sin `accept` (cualquier formato) */}
       <input
         ref={inputRef}
         type="file"
@@ -323,6 +366,31 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
         onChange={handleInputChange}
         aria-label="Adjuntar archivo"
       />
+
+      {sizeNotice && (
+        <div
+          role="alert"
+          className="mb-3 rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2.5 flex items-start gap-2"
+        >
+          <CircleAlert className="w-4 h-4 shrink-0 mt-0.5 text-red-500" />
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold text-red-500">
+              Archivo demasiado pesado (máximo {MAX_FILE_SIZE_LABEL})
+            </p>
+            <p className="mt-1 text-[11px] leading-relaxed text-andros-primary break-words">
+              {sizeNotice}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSizeNotice(null)}
+            aria-label="Cerrar aviso"
+            className="shrink-0 min-w-[28px] min-h-[28px] rounded-lg flex items-center justify-center text-andros-muted hover:text-andros-primary hover:bg-andros-border/40 spring-micro"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {!hasFile ? (
         /* ------------------------------------------------------------------
@@ -345,8 +413,8 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
           </span>
           <span className="text-[11px] leading-relaxed text-andros-muted">
             {variant === "stack"
-              ? "Cualquier formato · sin límite de peso"
-              : "Haz clic o arrastra aquí · cualquier formato · sin límite de peso"}
+              ? `Cualquier formato · hasta ${MAX_FILE_SIZE_LABEL} por pieza`
+              : `Haz clic o arrastra aquí · cualquier formato · hasta ${MAX_FILE_SIZE_LABEL} por pieza`}
           </span>
         </button>
       ) : (
@@ -376,6 +444,18 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
               </div>
             </div>
           </div>
+
+          {/* Visor 3D de solo lectura (.stl / .obj / .3mf) */}
+          {canPreview3D && (
+            <Model3DPreview
+              key={file.downloadUrl}
+              url={file.downloadUrl}
+              extension={file.extension}
+              fileSizeBytes={file.fileSizeBytes}
+              variant={variant}
+              onDimensions={(dims) => setMeasured({ url: file.downloadUrl, dimensions: dims })}
+            />
+          )}
 
           {/* Telemetría tabular del archivo */}
           <div className="space-y-1.5 text-xs font-mono tabular-telemetry tabular-nums">
@@ -443,6 +523,61 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
             </div>
           </div>
 
+          {/* Estado del guardado en la nube del usuario */}
+          {isReady && !isSignedIn && isLocalOnly && (
+            <p className="flex items-start gap-2 rounded-xl bg-andros-accent/5 border border-andros-border px-3 py-2 text-[11px] leading-relaxed text-andros-muted">
+              <LogIn className="w-3.5 h-3.5 shrink-0 mt-0.5 text-andros-accent" />
+              <span>
+                {isCloudWorthy && file.extension !== "pdf"
+                  ? "Inicia sesión con Google arriba para guardar este archivo 3D en tu nube"
+                  : "Inicia sesión con Google arriba para guardar este archivo en tu nube"}
+              </span>
+            </p>
+          )}
+          {isReady && isSignedIn && file.storagePath && (
+            <p className="flex items-center gap-2 text-[11px] text-andros-success">
+              <CloudCheck className="w-3.5 h-3.5 shrink-0" />
+              <span>Guardado en tu nube · disponible en cualquier dispositivo</span>
+            </p>
+          )}
+          {isReady && isSignedIn && isLocalOnly && !cloudUploadError && (
+            <p className="flex items-center gap-2 text-[11px] text-andros-muted" role="status">
+              <CloudUpload className="w-3.5 h-3.5 shrink-0 text-andros-accent animate-pulse" />
+              <span>Guardando en tu nube…</span>
+            </p>
+          )}
+          {isReady && isSignedIn && isLocalOnly && cloudUploadError && (
+            <div className="rounded-xl border border-red-500/30 bg-red-500/5 px-3 py-2 space-y-1.5">
+              <p className="flex items-start gap-2 text-[11px] leading-relaxed text-red-500">
+                <CircleAlert className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                <span>
+                  No se pudo guardar en tu nube ({cloudUploadError}). El archivo sigue
+                  disponible solo en este dispositivo.
+                </span>
+              </p>
+              <button
+                type="button"
+                onClick={() => retryFileUpload(node.id)}
+                className={`${touchTarget} px-3 rounded-lg bg-andros-border/50 hover:bg-andros-border text-andros-primary text-[11px] font-medium flex items-center gap-1.5 active:scale-95 spring-micro`}
+              >
+                <RefreshCw className="w-3.5 h-3.5 text-andros-accent" />
+                <span>Reintentar</span>
+              </button>
+            </div>
+          )}
+
+          {/* Acción principal: asistente de impresión 3D */}
+          {canPrint3D && (
+            <button
+              type="button"
+              onClick={() => setIsPrintOpen(true)}
+              className="w-full min-h-[44px] px-3 rounded-xl bg-andros-accent text-white text-sm font-semibold flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] spring-micro"
+            >
+              <Printer className="w-4 h-4" />
+              <span>Imprimir en 3D</span>
+            </button>
+          )}
+
           {/* Acciones */}
           <div className="flex items-center gap-2">
             {file.status === "ready" ? (
@@ -485,6 +620,18 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
             </button>
           </div>
         </div>
+      )}
+
+      {isPrintOpen && canPrint3D && (
+        <Print3DModal
+          pieceName={node.title}
+          fileName={file.fileName}
+          extension={file.extension}
+          downloadUrl={file.downloadUrl}
+          storagePath={file.storagePath}
+          dimensions={dimensions}
+          onClose={() => setIsPrintOpen(false)}
+        />
       )}
     </div>
   );

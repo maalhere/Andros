@@ -130,6 +130,10 @@ const DEFAULT_TAGS: Record<NodeArchetype, string> = {
 /** Título que recibe un nodo de archivo recién creado (aún sin archivo). */
 export const DEFAULT_FILE_NODE_TITLE = DEFAULT_TITLES["file-node"];
 
+/** Límite actual de peso por archivo (el mismo que admite el bucket `print-files`). */
+export const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024;
+export const MAX_FILE_SIZE_LABEL = "50 MB";
+
 export function createEmptyFilePayload(): FileNodePayload {
   return {
     fileName: "",
