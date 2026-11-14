@@ -5,9 +5,11 @@ import {
   ArrowLeft,
   ArrowRight,
   Cable,
+  CheckSquare,
   FileBox,
   NotebookPen,
   Sigma,
+  Square,
   X,
 } from "lucide-react";
 import {
@@ -17,7 +19,7 @@ import {
   PortPosition,
   SketchNoteEngineeringNode,
 } from "@/types/workspace";
-import { useWorkspaceStore } from "@/store/useWorkspaceStore";
+import { SKETCH_TEXT_MAX_HEIGHT, useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { FileNodeView } from "@/components/nodes/FileNodeView";
 
 interface EngineeringNodeProps {
@@ -67,6 +69,7 @@ const INTERACTIVE_SELECTOR =
 const SketchNotePreview: React.FC<{ node: SketchNoteEngineeringNode }> = ({
   node,
 }) => {
+  const updateNodePayload = useWorkspaceStore((s) => s.updateNodePayload);
   const data = node.sketchNoteData;
   const doneCount = data.checklistItems.filter((item) => item.checked).length;
   const isEmpty =
@@ -82,23 +85,64 @@ const SketchNotePreview: React.FC<{ node: SketchNoteEngineeringNode }> = ({
     );
   }
 
+  const toggleChecklistItem = (itemId: string) =>
+    updateNodePayload(node.id, {
+      checklistItems: data.checklistItems.map((item) =>
+        item.id === itemId ? { ...item, checked: !item.checked } : item
+      ),
+    });
+
   return (
     <div className="py-3 space-y-3">
-      {data.textBlocks.length > 0 && (
-        <div className="space-y-1.5">
-          {data.textBlocks.slice(0, 3).map((block) =>
+      {(data.textBlocks.length > 0 || data.checklistItems.length > 0) && (
+        // Texto completo con scroll propio (los bloques de la IA pueden ser largos).
+        <div
+          className="space-y-1.5 overflow-y-auto pr-1"
+          style={{ maxHeight: SKETCH_TEXT_MAX_HEIGHT }}
+        >
+          {data.textBlocks.map((block, index) =>
             block.type === "heading" ? (
-              <p key={block.id} className="text-xs font-semibold text-andros-primary">
+              <p
+                key={block.id}
+                className={`text-xs font-semibold text-andros-primary ${index > 0 ? "pt-1.5" : ""}`}
+              >
                 {block.text}
               </p>
             ) : (
-              <p
-                key={block.id}
-                className="text-xs leading-relaxed text-andros-muted line-clamp-3"
-              >
+              <p key={block.id} className="text-xs leading-relaxed text-andros-muted">
                 {block.type === "bullet" ? `• ${block.text}` : block.text}
               </p>
             )
+          )}
+
+          {data.checklistItems.length > 0 && (
+            <ul className="pt-1 space-y-1">
+              {data.checklistItems.map((item) => (
+                <li key={item.id}>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleChecklistItem(item.id);
+                    }}
+                    className="w-full flex items-start gap-1.5 text-left text-xs leading-relaxed spring-micro"
+                  >
+                    {item.checked ? (
+                      <CheckSquare className="w-3.5 h-3.5 mt-0.5 shrink-0 text-andros-success" />
+                    ) : (
+                      <Square className="w-3.5 h-3.5 mt-0.5 shrink-0 text-andros-muted" />
+                    )}
+                    <span
+                      className={
+                        item.checked ? "text-andros-muted line-through" : "text-andros-primary"
+                      }
+                    >
+                      {item.text}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
       )}

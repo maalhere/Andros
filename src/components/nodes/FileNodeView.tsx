@@ -257,6 +257,8 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
       lastModifiedMs: selected.lastModified,
       // Archivo nuevo: `useCloudSync` lo subirá y escribirá su nueva ruta.
       storagePath: undefined,
+      // Las dimensiones 3D se volverán a medir con la pieza nueva.
+      modelDimensionsMm: undefined,
     });
 
     updateNodeMeta(node.id, {
@@ -337,6 +339,7 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
       errorMessage: undefined,
       lastModifiedMs: undefined,
       storagePath: undefined,
+      modelDimensionsMm: undefined,
     });
     updateNodeMeta(node.id, {
       codeTag: "FILE",
@@ -453,7 +456,30 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
               extension={file.extension}
               fileSizeBytes={file.fileSizeBytes}
               variant={variant}
-              onDimensions={(dims) => setMeasured({ url: file.downloadUrl, dimensions: dims })}
+              onDimensions={(dims) => {
+                setMeasured({ url: file.downloadUrl, dimensions: dims });
+                // Se guardan en el nodo (y en la nube) para que el Oráculo IA
+                // conozca el tamaño real de la pieza. Solo si cambiaron.
+                const round = (v: number) => Math.round(v * 100) / 100;
+                const next = {
+                  widthMm: round(dims.widthMm),
+                  depthMm: round(dims.depthMm),
+                  heightMm: round(dims.heightMm),
+                };
+                const prev = useWorkspaceStore
+                  .getState()
+                  .nodes.find((n) => n.id === node.id);
+                const stored =
+                  prev?.type === "file-node" ? prev.fileData.modelDimensionsMm : undefined;
+                if (
+                  !stored ||
+                  stored.widthMm !== next.widthMm ||
+                  stored.depthMm !== next.depthMm ||
+                  stored.heightMm !== next.heightMm
+                ) {
+                  updateNodePayload(node.id, { modelDimensionsMm: next });
+                }
+              }}
             />
           )}
 

@@ -2,6 +2,7 @@ import { create } from "zustand";
 import {
   ActiveTool,
   CalcLatexPayload,
+  ChecklistItem,
   ConnectionDraft,
   EngineeringNodeBase,
   EngineeringNodeData,
@@ -12,7 +13,9 @@ import {
   NodeConnection,
   NodeMetaPatch,
   NodePayloadPatch,
+  NoteTextBlock,
   PortPosition,
+  SketchNoteEngineeringNode,
   SketchNotePayload,
   SpawnNodeInput,
   ThemeMode,
@@ -71,6 +74,35 @@ interface WorkspaceState {
   updateConnectionLabel: (id: string, label: string) => void;
   selectConnection: (id: string | null) => void;
 
+  // --------------------------------------------------------------------------
+  // Acciones controladas por el Oráculo IA (ETAPA · PRIORIDAD 2)
+  // --------------------------------------------------------------------------
+
+  /** Crea un nodo nuevo en un hueco libre del lienzo, sin encimarlo sobre otros. */
+  aiCreateNode: (partial?: SpawnNodeInput) => string;
+  /** Conecta dos nodos existentes (sin pasar por el modo "arrastrar cable"). */
+  aiConnectNodes: (fromNodeId: string, toNodeId: string, label?: string) => void;
+  /** Reordena todos los nodos del lienzo en una cuadrícula limpia y alineada. */
+  aiAutoLayout: () => void;
+  /** Analiza el nodo seleccionado y crea a su lado una guía técnica de impresión 3D. */
+  aiAnnotateSelected: () => void;
+  /**
+   * Crea un bloque de texto limpio (cuaderno en modo texto) con el contenido
+   * redactado por la IA y, si se indica, lo cablea con etiqueta al archivo o
+   * nodo al que hace referencia. Devuelve el id del bloque creado.
+   */
+  aiCreateTextBlock: (input: AiTextBlockInput) => string;
+  /** Añade o reemplaza el texto de un nodo existente (cuaderno, cálculo o archivo). */
+  aiUpdateNodeNote: (nodeId: string, content: string, mode?: "append" | "replace") => boolean;
+  /**
+   * Ordena el lienzo por flujo de trabajo humano en zonas/columnas:
+   * 1) archivos fuente y modelos 3D, 2) textos y análisis a la derecha de su
+   * archivo, 3) enlaces, fuentes y cálculos. Devuelve cuántos nodos quedaron en cada zona.
+   */
+  aiApplyHumanLayout: (
+    assignments?: { nodeId: string; zone: HumanLayoutZone }[]
+  ) => HumanLayoutResult;
+
   // Acciones de Herramientas y Navegación
   setActiveTool: (tool: ActiveTool) => void;
   setCanvasTransform: (transform: { x: number; y: number; scale: number }) => void;
@@ -83,9 +115,42 @@ interface WorkspaceState {
   setActiveMobileSheet: (sheet: MobileSheetType) => void;
 }
 
+/** Zonas del ordenamiento humano del lienzo. */
+export type HumanLayoutZone = 1 | 2 | 3;
+
+export interface HumanLayoutResult {
+  zone1: number;
+  zone2: number;
+  zone3: number;
+}
+
+export interface AiTextBlockInput {
+  title: string;
+  /** Texto con marcas ligeras: "# título", "- viñeta", "- [ ] tarea", párrafos. */
+  content: string;
+  /** Archivo o nodo al que hace referencia el bloque (se conecta con un cable). */
+  linkedNodeId?: string;
+  /** Etiqueta del cable que une el archivo con el bloque. */
+  connectionLabel?: string;
+  /** Etiqueta corta del bloque (por defecto "AI-TEXT"). */
+  codeTag?: string;
+}
+
 // ============================================================================
 // 2. UTILIDADES PURAS (exportadas para reutilizarlas en los componentes)
 // ============================================================================
+
+/**
+ * Ids únicos aunque la IA cree varios nodos en el mismo milisegundo
+ * (`Date.now()` solo se repetiría y pisaría nodos).
+ */
+let aiIdCounter = 0;
+function nextUniqueId(prefix: string): string {
+  aiIdCounter += 1;
+  return `${prefix}-${Date.now().toString(36)}-${aiIdCounter}-${Math.random()
+    .toString(36)
+    .slice(2, 6)}`;
+}
 
 /** Traduce las categorías de prueba de la Fase 0 a los 3 nodos definitivos. */
 const LEGACY_TYPE_MAP: Record<LegacyNodeCategory, NodeArchetype> = {
@@ -193,6 +258,480 @@ export function resolveAutoPorts(
   return dy >= 0
     ? { fromPort: "bottom", toPort: "top" }
     : { fromPort: "top", toPort: "bottom" };
+}
+
+/**
+ * Huella asumida de un nodo para calcular huecos libres y cuadrículas de
+ * auto-layout. El store no conoce el tamaño real renderizado (eso vive en
+ * `SpatialCanvas`), así que se usa una huella conservadora que cubre a los
+ * 3 arquetipos sin que se encimen visualmente.
+ */
+const AI_NODE_FOOTPRINT = { width: 340, height: 220 };
+const AI_NODE_MARGIN = 48;
+
+function rectsOverlap(
+  a: { x: number; y: number; w: number; h: number },
+  b: { x: number; y: number; w: number; h: number }
+): boolean {
+  return !(
+    a.x + a.w <= b.x ||
+    b.x + b.w <= a.x ||
+    a.y + a.h <= b.y ||
+    b.y + b.h <= a.y
+  );
+}
+
+/**
+ * Busca, en una cuadrícula invisible a partir de `near` (o del origen del
+ * lienzo), el primer hueco que no se encime con ningún nodo existente.
+ */
+function findFreeCanvasPosition(
+  existingNodes: EngineeringNodeData[],
+  near?: { x: number; y: number }
+): { x: number; y: number } {
+  const origin = near ?? { x: 80, y: 120 };
+  const columns = 6;
+  const step = {
+    x: AI_NODE_FOOTPRINT.width + AI_NODE_MARGIN,
+    y: AI_NODE_FOOTPRINT.height + AI_NODE_MARGIN,
+  };
+
+  for (let ring = 0; ring < 60; ring += 1) {
+    for (let col = 0; col < columns; col += 1) {
+      const candidate = {
+        x: origin.x + col * step.x,
+        y: origin.y + ring * step.y,
+        w: AI_NODE_FOOTPRINT.width,
+        h: AI_NODE_FOOTPRINT.height,
+      };
+      const collides = existingNodes.some((node) =>
+        rectsOverlap(candidate, {
+          x: node.position.x,
+          y: node.position.y,
+          w: AI_NODE_FOOTPRINT.width,
+          h: AI_NODE_FOOTPRINT.height,
+        })
+      );
+      if (!collides) return { x: candidate.x, y: candidate.y };
+    }
+  }
+  // Huecos agotados tras 60 anillos: se apila igual, por si acaso.
+  return { x: origin.x, y: origin.y + existingNodes.length * step.y };
+}
+
+/** Construye el nodo concreto (con su payload por defecto) a partir de un `SpawnNodeInput`. */
+function buildNodeFromInput(
+  partial: SpawnNodeInput | undefined,
+  id: string,
+  position: { x: number; y: number }
+): EngineeringNodeData {
+  const archetype = resolveNodeArchetype(partial?.type);
+
+  const base: EngineeringNodeBase = {
+    id,
+    title: partial?.title || DEFAULT_TITLES[archetype],
+    codeTag: partial?.codeTag || DEFAULT_TAGS[archetype],
+    summary: partial?.summary,
+    metrics: partial?.metrics,
+    actionLabel: partial?.actionLabel,
+    position,
+    updatedAt: "Ahora mismo",
+  };
+
+  if (archetype === "file-node") {
+    return {
+      ...base,
+      type: "file-node",
+      fileData: { ...createEmptyFilePayload(), ...partial?.fileData },
+    };
+  }
+  if (archetype === "sketch-note-node") {
+    return {
+      ...base,
+      type: "sketch-note-node",
+      // El texto del resumen pasa a ser el primer párrafo del cuaderno.
+      summary: undefined,
+      sketchNoteData: {
+        ...createEmptySketchNotePayload(partial?.summary),
+        ...partial?.sketchNoteData,
+      },
+    };
+  }
+  return {
+    ...base,
+    type: "calc-latex-node",
+    calcLatexData: {
+      ...createEmptyCalcLatexPayload(),
+      ...(partial?.summary ? { justificationText: partial.summary } : {}),
+      ...partial?.calcLatexData,
+    },
+    summary: undefined,
+  };
+}
+
+/** Extensiones de pieza 3D que el Oráculo sabe analizar para imprimir. */
+const PRINTABLE_3D_EXTENSIONS = new Set(["stl", "obj", "3mf"]);
+
+/** Redacta la nota técnica de impresión 3D que acompaña al nodo analizado. */
+function build3DPrintAdvice(node: EngineeringNodeData): SketchNotePayload {
+  const isFileNode = node.type === "file-node";
+  const extension = isFileNode ? node.fileData.extension.toLowerCase() : "";
+  const fileName = isFileNode && node.fileData.fileName ? node.fileData.fileName : node.title;
+  const isPrintable = isFileNode && PRINTABLE_3D_EXTENSIONS.has(extension);
+
+  const material = isPrintable
+    ? extension === "3mf"
+      ? "PLA o PETG (el .3mf puede traer ya color y soportes definidos; revísalos antes de laminar)"
+      : "PLA para prototipos rápidos; PETG o ABS si la pieza llevará carga mecánica, calor o intemperie"
+    : "No se detectó un archivo 3D imprimible (.stl, .obj o .3mf) en este nodo";
+
+  const infill = isPrintable
+    ? "15–20% para uso general; sube a 35–50% si la pieza es estructural o va a recibir carga"
+    : "—";
+
+  const supports = isPrintable
+    ? "Activa soportes si hay voladizos mayores a 45° o puentes largos; prefiere soportes de árbol para no marcar superficies visibles"
+    : "—";
+
+  const review = isPrintable
+    ? "Revisa escala real, orientación de impresión y tolerancias críticas antes de laminar"
+    : "Conecta primero el archivo de la pieza (.stl, .obj o .3mf) a este nodo para recibir recomendaciones precisas";
+
+  const paragraph = isPrintable
+    ? `Recomendaciones automáticas de impresión 3D para "${fileName}" (.${extension}). Ajusta los valores según la impresora y el material disponibles en el taller.`
+    : `"${fileName}" todavía no es un archivo 3D reconocido. Adjunta un .stl, .obj o .3mf a este nodo para recibir recomendaciones de impresión precisas.`;
+
+  const checklistItems: ChecklistItem[] = [
+    { id: "chk-1", text: `Material sugerido: ${material}`, checked: false },
+    { id: "chk-2", text: `Relleno (infill) sugerido: ${infill}`, checked: false },
+    { id: "chk-3", text: `Soportes de impresión: ${supports}`, checked: false },
+    { id: "chk-4", text: review, checked: false },
+  ];
+
+  return {
+    ...createEmptySketchNotePayload(),
+    richTextHtml: `<h2>Guía de impresión 3D</h2><p>${escapeHtml(paragraph)}</p>`,
+    textBlocks: [
+      { id: "blk-1", type: "heading", text: "Guía de impresión 3D" },
+      { id: "blk-2", type: "paragraph", text: paragraph },
+    ],
+    checklistItems,
+  };
+}
+
+// ----------------------------------------------------------------------------
+// Bloques de texto redactados por la IA
+// ----------------------------------------------------------------------------
+
+const MAX_AI_BLOCKS = 80;
+const MAX_AI_BLOCK_CHARS = 1500;
+
+/** Quita marcas de Markdown que el cuaderno no interpreta (**negrita**, `código`). */
+function stripInlineMarkdown(text: string): string {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/__(.+?)__/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .trim()
+    .slice(0, MAX_AI_BLOCK_CHARS);
+}
+
+/**
+ * Convierte el texto de la IA en bloques del cuaderno, una idea por línea:
+ * "# Título" → título · "- [ ] tarea" → checklist · "- viñeta" / "1. paso" → viñeta
+ * · cualquier otra línea → párrafo.
+ */
+export function parseAiTextContent(content: string): {
+  textBlocks: NoteTextBlock[];
+  checklistItems: ChecklistItem[];
+} {
+  const textBlocks: NoteTextBlock[] = [];
+  const checklistItems: ChecklistItem[] = [];
+
+  for (const rawLine of content.replace(/\r\n/g, "\n").split("\n")) {
+    const line = rawLine.trim();
+    if (!line || /^[-*_]{3,}$/.test(line)) continue;
+    if (textBlocks.length + checklistItems.length >= MAX_AI_BLOCKS) break;
+
+    const heading = line.match(/^#{1,6}\s+(.+)$/);
+    const task = line.match(/^(?:[-*•]|\d+[.)])\s*\[( |x|X)\]\s*(.+)$/);
+    const numbered = line.match(/^(\d+)[.)]\s+(.+)$/);
+    const bullet = line.match(/^[-*•]\s+(.+)$/);
+
+    if (heading) {
+      textBlocks.push({ id: nextUniqueId("blk"), type: "heading", text: stripInlineMarkdown(heading[1]) });
+    } else if (task) {
+      checklistItems.push({
+        id: nextUniqueId("chk"),
+        text: stripInlineMarkdown(task[2]),
+        checked: task[1].toLowerCase() === "x",
+      });
+    } else if (numbered) {
+      textBlocks.push({
+        id: nextUniqueId("blk"),
+        type: "bullet",
+        text: `${numbered[1]}. ${stripInlineMarkdown(numbered[2])}`,
+      });
+    } else if (bullet) {
+      textBlocks.push({ id: nextUniqueId("blk"), type: "bullet", text: stripInlineMarkdown(bullet[1]) });
+    } else {
+      textBlocks.push({ id: nextUniqueId("blk"), type: "paragraph", text: stripInlineMarkdown(line) });
+    }
+  }
+
+  return { textBlocks, checklistItems };
+}
+
+/** Versión HTML de los bloques (para exportar o renderizar con formato rico). */
+function textBlocksToHtml(blocks: NoteTextBlock[]): string {
+  let html = "";
+  let inList = false;
+  for (const block of blocks) {
+    if (block.type === "bullet") {
+      if (!inList) {
+        html += "<ul>";
+        inList = true;
+      }
+      html += `<li>${escapeHtml(block.text)}</li>`;
+      continue;
+    }
+    if (inList) {
+      html += "</ul>";
+      inList = false;
+    }
+    html +=
+      block.type === "heading"
+        ? `<h2>${escapeHtml(block.text)}</h2>`
+        : `<p>${escapeHtml(block.text)}</p>`;
+  }
+  if (inList) html += "</ul>";
+  return html;
+}
+
+// ----------------------------------------------------------------------------
+// Ordenamiento humano por zonas
+// ----------------------------------------------------------------------------
+
+/** Alto máximo (px) del área de texto de un cuaderno en el lienzo. */
+export const SKETCH_TEXT_MAX_HEIGHT = 320;
+
+/** Ancho real de un nodo en el lienzo (`w-80` en `EngineeringNode`). */
+const CANVAS_NODE_WIDTH = 320;
+/** Separación entre columnas/zonas: deja aire para leer los cables. */
+const ZONE_GUTTER = 150;
+/** Separación vertical entre nodos de una misma columna. */
+const STACK_GAP = 40;
+/** Separación extra entre "bandas" (un archivo y sus textos derivados). */
+const BAND_GAP = 90;
+const LAYOUT_ORIGIN = { x: 80, y: 120 };
+
+const MODEL_3D_EXTENSIONS = new Set(["stl", "obj", "3mf", "step", "stp", "iges", "igs"]);
+
+const REFERENCE_PATTERN =
+  /(https?:\/\/|www\.|doi\.org|\bdoi\b|referencia|bibliograf|fuente|enlace|link|paper|articulo|artículo|norma\b|datasheet|hoja de datos)/i;
+
+function noteFullText(node: EngineeringNodeData): string {
+  if (node.type === "sketch-note-node") {
+    return [
+      ...node.sketchNoteData.textBlocks.map((b) => b.text),
+      ...node.sketchNoteData.checklistItems.map((c) => c.text),
+    ].join("\n");
+  }
+  if (node.type === "calc-latex-node") return node.calcLatexData.justificationText;
+  return node.summary ?? "";
+}
+
+/** Zona por defecto según el tipo de nodo y su contenido. */
+function defaultHumanZone(node: EngineeringNodeData): HumanLayoutZone {
+  if (node.type === "file-node") return 1;
+  if (node.type === "calc-latex-node") return 3;
+  const header = `${node.title} ${node.codeTag}`;
+  if (REFERENCE_PATTERN.test(header)) return 3;
+  const text = noteFullText(node);
+  // Un cuaderno que es básicamente una lista de enlaces va a la zona 3.
+  const urlCount = (text.match(/https?:\/\/|www\./g) ?? []).length;
+  if (urlCount > 0 && urlCount >= Math.max(1, Math.floor(node.sketchNoteData.textBlocks.length / 2))) {
+    return 3;
+  }
+  return 2;
+}
+
+/**
+ * Altura estimada de un nodo ya renderizado. El store no ve el DOM, así que
+ * se aproxima según el contenido para que el ordenamiento no encime tarjetas.
+ */
+function estimateNodeHeight(node: EngineeringNodeData): number {
+  const CHARS_PER_LINE = 46;
+  const LINE = 18;
+  let height = 32 + 46 + 38; // padding + cabecera + pie
+  if (node.summary) height += 12 + Math.ceil(node.summary.length / CHARS_PER_LINE) * LINE;
+
+  if (node.type === "file-node") {
+    const file = node.fileData;
+    if (file.status === "empty") height += 150;
+    else if (MODEL_3D_EXTENSIONS.has(file.extension.toLowerCase())) height += 430;
+    else height += 220;
+  } else if (node.type === "sketch-note-node") {
+    const data = node.sketchNoteData;
+    let text = 0;
+    for (const block of data.textBlocks) {
+      text +=
+        block.type === "heading"
+          ? 26
+          : Math.max(1, Math.ceil(block.text.length / CHARS_PER_LINE)) * LINE + 6;
+    }
+    for (const item of data.checklistItems) {
+      text += Math.max(1, Math.ceil(item.text.length / (CHARS_PER_LINE - 4))) * LINE + 6;
+    }
+    // El área de texto del nodo tiene un alto máximo con scroll.
+    height += 24 + Math.min(text, SKETCH_TEXT_MAX_HEIGHT);
+    if (data.strokes.length > 0) {
+      height += 12 + (288 * data.canvasSize.height) / Math.max(1, data.canvasSize.width);
+    }
+    height += data.checklistItems.length > 0 ? 48 : 26;
+  } else {
+    const data = node.calcLatexData;
+    const cells = Object.keys(data.gridCells).length;
+    if (cells === 0 && data.latexEquations.length === 0) {
+      height += 24 + Math.ceil((data.justificationText.length || 40) / CHARS_PER_LINE) * LINE;
+    } else {
+      height += 24;
+      if (cells > 0) height += Math.min(data.gridSize.rows, 6) * 23 + 4;
+      height += Math.min(data.latexEquations.length, 2) * 46;
+    }
+  }
+  return Math.round(height);
+}
+
+/**
+ * Calcula las posiciones del ordenamiento humano. Función pura: recibe los
+ * nodos y conexiones actuales y devuelve la nueva posición de cada nodo.
+ */
+function computeHumanLayout(
+  nodes: EngineeringNodeData[],
+  connections: NodeConnection[],
+  assignments: { nodeId: string; zone: HumanLayoutZone }[] = []
+): { positions: Map<string, { x: number; y: number }>; result: HumanLayoutResult } {
+  const assigned = new Map<string, HumanLayoutZone>();
+  for (const a of assignments) {
+    if (a.zone === 1 || a.zone === 2 || a.zone === 3) assigned.set(a.nodeId, a.zone);
+  }
+  const zoneOf = new Map<string, HumanLayoutZone>();
+  for (const node of nodes) zoneOf.set(node.id, assigned.get(node.id) ?? defaultHumanZone(node));
+
+  const neighbors = new Map<string, string[]>();
+  for (const c of connections) {
+    neighbors.set(c.fromNodeId, [...(neighbors.get(c.fromNodeId) ?? []), c.toNodeId]);
+    neighbors.set(c.toNodeId, [...(neighbors.get(c.toNodeId) ?? []), c.fromNodeId]);
+  }
+
+  // Orden de lectura actual (arriba→abajo, izquierda→derecha) como desempate estable.
+  const readingOrder = (a: EngineeringNodeData, b: EngineeringNodeData) =>
+    a.position.y - b.position.y || a.position.x - b.position.x;
+
+  const zone1 = nodes.filter((n) => zoneOf.get(n.id) === 1);
+  const zone2 = nodes.filter((n) => zoneOf.get(n.id) === 2);
+  const zone3 = nodes.filter((n) => zoneOf.get(n.id) === 3);
+
+  // Zona 1: primero los modelos 3D, luego el resto de archivos fuente.
+  const is3D = (n: EngineeringNodeData) =>
+    n.type === "file-node" && MODEL_3D_EXTENSIONS.has(n.fileData.extension.toLowerCase());
+  zone1.sort((a, b) => Number(is3D(b)) - Number(is3D(a)) || readingOrder(a, b));
+  zone2.sort(readingOrder);
+
+  // Columnas solo para las zonas que tienen nodos (sin huecos vacíos).
+  const columnX: Record<HumanLayoutZone, number> = { 1: 0, 2: 0, 3: 0 };
+  let x = LAYOUT_ORIGIN.x;
+  for (const [zone, list] of [
+    [1, zone1],
+    [2, zone2],
+    [3, zone3],
+  ] as const) {
+    columnX[zone] = x;
+    if (list.length > 0) x += CANVAS_NODE_WIDTH + ZONE_GUTTER;
+  }
+
+  const positions = new Map<string, { x: number; y: number }>();
+  const heightOf = new Map(nodes.map((n) => [n.id, estimateNodeHeight(n)]));
+  const placedZone2 = new Set<string>();
+  let cursorY = LAYOUT_ORIGIN.y;
+
+  // Bandas: cada archivo de la zona 1 con sus textos derivados a la derecha.
+  for (const file of zone1) {
+    const bandTop = cursorY;
+    positions.set(file.id, { x: columnX[1], y: bandTop });
+
+    let childY = bandTop;
+    for (const neighborId of neighbors.get(file.id) ?? []) {
+      if (zoneOf.get(neighborId) !== 2 || placedZone2.has(neighborId)) continue;
+      placedZone2.add(neighborId);
+      positions.set(neighborId, { x: columnX[2], y: childY });
+      childY += (heightOf.get(neighborId) ?? 220) + STACK_GAP;
+    }
+
+    const bandHeight = Math.max(
+      heightOf.get(file.id) ?? 220,
+      childY - bandTop - (childY > bandTop ? STACK_GAP : 0)
+    );
+    cursorY = bandTop + bandHeight + BAND_GAP;
+  }
+
+  // Textos sin archivo propio: al final de la zona 2, en orden de lectura.
+  let zone2Y = zone1.length > 0 ? cursorY : LAYOUT_ORIGIN.y;
+  for (const note of zone2) {
+    if (placedZone2.has(note.id)) continue;
+    positions.set(note.id, { x: columnX[2], y: zone2Y });
+    zone2Y += (heightOf.get(note.id) ?? 220) + STACK_GAP;
+  }
+
+  // Zona 3: cada fuente/cálculo a la altura del nodo con el que se conecta.
+  const anchorOf = (node: EngineeringNodeData) => {
+    const ys = (neighbors.get(node.id) ?? [])
+      .map((id) => positions.get(id)?.y)
+      .filter((y): y is number => typeof y === "number");
+    return ys.length > 0 ? Math.min(...ys) : Number.POSITIVE_INFINITY;
+  };
+  const zone3Anchored = zone3
+    .map((node) => ({ node, anchor: anchorOf(node) }))
+    .sort((a, b) => a.anchor - b.anchor || readingOrder(a.node, b.node));
+  let zone3Y = LAYOUT_ORIGIN.y;
+  for (const { node, anchor } of zone3Anchored) {
+    const y = Number.isFinite(anchor) ? Math.max(anchor, zone3Y) : zone3Y;
+    positions.set(node.id, { x: columnX[3], y });
+    zone3Y = y + (heightOf.get(node.id) ?? 220) + STACK_GAP;
+  }
+
+  return {
+    positions,
+    result: { zone1: zone1.length, zone2: zone2.length, zone3: zone3.length },
+  };
+}
+
+/**
+ * Hueco libre para un bloque nuevo justo a la derecha del nodo de referencia,
+ * bajando en esa misma columna si ya hay otros textos ahí.
+ */
+function findSlotRightOf(
+  nodes: EngineeringNodeData[],
+  anchor: EngineeringNodeData,
+  newHeight: number
+): { x: number; y: number } {
+  const x = anchor.position.x + CANVAS_NODE_WIDTH + ZONE_GUTTER;
+  let y = anchor.position.y;
+  for (let attempt = 0; attempt < 400; attempt += 1) {
+    const candidate = { x, y, w: CANVAS_NODE_WIDTH, h: newHeight };
+    const blocker = nodes.find((node) =>
+      rectsOverlap(candidate, {
+        x: node.position.x,
+        y: node.position.y,
+        w: CANVAS_NODE_WIDTH,
+        h: estimateNodeHeight(node),
+      })
+    );
+    if (!blocker) return { x, y };
+    y = blocker.position.y + estimateNodeHeight(blocker) + STACK_GAP;
+  }
+  return { x, y };
 }
 
 /** Libera la memoria de un archivo local cuando ya no se usa. */
@@ -432,7 +971,7 @@ export const INITIAL_CONNECTIONS: NodeConnection[] = [
 // 4. STORE
 // ============================================================================
 
-export const useWorkspaceStore = create<WorkspaceState>((set) => ({
+export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   theme: "dark",
 
   toggleTheme: () =>
@@ -484,53 +1023,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
     set((state) => {
       const id = `node-${Date.now()}`;
       const offsetCount = state.nodes.length;
-      const archetype = resolveNodeArchetype(partial?.type);
-
-      const base: EngineeringNodeBase = {
-        id,
-        title: partial?.title || DEFAULT_TITLES[archetype],
-        codeTag: partial?.codeTag || DEFAULT_TAGS[archetype],
-        summary: partial?.summary,
-        metrics: partial?.metrics,
-        actionLabel: partial?.actionLabel,
-        position: partial?.position || {
-          x: 280 + ((offsetCount * 45) % 260),
-          y: 180 + ((offsetCount * 45) % 220),
-        },
-        updatedAt: "Ahora mismo",
+      const position = partial?.position || {
+        x: 280 + ((offsetCount * 45) % 260),
+        y: 180 + ((offsetCount * 45) % 220),
       };
-
-      let newNode: EngineeringNodeData;
-
-      if (archetype === "file-node") {
-        newNode = {
-          ...base,
-          type: "file-node",
-          fileData: { ...createEmptyFilePayload(), ...partial?.fileData },
-        };
-      } else if (archetype === "sketch-note-node") {
-        newNode = {
-          ...base,
-          type: "sketch-note-node",
-          // El texto del resumen pasa a ser el primer párrafo del cuaderno.
-          summary: undefined,
-          sketchNoteData: {
-            ...createEmptySketchNotePayload(partial?.summary),
-            ...partial?.sketchNoteData,
-          },
-        };
-      } else {
-        newNode = {
-          ...base,
-          type: "calc-latex-node",
-          calcLatexData: {
-            ...createEmptyCalcLatexPayload(),
-            ...(partial?.summary ? { justificationText: partial.summary } : {}),
-            ...partial?.calcLatexData,
-          },
-          summary: undefined,
-        };
-      }
+      const newNode = buildNodeFromInput(partial, id, position);
 
       return {
         nodes: [newNode, ...state.nodes],
@@ -725,6 +1222,257 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
     })),
 
   selectConnection: (id) => set({ selectedConnectionId: id }),
+
+  // --------------------------------------------------------------------------
+  // Acciones controladas por el Oráculo IA
+  // --------------------------------------------------------------------------
+
+  aiCreateNode: (partial) => {
+    const id = nextUniqueId("node");
+    set((state) => {
+      const position = partial?.position || findFreeCanvasPosition(state.nodes);
+      const newNode = buildNodeFromInput(partial, id, position);
+      return {
+        nodes: [newNode, ...state.nodes],
+        selectedNodeId: id,
+      };
+    });
+    return id;
+  },
+
+  aiConnectNodes: (fromNodeId, toNodeId, label) =>
+    set((state) => {
+      if (fromNodeId === toNodeId) return {};
+      const fromNode = state.nodes.find((node) => node.id === fromNodeId);
+      const toNode = state.nodes.find((node) => node.id === toNodeId);
+      if (!fromNode || !toNode) return {};
+
+      const cleanLabel = label?.trim();
+      const existing = state.connections.find(
+        (c) =>
+          (c.fromNodeId === fromNodeId && c.toNodeId === toNodeId) ||
+          (c.fromNodeId === toNodeId && c.toNodeId === fromNodeId)
+      );
+      if (existing) {
+        if (!cleanLabel) return { selectedConnectionId: existing.id };
+        return {
+          connections: state.connections.map((c) =>
+            c.id === existing.id ? { ...c, label: cleanLabel } : c
+          ),
+          selectedConnectionId: existing.id,
+        };
+      }
+
+      const auto = resolveAutoPorts(fromNode, toNode);
+      const newConnection: NodeConnection = {
+        id: `conn-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+        fromNodeId,
+        toNodeId,
+        fromPort: auto.fromPort,
+        toPort: auto.toPort,
+        ...(cleanLabel ? { label: cleanLabel } : {}),
+      };
+
+      return {
+        connections: [...state.connections, newConnection],
+        selectedConnectionId: newConnection.id,
+      };
+    }),
+
+  aiAutoLayout: () =>
+    set((state) => {
+      if (state.nodes.length === 0) return {};
+      const columns = Math.max(1, Math.ceil(Math.sqrt(state.nodes.length)));
+      const step = {
+        x: AI_NODE_FOOTPRINT.width + AI_NODE_MARGIN,
+        y: AI_NODE_FOOTPRINT.height + AI_NODE_MARGIN,
+      };
+      const origin = { x: 80, y: 120 };
+
+      // El más viejo primero, para que la cuadrícula se lea en orden natural.
+      const ordered = [...state.nodes].reverse();
+      const positionById = new Map<string, { x: number; y: number }>();
+      ordered.forEach((node, index) => {
+        const col = index % columns;
+        const row = Math.floor(index / columns);
+        positionById.set(node.id, {
+          x: origin.x + col * step.x,
+          y: origin.y + row * step.y,
+        });
+      });
+
+      return {
+        nodes: state.nodes.map((node) => ({
+          ...node,
+          position: positionById.get(node.id) ?? node.position,
+        })),
+      };
+    }),
+
+  aiAnnotateSelected: () =>
+    set((state) => {
+      const selected = state.nodes.find((node) => node.id === state.selectedNodeId);
+      if (!selected) return {};
+
+      const id = nextUniqueId("node");
+      const position = findFreeCanvasPosition(state.nodes, {
+        x: selected.position.x + AI_NODE_FOOTPRINT.width + AI_NODE_MARGIN,
+        y: selected.position.y,
+      });
+      const newNode: EngineeringNodeData = {
+        id,
+        type: "sketch-note-node",
+        title: `Guía de Impresión 3D • ${selected.title}`,
+        codeTag: "AI-PRINT",
+        position,
+        updatedAt: "Ahora mismo",
+        sketchNoteData: build3DPrintAdvice(selected),
+      };
+
+      const auto = resolveAutoPorts(selected, newNode);
+      const newConnection: NodeConnection = {
+        id: `conn-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+        fromNodeId: selected.id,
+        toNodeId: id,
+        fromPort: auto.fromPort,
+        toPort: auto.toPort,
+        label: "Guía de impresión 3D",
+      };
+
+      return {
+        nodes: [newNode, ...state.nodes],
+        connections: [...state.connections, newConnection],
+        selectedNodeId: id,
+      };
+    }),
+
+  aiCreateTextBlock: (input) => {
+    const id = nextUniqueId("node");
+    const { textBlocks, checklistItems } = parseAiTextContent(input.content);
+    // Nunca queda un bloque vacío: si la IA no mandó texto útil se avisa dentro.
+    const blocks: NoteTextBlock[] =
+      textBlocks.length > 0 || checklistItems.length > 0
+        ? textBlocks
+        : [{ id: nextUniqueId("blk"), type: "paragraph", text: "Sin contenido generado." }];
+
+    set((state) => {
+      const anchor = input.linkedNodeId
+        ? state.nodes.find((n) => n.id === input.linkedNodeId)
+        : undefined;
+
+      const draft: SketchNoteEngineeringNode = {
+        id,
+        type: "sketch-note-node",
+        title: input.title.trim().slice(0, 120) || "Bloque de texto IA",
+        codeTag: input.codeTag || "AI-TEXT",
+        position: { x: 0, y: 0 },
+        updatedAt: "Ahora mismo",
+        sketchNoteData: {
+          ...createEmptySketchNotePayload(),
+          canvasMode: "text",
+          textBlocks: blocks,
+          checklistItems,
+          richTextHtml: textBlocksToHtml(blocks),
+        },
+      };
+      const height = estimateNodeHeight(draft);
+      const newNode: EngineeringNodeData = {
+        ...draft,
+        position: anchor
+          ? findSlotRightOf(state.nodes, anchor, height)
+          : findFreeCanvasPosition(state.nodes),
+      };
+
+      if (!anchor) return { nodes: [newNode, ...state.nodes] };
+
+      const auto = resolveAutoPorts(anchor, newNode);
+      const label = input.connectionLabel?.trim() || "Referencia de";
+      const newConnection: NodeConnection = {
+        id: nextUniqueId("conn"),
+        fromNodeId: anchor.id,
+        toNodeId: id,
+        fromPort: auto.fromPort,
+        toPort: auto.toPort,
+        label: label.slice(0, 60),
+      };
+      return {
+        nodes: [newNode, ...state.nodes],
+        connections: [...state.connections, newConnection],
+      };
+    });
+    return id;
+  },
+
+  aiUpdateNodeNote: (nodeId, content, mode = "append") => {
+    const target = get().nodes.find((n) => n.id === nodeId);
+    const clean = content.trim();
+    if (!target || !clean) return false;
+
+    set((state) => ({
+      nodes: state.nodes.map((node): EngineeringNodeData => {
+        if (node.id !== nodeId) return node;
+
+        if (node.type === "sketch-note-node") {
+          const parsed = parseAiTextContent(clean);
+          const data = node.sketchNoteData;
+          const textBlocks =
+            mode === "replace" ? parsed.textBlocks : [...data.textBlocks, ...parsed.textBlocks];
+          const checklistItems =
+            mode === "replace"
+              ? parsed.checklistItems
+              : [...data.checklistItems, ...parsed.checklistItems];
+          return {
+            ...node,
+            updatedAt: "Ahora mismo",
+            sketchNoteData: {
+              ...data,
+              textBlocks,
+              checklistItems,
+              richTextHtml: textBlocksToHtml(textBlocks),
+            },
+          };
+        }
+
+        if (node.type === "calc-latex-node") {
+          const prev = node.calcLatexData.justificationText.trim();
+          return {
+            ...node,
+            updatedAt: "Ahora mismo",
+            calcLatexData: {
+              ...node.calcLatexData,
+              justificationText:
+                mode === "replace" || !prev ? clean : `${prev}\n\n${clean}`,
+            },
+          };
+        }
+
+        // Archivo: el texto vive en la descripción visible del nodo.
+        const prev = node.summary?.trim() ?? "";
+        return {
+          ...node,
+          updatedAt: "Ahora mismo",
+          summary: (mode === "replace" || !prev ? clean : `${prev}\n${clean}`).slice(0, 1200),
+        };
+      }),
+    }));
+    return true;
+  },
+
+  aiApplyHumanLayout: (assignments) => {
+    const { nodes, connections } = get();
+    const { positions, result } = computeHumanLayout(nodes, connections, assignments);
+    if (nodes.length === 0) return result;
+
+    set((state) => ({
+      nodes: state.nodes.map((node) => {
+        const position = positions.get(node.id);
+        return position ? { ...node, position } : node;
+      }),
+      // Se lleva la vista al inicio del lienzo para ver las zonas completas.
+      canvasTransform: { x: 0, y: 0, scale: state.canvasTransform.scale },
+    }));
+    return result;
+  },
 
   // --------------------------------------------------------------------------
   // Acciones de Herramientas y Navegación

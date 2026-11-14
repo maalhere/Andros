@@ -104,6 +104,7 @@ function cloudFilePayload(file: FileNodePayload): FileNodePayload {
       ? { errorMessage: file.errorMessage.slice(0, 300) }
       : {}),
     ...(file.storagePath ? { storagePath: file.storagePath } : {}),
+    ...(file.modelDimensionsMm ? { modelDimensionsMm: file.modelDimensionsMm } : {}),
   };
 }
 

@@ -128,6 +128,12 @@ export interface FileNodePayload {
    * `useCloudSync` al terminar la subida; vacía en modo local.
    */
   storagePath?: string;
+  /**
+   * Dimensiones reales del modelo 3D (caja envolvente) en milímetros. Las mide
+   * el visor 3D al cargar la pieza y se guardan para que el Oráculo IA pueda
+   * razonar sobre el tamaño real sin volver a abrir el archivo.
+   */
+  modelDimensionsMm?: { widthMm: number; depthMm: number; heightMm: number };
 }
 
 // ----------------------------------------------------------------------------
