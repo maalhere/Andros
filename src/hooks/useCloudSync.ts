@@ -20,7 +20,9 @@ import { getSupabaseBrowserClient, PRINT_FILES_BUCKET } from "@/lib/supabase/cli
 import { useCloudStore, type CloudUser } from "@/store/useCloudStore";
 import {
   createEmptyCalcLatexPayload,
+  createEmptyCodeLabPayload,
   createEmptyFilePayload,
+  createEmptyResourceLinkPayload,
   createEmptySketchNotePayload,
   INITIAL_CONNECTIONS,
   INITIAL_NODES,
@@ -31,12 +33,14 @@ import {
 import { sanitizeCanvasStrokes } from "@/lib/canvas/inkGeometry";
 import type {
   CalcLatexPayload,
+  CodeLabPayload,
   EngineeringNodeBase,
   EngineeringNodeData,
   FileNodePayload,
   NodeArchetype,
   NodeConnection,
   PortPosition,
+  ResourceLinkPayload,
   SketchNotePayload,
   TelemetryMetric,
 } from "@/types/workspace";
@@ -126,7 +130,11 @@ function nodeToRow(
       ? cloudFilePayload(node.fileData)
       : node.type === "sketch-note-node"
         ? node.sketchNoteData
-        : node.calcLatexData;
+        : node.type === "calc-latex-node"
+          ? node.calcLatexData
+          : node.type === "resource-link-node"
+            ? node.resourceLinkData
+            : node.codeLabData;
 
   return {
     workspace_id: workspaceId,
@@ -184,6 +192,24 @@ function rowToNode(row: NodeRow): EngineeringNodeData | null {
         calcLatexData: {
           ...createEmptyCalcLatexPayload(),
           ...(payload as Partial<CalcLatexPayload>),
+        },
+      };
+    case "resource-link-node":
+      return {
+        ...base,
+        type: "resource-link-node",
+        resourceLinkData: {
+          ...createEmptyResourceLinkPayload(),
+          ...(payload as Partial<ResourceLinkPayload>),
+        },
+      };
+    case "code-lab-node":
+      return {
+        ...base,
+        type: "code-lab-node",
+        codeLabData: {
+          ...createEmptyCodeLabPayload(),
+          ...(payload as Partial<CodeLabPayload>),
         },
       };
     default:

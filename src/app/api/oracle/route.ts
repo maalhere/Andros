@@ -52,6 +52,8 @@ TIPOS DE NODO
 - "file-node": archivo (modelos 3D .stl/.obj/.3mf/.step, PDF, CSV, imágenes…). Trae fileName, fileExtension, fileSizeBytes y, si el visor 3D ya lo midió, dimensionsMm (caja envolvente real en milímetros: ancho × profundidad × alto).
 - "sketch-note-node": cuaderno de texto (títulos, párrafos, viñetas, checklist y bocetos). Su texto llega en textExcerpt.
 - "calc-latex-node": hoja de cálculo con ecuaciones LaTeX. Su justificación, ecuaciones y celdas llegan en textExcerpt.
+- "resource-link-node": enlace externo (YouTube, GitHub, paper científico, LinkedIn/perfil o genérico). Su URL, plataforma, título y resumen llegan en textExcerpt.
+- "code-lab-node": laboratorio de código/cálculo rápido (variables, funciones matemáticas, linspace y plot). Su código, variables resultantes y errores llegan en textExcerpt.
 Cada nodo trae connectedNodeIds; la lista "connections" trae los cables con su etiqueta.
 
 FORMATO DE RESPUESTA (obligatorio)
@@ -89,7 +91,13 @@ REGLAS
 const str = (value: unknown, max: number): string =>
   typeof value === "string" ? value.trim().slice(0, max) : "";
 
-const ARCHETYPES: NodeArchetype[] = ["file-node", "sketch-note-node", "calc-latex-node"];
+const ARCHETYPES: NodeArchetype[] = [
+  "file-node",
+  "sketch-note-node",
+  "calc-latex-node",
+  "resource-link-node",
+  "code-lab-node",
+];
 
 function sanitizeActions(raw: unknown, context: OracleCanvasContext): OracleAction[] {
   if (!Array.isArray(raw)) return [];

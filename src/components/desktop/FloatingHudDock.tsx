@@ -6,9 +6,11 @@ import {
   PlusCircle,
   GitBranch,
   Library,
+  Link2,
   Sparkles,
   PenLine,
   Eraser,
+  Terminal,
   Undo2,
   Minus,
   Plus,
@@ -304,7 +306,31 @@ export const FloatingHudDock: React.FC = () => {
 
       <div className="w-px h-5 bg-andros-border mx-1" />
 
-      {/* 5. Biblioteca Técnica (B) */}
+      {/* 5. Enlace / Fuente (L) */}
+      <button
+        type="button"
+        onClick={() => spawnNode({ type: "resource-link-node" })}
+        title="Enlace / Fuente (L)"
+        className="flex items-center gap-1.5 p-2.5 rounded-xl text-andros-muted hover:text-andros-primary hover:bg-andros-border/30 hover:scale-105 active:scale-95 spring-micro"
+      >
+        <Link2 className="w-4 h-4" />
+        <kbd className="text-[10px] font-mono opacity-60">L</kbd>
+      </button>
+
+      {/* 6. Código / Cálculo (M) */}
+      <button
+        type="button"
+        onClick={() => spawnNode({ type: "code-lab-node" })}
+        title="Código / Cálculo (M)"
+        className="flex items-center gap-1.5 p-2.5 rounded-xl text-andros-muted hover:text-andros-primary hover:bg-andros-border/30 hover:scale-105 active:scale-95 spring-micro"
+      >
+        <Terminal className="w-4 h-4" />
+        <kbd className="text-[10px] font-mono opacity-60">M</kbd>
+      </button>
+
+      <div className="w-px h-5 bg-andros-border mx-1" />
+
+      {/* 7. Biblioteca Técnica (B) */}
       <button
         type="button"
         onClick={() =>
@@ -323,7 +349,7 @@ export const FloatingHudDock: React.FC = () => {
         <kbd className="text-[10px] font-mono opacity-60">B</kbd>
       </button>
 
-      {/* 6. Oráculo IA (⌘K) */}
+      {/* 8. Oráculo IA (⌘K) */}
       <button
         type="button"
         onClick={() => setOracleModalOpen(true)}

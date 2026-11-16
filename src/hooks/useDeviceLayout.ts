@@ -82,6 +82,12 @@ export function useDeviceLayout(): DeviceLayoutResult {
         case "b":
           setActiveTool("library");
           break;
+        case "l":
+          spawnNode({ type: "resource-link-node" });
+          break;
+        case "m":
+          spawnNode({ type: "code-lab-node" });
+          break;
       }
     };
 

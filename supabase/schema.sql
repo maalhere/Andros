@@ -105,7 +105,12 @@ create table if not exists public.workspace_nodes (
   workspace_id   uuid not null references public.workspaces (id) on delete cascade,
   id             text not null,
   owner_id       uuid not null default auth.uid() references auth.users (id) on delete cascade,
-  type           text not null check (type in ('file-node', 'sketch-note-node', 'calc-latex-node')),
+  type           text not null check (
+                   type in (
+                     'file-node', 'sketch-note-node', 'calc-latex-node',
+                     'resource-link-node', 'code-lab-node'
+                   )
+                 ),
   title          text not null default '',
   code_tag       text not null default '',
   summary        text,
@@ -127,6 +132,18 @@ drop trigger if exists workspace_nodes_set_updated_at on public.workspace_nodes;
 create trigger workspace_nodes_set_updated_at
   before update on public.workspace_nodes
   for each row execute function public.set_updated_at();
+
+-- BLOQUE 3: se agregaron los nodos "resource-link-node" (Enlace / Fuente) y
+-- "code-lab-node" (Código / Cálculo). En una base ya creada, `create table if
+-- not exists` no actualiza el check existente, así que se reemplaza aparte.
+alter table public.workspace_nodes drop constraint if exists workspace_nodes_type_check;
+alter table public.workspace_nodes add constraint workspace_nodes_type_check
+  check (
+    type in (
+      'file-node', 'sketch-note-node', 'calc-latex-node',
+      'resource-link-node', 'code-lab-node'
+    )
+  );
 
 -- ============================================================================
 -- 4. WORKSPACE_CONNECTIONS

@@ -8,8 +8,10 @@ import {
   Cable,
   Check,
   FileBox,
+  Link2,
   NotebookPen,
   Sigma,
+  Terminal,
   X,
 } from "lucide-react";
 import { NODE_ARCHETYPE_LABELS, useWorkspaceStore } from "@/store/useWorkspaceStore";
@@ -28,6 +30,10 @@ const renderArchetypeIcon = (type: NodeArchetype, className: string) => {
       return <NotebookPen className={className} />;
     case "calc-latex-node":
       return <Sigma className={className} />;
+    case "resource-link-node":
+      return <Link2 className={className} />;
+    case "code-lab-node":
+      return <Terminal className={className} />;
   }
 };
 
@@ -313,6 +319,16 @@ const NEW_NODE_OPTIONS: {
     type: "calc-latex-node",
     name: "Hoja de Cálculo + LaTeX",
     description: "Celdas con fórmulas y ecuaciones justificadas",
+  },
+  {
+    type: "resource-link-node",
+    name: "Enlace / Fuente",
+    description: "YouTube, GitHub, papers y perfiles con vista previa",
+  },
+  {
+    type: "code-lab-node",
+    name: "Código / Cálculo Rápido",
+    description: "Variables, funciones matemáticas y gráficas plot(x, y)",
   },
 ];
 

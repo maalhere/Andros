@@ -67,8 +67,13 @@ export type MobileSheetType =
 // 2. Los 3 Nodos Definitivos de Andros
 // ----------------------------------------------------------------------------
 
-/** Los 3 arquetipos oficiales de nodo. */
-export type NodeArchetype = "file-node" | "sketch-note-node" | "calc-latex-node";
+/** Los 5 arquetipos oficiales de nodo. */
+export type NodeArchetype =
+  | "file-node"
+  | "sketch-note-node"
+  | "calc-latex-node"
+  | "resource-link-node"
+  | "code-lab-node";
 
 /**
  * Alias de compatibilidad: los archivos de la Fase 0 importaban `NodeCategory`.
@@ -271,7 +276,97 @@ export interface CalcLatexPayload {
 }
 
 // ----------------------------------------------------------------------------
-// 7. Nodo de ingeniería (unión estricta de los 3 tipos)
+// 6b. NODO TIPO 4 — Enlace / Fuente Externa (`resource-link-node`)
+//     YouTube, GitHub, papers (arXiv/DOI/OpenAlex) y perfiles (LinkedIn, etc.)
+// ----------------------------------------------------------------------------
+
+/** Plataforma detectada automáticamente al pegar la URL. */
+export type ResourceLinkPlatform =
+  | "youtube"
+  | "github"
+  | "paper"
+  | "linkedin"
+  | "generic";
+
+export type ResourceLinkStatus = "idle" | "loading" | "ready" | "error";
+
+/** Metadatos de un video embebido de YouTube. */
+export interface ResourceYouTubeData {
+  videoId: string;
+}
+
+/** Metadatos consultados en la API pública de GitHub. */
+export interface ResourceGitHubData {
+  owner: string;
+  repo: string;
+  description: string;
+  stars: number;
+  language: string;
+  htmlUrl: string;
+}
+
+/** Metadatos de un paper científico extraídos de `/api/link-preview`. */
+export interface ResourcePaperData {
+  title: string;
+  authors: string;
+  source: string;
+  summary: string;
+}
+
+export interface ResourceLinkPayload {
+  /** URL exactamente como la pegó el usuario. */
+  url: string;
+  platform: ResourceLinkPlatform;
+  status: ResourceLinkStatus;
+  /** Título legible (de YouTube, GitHub, el paper o el og:title genérico). */
+  title?: string;
+  /** Resumen/descripción corta para que el Oráculo IA la pueda leer. */
+  description?: string;
+  siteName?: string;
+  imageUrl?: string;
+  errorMessage?: string;
+  youtube?: ResourceYouTubeData;
+  github?: ResourceGitHubData;
+  paper?: ResourcePaperData;
+}
+
+// ----------------------------------------------------------------------------
+// 6c. NODO TIPO 5 — Laboratorio de Código / Cálculo Rápido (`code-lab-node`)
+//     Ejecutor ligero tipo MATLAB, 100% en el navegador (sin servidor externo).
+// ----------------------------------------------------------------------------
+
+/** Una variable numérica o vector resultante de ejecutar el código. */
+export type CodeLabValue = number | number[];
+
+export interface CodeLabPlotData {
+  x: number[];
+  y: number[];
+  xLabel?: string;
+  yLabel?: string;
+}
+
+export interface CodeLabRunResult {
+  /** Variables definidas al terminar la ejecución (nombre → valor). */
+  variables: Record<string, CodeLabValue>;
+  /** Líneas de salida, en orden (resultado de cada expresión suelta). */
+  logs: string[];
+  /** Última gráfica dibujada con `plot(x, y)`, si el código la generó. */
+  plot?: CodeLabPlotData;
+  /** Mensaje de error si la última ejecución falló (sintaxis o cálculo). */
+  errorMessage?: string;
+}
+
+export interface CodeLabPayload {
+  /** Código fuente tal como lo escribió el usuario. */
+  code: string;
+  /** Resultado de la última ejecución (o `undefined` si nunca se ejecutó). */
+  result?: CodeLabRunResult;
+  /** Marca de tiempo legible de la última ejecución. */
+  lastRunAt?: string;
+}
+
+// ----------------------------------------------------------------------------
+// 7. Nodo de ingeniería (unión estricta de los 5 tipos)
 // ----------------------------------------------------------------------------
 
 /** Campos comunes a cualquier nodo. */
@@ -294,6 +389,8 @@ export interface FileEngineeringNode extends EngineeringNodeBase {
   fileData: FileNodePayload;
   sketchNoteData?: undefined;
   calcLatexData?: undefined;
+  resourceLinkData?: undefined;
+  codeLabData?: undefined;
 }
 
 export interface SketchNoteEngineeringNode extends EngineeringNodeBase {
@@ -301,6 +398,8 @@ export interface SketchNoteEngineeringNode extends EngineeringNodeBase {
   sketchNoteData: SketchNotePayload;
   fileData?: undefined;
   calcLatexData?: undefined;
+  resourceLinkData?: undefined;
+  codeLabData?: undefined;
 }
 
 export interface CalcLatexEngineeringNode extends EngineeringNodeBase {
@@ -308,22 +407,46 @@ export interface CalcLatexEngineeringNode extends EngineeringNodeBase {
   calcLatexData: CalcLatexPayload;
   fileData?: undefined;
   sketchNoteData?: undefined;
+  resourceLinkData?: undefined;
+  codeLabData?: undefined;
+}
+
+export interface ResourceLinkEngineeringNode extends EngineeringNodeBase {
+  type: "resource-link-node";
+  resourceLinkData: ResourceLinkPayload;
+  fileData?: undefined;
+  sketchNoteData?: undefined;
+  calcLatexData?: undefined;
+  codeLabData?: undefined;
+}
+
+export interface CodeLabEngineeringNode extends EngineeringNodeBase {
+  type: "code-lab-node";
+  codeLabData: CodeLabPayload;
+  fileData?: undefined;
+  sketchNoteData?: undefined;
+  calcLatexData?: undefined;
+  resourceLinkData?: undefined;
 }
 
 /**
- * Un nodo es exactamente uno de los 3 tipos. Al comprobar `node.type`,
+ * Un nodo es exactamente uno de los 5 tipos. Al comprobar `node.type`,
  * TypeScript garantiza que su payload existe (sin `?` ni `undefined`).
  */
 export type EngineeringNodeData =
   | FileEngineeringNode
   | SketchNoteEngineeringNode
-  | CalcLatexEngineeringNode;
+  | CalcLatexEngineeringNode
+  | ResourceLinkEngineeringNode
+  | CodeLabEngineeringNode;
 
 /** Cambios parciales aceptados por `updateNodePayload`. */
 export type NodePayloadPatch =
   | Partial<FileNodePayload>
   | Partial<SketchNotePayload>
-  | Partial<CalcLatexPayload>;
+  | Partial<CalcLatexPayload>
+  | Partial<ResourceLinkPayload>
+  | Partial<CodeLabPayload>;
 
 /** Campos de cabecera editables con `updateNodeMeta`. */
 export type NodeMetaPatch = Partial<
@@ -345,4 +468,6 @@ export interface SpawnNodeInput {
   fileData?: Partial<FileNodePayload>;
   sketchNoteData?: Partial<SketchNotePayload>;
   calcLatexData?: Partial<CalcLatexPayload>;
+  resourceLinkData?: Partial<ResourceLinkPayload>;
+  codeLabData?: Partial<CodeLabPayload>;
 }

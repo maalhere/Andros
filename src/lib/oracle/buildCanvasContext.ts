@@ -50,6 +50,37 @@ function excerptOf(node: EngineeringNodeData): string | undefined {
     return lines.length > 0 ? clip(lines.join("\n")) : undefined;
   }
 
+  if (node.type === "resource-link-node") {
+    const data = node.resourceLinkData;
+    const lines: string[] = [`URL: ${data.url}`, `Plataforma: ${data.platform}`];
+    if (data.title) lines.push(`Título: ${data.title}`);
+    if (data.description) lines.push(`Descripción: ${data.description}`);
+    if (data.github) {
+      lines.push(
+        `Repositorio GitHub: ${data.github.owner}/${data.github.repo} · ${data.github.stars} estrellas · ${data.github.language || "sin lenguaje detectado"}`
+      );
+    }
+    if (data.paper) {
+      lines.push(`Paper: "${data.paper.title}" — ${data.paper.authors} (${data.paper.source})`);
+      if (data.paper.summary) lines.push(`Resumen: ${data.paper.summary}`);
+    }
+    return clip(lines.join("\n"));
+  }
+
+  if (node.type === "code-lab-node") {
+    const data = node.codeLabData;
+    const lines: string[] = [`Código:\n${data.code}`];
+    if (data.result?.variables && Object.keys(data.result.variables).length > 0) {
+      const vars = Object.entries(data.result.variables)
+        .map(([name, value]) => `${name}=${Array.isArray(value) ? `[${value.length} valores]` : value}`)
+        .join(", ");
+      lines.push(`Variables resultantes: ${vars}`);
+    }
+    if (data.result?.plot) lines.push(`Gráfica plot(x, y) con ${data.result.plot.x.length} puntos.`);
+    if (data.result?.errorMessage) lines.push(`Error en la última ejecución: ${data.result.errorMessage}`);
+    return clip(lines.join("\n"));
+  }
+
   return undefined;
 }
 

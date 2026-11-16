@@ -7,9 +7,11 @@ import {
   Cable,
   CheckSquare,
   FileBox,
+  Link2,
   NotebookPen,
   Sigma,
   Square,
+  Terminal,
   X,
 } from "lucide-react";
 import {
@@ -21,6 +23,8 @@ import {
 } from "@/types/workspace";
 import { SKETCH_TEXT_MAX_HEIGHT, useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { FileNodeView } from "@/components/nodes/FileNodeView";
+import { ResourceLinkNodeView } from "@/components/nodes/ResourceLinkNode";
+import { CodeLabNodeView } from "@/components/nodes/CodeLabNode";
 
 interface EngineeringNodeProps {
   node: EngineeringNodeData;
@@ -373,6 +377,10 @@ export const EngineeringNode: React.FC<EngineeringNodeProps> = ({
         return <NotebookPen className="w-4 h-4 text-andros-accent shrink-0" />;
       case "calc-latex-node":
         return <Sigma className="w-4 h-4 text-andros-accent shrink-0" />;
+      case "resource-link-node":
+        return <Link2 className="w-4 h-4 text-andros-accent shrink-0" />;
+      case "code-lab-node":
+        return <Terminal className="w-4 h-4 text-andros-accent shrink-0" />;
     }
   };
 
@@ -384,6 +392,10 @@ export const EngineeringNode: React.FC<EngineeringNodeProps> = ({
         return <SketchNotePreview node={node} />;
       case "calc-latex-node":
         return <CalcLatexPreview node={node} />;
+      case "resource-link-node":
+        return <ResourceLinkNodeView node={node} variant={variant} />;
+      case "code-lab-node":
+        return <CodeLabNodeView node={node} variant={variant} />;
     }
   };
 

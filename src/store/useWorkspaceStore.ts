@@ -7,6 +7,7 @@ import {
   CanvasStroke,
   CalcLatexPayload,
   ChecklistItem,
+  CodeLabPayload,
   ConnectionDraft,
   EngineeringNodeBase,
   EngineeringNodeData,
@@ -19,6 +20,7 @@ import {
   NodePayloadPatch,
   NoteTextBlock,
   PortPosition,
+  ResourceLinkPayload,
   SketchNoteEngineeringNode,
   SketchNotePayload,
   SpawnNodeInput,
@@ -224,7 +226,9 @@ export function resolveNodeArchetype(
   if (
     type === "file-node" ||
     type === "sketch-note-node" ||
-    type === "calc-latex-node"
+    type === "calc-latex-node" ||
+    type === "resource-link-node" ||
+    type === "code-lab-node"
   ) {
     return type;
   }
@@ -235,18 +239,24 @@ export const NODE_ARCHETYPE_LABELS: Record<NodeArchetype, string> = {
   "file-node": "Archivo",
   "sketch-note-node": "Cuaderno",
   "calc-latex-node": "Cálculo",
+  "resource-link-node": "Enlace / Fuente",
+  "code-lab-node": "Código / Cálculo",
 };
 
 const DEFAULT_TITLES: Record<NodeArchetype, string> = {
   "file-node": "Nuevo Archivo de Ingeniería",
   "sketch-note-node": "Nuevo Cuaderno Técnico",
   "calc-latex-node": "Nueva Hoja de Cálculo",
+  "resource-link-node": "Nuevo Enlace / Fuente",
+  "code-lab-node": "Nuevo Laboratorio de Código",
 };
 
 const DEFAULT_TAGS: Record<NodeArchetype, string> = {
   "file-node": "FILE",
   "sketch-note-node": "NOTE-v1",
   "calc-latex-node": "CALC-v1",
+  "resource-link-node": "LINK",
+  "code-lab-node": "CODE-v1",
 };
 
 /** Título que recibe un nodo de archivo recién creado (aún sin archivo). */
@@ -286,6 +296,20 @@ export function createEmptyCalcLatexPayload(): CalcLatexPayload {
     latexEquations: [],
     gridCells: {},
     gridSize: { rows: 6, columns: 3 },
+  };
+}
+
+export function createEmptyResourceLinkPayload(): ResourceLinkPayload {
+  return {
+    url: "",
+    platform: "generic",
+    status: "idle",
+  };
+}
+
+export function createEmptyCodeLabPayload(): CodeLabPayload {
+  return {
+    code: "",
   };
 }
 
@@ -414,15 +438,35 @@ function buildNodeFromInput(
       },
     };
   }
+  if (archetype === "calc-latex-node") {
+    return {
+      ...base,
+      type: "calc-latex-node",
+      calcLatexData: {
+        ...createEmptyCalcLatexPayload(),
+        ...(partial?.summary ? { justificationText: partial.summary } : {}),
+        ...partial?.calcLatexData,
+      },
+      summary: undefined,
+    };
+  }
+  if (archetype === "resource-link-node") {
+    return {
+      ...base,
+      type: "resource-link-node",
+      resourceLinkData: {
+        ...createEmptyResourceLinkPayload(),
+        ...partial?.resourceLinkData,
+      },
+    };
+  }
   return {
     ...base,
-    type: "calc-latex-node",
-    calcLatexData: {
-      ...createEmptyCalcLatexPayload(),
-      ...(partial?.summary ? { justificationText: partial.summary } : {}),
-      ...partial?.calcLatexData,
+    type: "code-lab-node",
+    codeLabData: {
+      ...createEmptyCodeLabPayload(),
+      ...partial?.codeLabData,
     },
-    summary: undefined,
   };
 }
 
@@ -595,6 +639,12 @@ function noteFullText(node: EngineeringNodeData): string {
     ].join("\n");
   }
   if (node.type === "calc-latex-node") return node.calcLatexData.justificationText;
+  if (node.type === "resource-link-node") {
+    return [node.resourceLinkData.title, node.resourceLinkData.description, node.resourceLinkData.url]
+      .filter(Boolean)
+      .join("\n");
+  }
+  if (node.type === "code-lab-node") return node.codeLabData.code;
   return node.summary ?? "";
 }
 
@@ -602,6 +652,8 @@ function noteFullText(node: EngineeringNodeData): string {
 function defaultHumanZone(node: EngineeringNodeData): HumanLayoutZone {
   if (node.type === "file-node") return 1;
   if (node.type === "calc-latex-node") return 3;
+  if (node.type === "resource-link-node") return 3;
+  if (node.type === "code-lab-node") return 3;
   const header = `${node.title} ${node.codeTag}`;
   if (REFERENCE_PATTERN.test(header)) return 3;
   const text = noteFullText(node);
@@ -646,7 +698,7 @@ function estimateNodeHeight(node: EngineeringNodeData): number {
       height += 12 + (288 * data.canvasSize.height) / Math.max(1, data.canvasSize.width);
     }
     height += data.checklistItems.length > 0 ? 48 : 26;
-  } else {
+  } else if (node.type === "calc-latex-node") {
     const data = node.calcLatexData;
     const cells = Object.keys(data.gridCells).length;
     if (cells === 0 && data.latexEquations.length === 0) {
@@ -656,6 +708,13 @@ function estimateNodeHeight(node: EngineeringNodeData): number {
       if (cells > 0) height += Math.min(data.gridSize.rows, 6) * 23 + 4;
       height += Math.min(data.latexEquations.length, 2) * 46;
     }
+  } else if (node.type === "resource-link-node") {
+    height += node.resourceLinkData.platform === "youtube" ? 220 : 150;
+  } else {
+    // code-lab-node
+    const data = node.codeLabData;
+    height += Math.min(220, 60 + Math.ceil(data.code.length / CHARS_PER_LINE) * LINE);
+    if (data.result?.plot) height += 180;
   }
   return Math.round(height);
 }
@@ -1175,6 +1234,24 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
               calcLatexData: {
                 ...node.calcLatexData,
                 ...(patch as Partial<CalcLatexPayload>),
+              },
+            };
+          case "resource-link-node":
+            return {
+              ...node,
+              updatedAt: "Ahora mismo",
+              resourceLinkData: {
+                ...node.resourceLinkData,
+                ...(patch as Partial<ResourceLinkPayload>),
+              },
+            };
+          case "code-lab-node":
+            return {
+              ...node,
+              updatedAt: "Ahora mismo",
+              codeLabData: {
+                ...node.codeLabData,
+                ...(patch as Partial<CodeLabPayload>),
               },
             };
         }

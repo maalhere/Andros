@@ -10,11 +10,14 @@ import { FloatingHudDock } from "@/components/desktop/FloatingHudDock";
 import { TacticalCardStack } from "@/components/mobile/TacticalCardStack";
 import { ThumbZoneBar } from "@/components/mobile/ThumbZoneBar";
 import { MobileBottomSheet } from "@/components/mobile/MobileBottomSheet";
+import { LandingOverlay } from "@/components/landing/LandingOverlay";
+import { useLandingStore } from "@/store/useLandingStore";
 
 export default function AndrosWorkspacePage() {
   const { isMobile, isMounted } = useDeviceLayout();
   // Login con Google + guardado automático en Supabase (no hace nada en modo local).
   useCloudSync();
+  const showLanding = useLandingStore((s) => s.phase !== "workspace");
 
   if (!isMounted) {
     return <div className="w-screen h-screen canvas-grid" />;
@@ -39,6 +42,9 @@ export default function AndrosWorkspacePage() {
           <OracleModal />
         </>
       )}
+
+      {/* Portada inmersiva: primera visita o al pulsar el logo de Andros */}
+      {showLanding && <LandingOverlay isMobile={isMobile} />}
     </div>
   );
 }
