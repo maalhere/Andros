@@ -81,6 +81,25 @@ const PROFILES: PrintProfile[] = [
   },
 ];
 
+/**
+ * Materiales sugeridos por perfil. Preparado para patrocinios técnicos o
+ * enlaces de afiliado: basta con cambiar `href` por el enlace real.
+ */
+const SPONSORED_MATERIALS: Record<ProfileId, { name: string; note: string; href: string }[]> = {
+  prototype: [
+    { name: "PLA estándar 1.75 mm", note: "económico y fácil", href: "https://www.google.com/search?q=filamento+PLA+1.75mm" },
+    { name: "PLA Silk", note: "acabado brillante", href: "https://www.google.com/search?q=filamento+PLA+silk" },
+  ],
+  strong: [
+    { name: "PETG 1.75 mm", note: "resistente y flexible", href: "https://www.google.com/search?q=filamento+PETG+1.75mm" },
+    { name: "PLA+ reforzado", note: "más firme que el PLA", href: "https://www.google.com/search?q=filamento+PLA%2B" },
+  ],
+  detail: [
+    { name: "PLA de precisión ±0.02 mm", note: "capas finas limpias", href: "https://www.google.com/search?q=filamento+PLA+precision+0.02" },
+    { name: "Resina estándar", note: "si tu impresora es de resina", href: "https://www.google.com/search?q=resina+3d+estandar" },
+  ],
+};
+
 type SlicerId = "bambu" | "prusa" | "cura";
 
 const SLICERS: { id: SlicerId; name: string; scheme: string }[] = [
@@ -377,6 +396,43 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
                 </li>
               </ol>
             </section>
+
+            {/* ---------------- MATERIALES RECOMENDADOS (patrocinios / afiliados) ---------------- */}
+            {profile && (
+              <section className="rounded-2xl border border-dashed border-andros-border px-4 py-3 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-xs font-semibold text-andros-primary">
+                    Filamentos y materiales recomendados
+                  </h3>
+                  <span className="text-[10px] uppercase tracking-wider text-andros-muted">
+                    Publicidad
+                  </span>
+                </div>
+                <ul className="space-y-1.5">
+                  {SPONSORED_MATERIALS[profile.id].map((item) => (
+                    <li key={item.name} className="flex items-center justify-between gap-3 text-xs">
+                      <span className="text-andros-primary">
+                        {item.name}
+                        <span className="text-andros-muted"> · {item.note}</span>
+                      </span>
+                      {/* Sustituye `href` por el enlace de afiliado o patrocinador real. */}
+                      <a
+                        href={item.href}
+                        target="_blank"
+                        rel="sponsored noopener noreferrer"
+                        className="shrink-0 text-andros-accent hover:underline"
+                      >
+                        Ver
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-[10px] text-andros-muted">
+                  Algunos enlaces pueden ser de afiliado: nos ayudan a mantener Andros sin costo
+                  extra para ti.
+                </p>
+              </section>
+            )}
 
             {/* ---------------- PASO 3 ---------------- */}
             <section className={`space-y-3 ${lockedStep}`} aria-disabled={!profile}>

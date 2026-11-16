@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { Download, Moon, Settings, Sun, X } from "lucide-react";
+import { Download, Eraser, Moon, RotateCcw, Settings, Sun, Trash2, X } from "lucide-react";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import {
   useSettingsStore,
@@ -98,6 +98,120 @@ const Switch: React.FC<{ checked: boolean; onChange: (v: boolean) => void; label
     />
   </button>
 );
+
+// ----------------------------------------------------------------------------
+// Limpieza del espacio de trabajo (con confirmación en dos pasos)
+// ----------------------------------------------------------------------------
+
+type CleanAction = "ink" | "orphans" | "reset";
+
+const CLEAN_COPY: Record<CleanAction, { label: string; confirm: string; danger: boolean }> = {
+  ink: {
+    label: "Limpiar solo trazos de tinta",
+    confirm: "Se borrarán todos los dibujos a mano alzada (se puede deshacer con Ctrl+Z).",
+    danger: false,
+  },
+  orphans: {
+    label: "Eliminar nodos desconectados",
+    confirm: "Se borrarán los nodos que no tienen ningún cable.",
+    danger: true,
+  },
+  reset: {
+    label: "Resetear todo el lienzo",
+    confirm: "Se borrarán TODOS los nodos, cables y trazos de este espacio. No se puede deshacer.",
+    danger: true,
+  },
+};
+
+const ClearWorkspaceSection: React.FC = () => {
+  const [pending, setPending] = useState<CleanAction | null>(null);
+  const [result, setResult] = useState<string | null>(null);
+  const strokeCount = useWorkspaceStore((s) => s.canvasStrokes.length);
+  const nodeCount = useWorkspaceStore((s) => s.nodes.length);
+
+  const run = (action: CleanAction) => {
+    const ws = useWorkspaceStore.getState();
+    if (action === "ink") {
+      const n = ws.clearInkStrokes();
+      setResult(n ? `Se borraron ${n} trazo(s) de tinta.` : "No había trazos de tinta.");
+    } else if (action === "orphans") {
+      const n = ws.removeOrphanNodes();
+      setResult(n ? `Se eliminaron ${n} nodo(s) desconectado(s).` : "No hay nodos desconectados.");
+    } else {
+      ws.resetWorkspace();
+      setResult("Lienzo reseteado. Los cambios se guardan en la nube automáticamente.");
+    }
+    setPending(null);
+  };
+
+  return (
+    <Section
+      title="Limpiar espacio de trabajo"
+      hint={`Este espacio tiene ${nodeCount} nodo(s) y ${strokeCount} trazo(s). Con sesión, la limpieza se sincroniza con Supabase.`}
+    >
+      <div className="space-y-1.5">
+        {(Object.keys(CLEAN_COPY) as CleanAction[]).map((action) => {
+          const copy = CLEAN_COPY[action];
+          const isPending = pending === action;
+          return (
+            <div key={action} className="space-y-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setResult(null);
+                  setPending(isPending ? null : action);
+                }}
+                className={`w-full min-h-[40px] px-3 rounded-xl border text-xs font-medium flex items-center justify-center gap-2 active:scale-[0.98] spring-micro ${
+                  copy.danger
+                    ? "border-red-500/40 text-red-500 hover:bg-red-500/10"
+                    : "border-andros-border text-andros-primary hover:bg-andros-border/40"
+                }`}
+              >
+                {action === "reset" ? (
+                  <RotateCcw className="w-3.5 h-3.5" />
+                ) : action === "ink" ? (
+                  <Eraser className="w-3.5 h-3.5" />
+                ) : (
+                  <Trash2 className="w-3.5 h-3.5" />
+                )}
+                {copy.label}
+              </button>
+              {isPending && (
+                <div
+                  role="alertdialog"
+                  className="rounded-xl border border-red-500/40 bg-red-500/5 px-3 py-2.5 space-y-2"
+                >
+                  <p className="text-[11px] text-andros-primary">{copy.confirm}</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPending(null)}
+                      className="min-h-[36px] rounded-lg border border-andros-border text-xs text-andros-muted hover:text-andros-primary"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => run(action)}
+                      className="min-h-[36px] rounded-lg bg-red-500 text-white text-xs font-semibold hover:opacity-90"
+                    >
+                      Sí, continuar
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {result && (
+        <p role="status" className="text-[11px] text-andros-success">
+          {result}
+        </p>
+      )}
+    </Section>
+  );
+};
 
 // ----------------------------------------------------------------------------
 // Modal
@@ -268,6 +382,8 @@ export const QualityOfLifeModal: React.FC = () => {
                 Exportar respaldo JSON
               </button>
             </Section>
+
+            <ClearWorkspaceSection />
 
             <p className="text-[10px] text-andros-muted text-center">
               Tus ajustes se guardan en este navegador y, con sesión, en tu perfil.

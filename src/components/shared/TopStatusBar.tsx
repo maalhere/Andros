@@ -1,7 +1,8 @@
 "use client";
 
 import React from "react";
-import { RotateCcw, Settings } from "lucide-react";
+import { Crown, RotateCcw, Settings, Swords } from "lucide-react";
+import { useMarketStore } from "@/store/useMarketStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { ThemeToggle } from "./ThemeToggle";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
@@ -20,6 +21,8 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({ isMobile }) => {
   const resetCanvasView = useWorkspaceStore((s) => s.resetCanvasView);
   const isCloudActive = useCloudStore((s) => s.user !== null && s.status !== "error");
   const setSettingsOpen = useSettingsStore((s) => s.setModalOpen);
+  const setArenaOpen = useMarketStore((s) => s.setArenaOpen);
+  const setUpgradeOpen = useMarketStore((s) => s.setUpgradeOpen);
   const openLanding =useLandingStore((s) => s.openLanding);
   const isLandingDone = useLandingStore((s) => s.phase === "workspace");
 
@@ -74,6 +77,28 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({ isMobile }) => {
             <span>{nodesCount} nodos</span>
           </button>
         )}
+
+        <button
+          type="button"
+          onClick={() => setArenaOpen(true)}
+          aria-label="Abrir Arena y Empleos"
+          title="Arena & Empleos"
+          className="min-h-[40px] md:min-h-0 px-2.5 py-1.5 rounded-xl bg-andros-surface backdrop-blur-md border border-andros-border text-[11px] font-medium text-andros-muted hover:text-andros-primary shadow-sm active:scale-95 spring-micro flex items-center gap-1.5"
+        >
+          <Swords className="w-3.5 h-3.5" />
+          {!isMobile && <span>Arena &amp; Empleos</span>}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setUpgradeOpen(true)}
+          aria-label="Ver planes y suscripciones"
+          title="Andros Pro"
+          className="min-h-[40px] md:min-h-0 px-2.5 py-1.5 rounded-xl bg-andros-accent text-white text-[11px] font-semibold shadow-sm active:scale-95 spring-micro flex items-center gap-1.5 hover:opacity-90"
+        >
+          <Crown className="w-3.5 h-3.5" />
+          {!isMobile && <span>Pro</span>}
+        </button>
 
         <ThemeToggle />
 

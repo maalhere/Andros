@@ -142,6 +142,14 @@ interface WorkspaceState {
   undoCanvasInk: () => void;
   /** Reemplaza todos los trazos (lo usa la nube al cargar el workspace). */
   hydrateCanvasStrokes: (strokes: CanvasStroke[]) => void;
+
+  // --- Limpieza del espacio de trabajo ("Clear Workspace") ---
+  /** Borra todos los trazos de tinta (se puede deshacer con "Deshacer"). Devuelve cuántos borró. */
+  clearInkStrokes: () => number;
+  /** Elimina los nodos sin ninguna conexión. Devuelve cuántos borró. */
+  removeOrphanNodes: () => number;
+  /** Deja el lienzo completamente vacío: nodos, cables y tinta. */
+  resetWorkspace: () => void;
   setOracleModalOpen: (isOpen: boolean) => void;
 
   // Acciones Exclusivas de Ergonomía Móvil
@@ -1732,6 +1740,64 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }),
 
   hydrateCanvasStrokes: (strokes) => set({ canvasStrokes: strokes, inkHistory: [] }),
+
+  // Los cambios de nodos/cables/tinta los detecta `useCloudSync` y los guarda
+  // en Supabase solo (borra las filas y los archivos que ya no se usan).
+  clearInkStrokes: () => {
+    const count = get().canvasStrokes.length;
+    if (count === 0) return 0;
+    set((state) => {
+      const entry: InkHistoryEntry = {
+        kind: "erase",
+        strokes: state.canvasStrokes.map((stroke, index) => ({ stroke, index })),
+      };
+      return {
+        canvasStrokes: [],
+        inkHistory: [...state.inkHistory, entry].slice(-INK_HISTORY_LIMIT),
+      };
+    });
+    return count;
+  },
+
+  removeOrphanNodes: () => {
+    const { nodes, connections } = get();
+    const connected = new Set<string>();
+    for (const c of connections) {
+      connected.add(c.fromNodeId);
+      connected.add(c.toNodeId);
+    }
+    const orphans = nodes.filter((n) => !connected.has(n.id));
+    if (orphans.length === 0) return 0;
+    const orphanIds = new Set(orphans.map((n) => n.id));
+    for (const node of orphans) {
+      if (node.type === "file-node") revokeLocalFileUrl(node.fileData.downloadUrl);
+    }
+    set((state) => ({
+      nodes: state.nodes.filter((n) => !orphanIds.has(n.id)),
+      selectedNodeId:
+        state.selectedNodeId && orphanIds.has(state.selectedNodeId) ? null : state.selectedNodeId,
+      connectingFrom:
+        state.connectingFrom && orphanIds.has(state.connectingFrom.nodeId)
+          ? null
+          : state.connectingFrom,
+    }));
+    return orphans.length;
+  },
+
+  resetWorkspace: () => {
+    for (const node of get().nodes) {
+      if (node.type === "file-node") revokeLocalFileUrl(node.fileData.downloadUrl);
+    }
+    set({
+      nodes: [],
+      connections: [],
+      canvasStrokes: [],
+      inkHistory: [],
+      selectedNodeId: null,
+      selectedConnectionId: null,
+      connectingFrom: null,
+    });
+  },
 
   setOracleModalOpen: (isOpen) =>
     set({

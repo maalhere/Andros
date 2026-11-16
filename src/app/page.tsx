@@ -6,6 +6,8 @@ import { useCloudSync } from "@/hooks/useCloudSync";
 import { useSettingsSync } from "@/hooks/useSettingsSync";
 import { QualityOfLifeModal } from "@/components/settings/QualityOfLifeModal";
 import { WorkspaceManagerDrawer } from "@/components/workspaces/WorkspaceManagerDrawer";
+import { ArenaModal } from "@/components/arena/ArenaModal";
+import { UpgradeModal } from "@/components/shared/UpgradeModal";
 import { TopStatusBar } from "@/components/shared/TopStatusBar";
 import { OracleModal } from "@/components/shared/OracleModal";
 import { SpatialCanvas } from "@/components/desktop/SpatialCanvas";
@@ -33,6 +35,8 @@ export default function AndrosWorkspacePage() {
       <TopStatusBar isMobile={isMobile} />
       <QualityOfLifeModal />
       <WorkspaceManagerDrawer />
+      <ArenaModal />
+      <UpgradeModal />
 
       {isMobile ? (
         /* MODO TELÉFONO (< 768px): Tactile Deck & Bottom Sheet Mode */
