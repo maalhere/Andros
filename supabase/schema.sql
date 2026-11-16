@@ -96,6 +96,10 @@ create index if not exists workspaces_owner_idx on public.workspaces (owner_id);
 alter table public.workspaces
   add column if not exists canvas_strokes jsonb not null default '[]'::jsonb;
 
+-- FASE 3: carpetas de proyectos. Cadena vacía = sin carpeta (raíz).
+alter table public.workspaces
+  add column if not exists folder text not null default '';
+
 drop trigger if exists workspaces_set_updated_at on public.workspaces;
 create trigger workspaces_set_updated_at
   before update on public.workspaces

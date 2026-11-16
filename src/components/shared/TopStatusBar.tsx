@@ -8,6 +8,7 @@ import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { useCloudStore } from "@/store/useCloudStore";
 import { useLandingStore } from "@/store/useLandingStore";
 import { GoogleAuthButton } from "@/components/auth/GoogleAuthButton";
+import { WorkspaceQuickSwitcher } from "@/components/workspaces/WorkspaceQuickSwitcher";
 import { AndrosMark } from "@/components/brand/AndrosMark";
 
 interface TopStatusBarProps {
@@ -51,9 +52,7 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({ isMobile }) => {
             Andros
           </button>
           <span className="text-andros-muted">/</span>
-          <span className="font-mono text-andros-muted text-[11px] truncate max-w-[110px] sm:max-w-none">
-            workspace-delta-01
-          </span>
+          <WorkspaceQuickSwitcher />
         </div>
         <div
           className={`w-1.5 h-1.5 rounded-full ml-0.5 ${

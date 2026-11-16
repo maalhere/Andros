@@ -5,6 +5,7 @@ import { useDeviceLayout } from "@/hooks/useDeviceLayout";
 import { useCloudSync } from "@/hooks/useCloudSync";
 import { useSettingsSync } from "@/hooks/useSettingsSync";
 import { QualityOfLifeModal } from "@/components/settings/QualityOfLifeModal";
+import { WorkspaceManagerDrawer } from "@/components/workspaces/WorkspaceManagerDrawer";
 import { TopStatusBar } from "@/components/shared/TopStatusBar";
 import { OracleModal } from "@/components/shared/OracleModal";
 import { SpatialCanvas } from "@/components/desktop/SpatialCanvas";
@@ -31,6 +32,7 @@ export default function AndrosWorkspacePage() {
     <div className="relative w-full min-h-screen overflow-hidden">
       <TopStatusBar isMobile={isMobile} />
       <QualityOfLifeModal />
+      <WorkspaceManagerDrawer />
 
       {isMobile ? (
         /* MODO TELÉFONO (< 768px): Tactile Deck & Bottom Sheet Mode */

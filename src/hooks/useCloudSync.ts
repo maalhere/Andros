@@ -32,6 +32,10 @@ import {
   useWorkspaceStore,
 } from "@/store/useWorkspaceStore";
 import { sanitizeCanvasStrokes } from "@/lib/canvas/inkGeometry";
+import {
+  useWorkspaceManagerStore,
+  type WorkspaceSummary,
+} from "@/store/useWorkspaceManagerStore";
 import type {
   CalcLatexPayload,
   CodeLabPayload,
@@ -45,6 +49,7 @@ import type {
   SketchNotePayload,
   TelemetryMetric,
 } from "@/types/workspace";
+import type { CanvasStroke } from "@/types/workspace";
 
 const SAVE_DEBOUNCE_MS = 1200;
 /** Duración de los enlaces de descarga firmados (7 días). */
@@ -247,6 +252,65 @@ function rowToConnection(row: ConnectionRow): NodeConnection | null {
   };
 }
 
+/** Datos con los que se abre un espacio nuevo (por ejemplo, un .andros.zip). */
+export interface WorkspaceSeed {
+  nodes: EngineeringNodeData[];
+  connections: NodeConnection[];
+  strokes: CanvasStroke[];
+}
+
+const NODE_DATA_KEY: Record<string, string> = {
+  "file-node": "fileData",
+  "sketch-note-node": "sketchNoteData",
+  "calc-latex-node": "calcLatexData",
+  "resource-link-node": "resourceLinkData",
+  "code-lab-node": "codeLabData",
+};
+
+/** Valida un nodo leído de un archivo externo (.andros.zip) y completa lo que falte. */
+export function parseImportedNode(raw: unknown): EngineeringNodeData | null {
+  if (!raw || typeof raw !== "object") return null;
+  const n = raw as Record<string, unknown>;
+  const dataKey = typeof n.type === "string" ? NODE_DATA_KEY[n.type] : undefined;
+  if (!dataKey || typeof n.id !== "string" || !n.id) return null;
+  const pos = (n.position ?? {}) as { x?: unknown; y?: unknown };
+  const text = (v: unknown) => (typeof v === "string" ? v : null);
+  return rowToNode({
+    workspace_id: "",
+    owner_id: "",
+    sort_order: 0,
+    id: n.id,
+    type: n.type as NodeArchetype,
+    title: text(n.title) ?? "",
+    code_tag: text(n.codeTag) ?? "",
+    summary: text(n.summary),
+    action_label: text(n.actionLabel),
+    metrics: Array.isArray(n.metrics) ? (n.metrics as TelemetryMetric[]) : null,
+    position_x: Number(pos.x) || 0,
+    position_y: Number(pos.y) || 0,
+    payload: n[dataKey],
+    updated_label: text(n.updatedAt),
+  });
+}
+
+/** Valida un cable leído de un archivo externo (.andros.zip). */
+export function parseImportedConnection(raw: unknown): NodeConnection | null {
+  if (!raw || typeof raw !== "object") return null;
+  const c = raw as Record<string, unknown>;
+  if (typeof c.id !== "string" || typeof c.fromNodeId !== "string" || typeof c.toNodeId !== "string")
+    return null;
+  return rowToConnection({
+    workspace_id: "",
+    owner_id: "",
+    id: c.id,
+    from_node_id: c.fromNodeId,
+    to_node_id: c.toNodeId,
+    from_port: c.fromPort as PortPosition,
+    to_port: c.toPort as PortPosition,
+    label: typeof c.label === "string" ? c.label : null,
+  });
+}
+
 /** Orden estable: el nodo más nuevo (primero del arreglo) tiene el número más alto. */
 function buildNodeRows(nodes: EngineeringNodeData[], workspaceId: string, ownerId: string) {
   return nodes.map((node, index) =>
@@ -306,7 +370,36 @@ interface CloudEngine {
   stop: () => void;
   /** Vuelve a intentar la subida fallida del archivo de un nodo. */
   retryUpload: (nodeId: string) => void;
+  /** Guarda el espacio actual y abre otro (o uno nuevo con `seed`). */
+  openWorkspace: (id: string, seed?: WorkspaceSeed) => Promise<void>;
+  createWorkspace: (name: string, folder: string, seed?: WorkspaceSeed) => Promise<string | null>;
+  renameWorkspace: (id: string, name: string) => Promise<void>;
+  moveWorkspace: (id: string, folder: string) => Promise<void>;
+  renameFolder: (from: string, to: string) => Promise<void>;
+  duplicateWorkspace: (id: string) => Promise<void>;
+  deleteWorkspace: (id: string) => Promise<void>;
 }
+
+const LAST_WORKSPACE_KEY = "andros:last-workspace:";
+
+function readLastWorkspace(uid: string): string | null {
+  try {
+    return window.localStorage.getItem(LAST_WORKSPACE_KEY + uid);
+  } catch {
+    return null;
+  }
+}
+
+function writeLastWorkspace(uid: string, id: string): void {
+  try {
+    window.localStorage.setItem(LAST_WORKSPACE_KEY + uid, id);
+  } catch {
+    /* sin localStorage: se abre el primer espacio */
+  }
+}
+
+const FOLDERS_SETUP_HINT =
+  "Las carpetas necesitan una columna nueva. Ejecuta de nuevo supabase/schema.sql en el SQL Editor de Supabase";
 
 let activeEngine: CloudEngine | null = null;
 
@@ -643,21 +736,52 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
       })
     );
 
-  const loadWorkspace = async (uid: string) => {
+  /** Lista los espacios del usuario (con carpeta si la columna existe). */
+  const refreshWorkspaceList = async (uid: string): Promise<WorkspaceSummary[]> => {
+    const toSummary = (r: Record<string, unknown>): WorkspaceSummary => ({
+      id: String(r.id),
+      name: typeof r.name === "string" && r.name ? r.name : "Sin nombre",
+      folder: typeof r.folder === "string" ? r.folder : "",
+      createdAt: String(r.created_at ?? ""),
+      updatedAt: String(r.updated_at ?? ""),
+    });
+    let foldersSupported = true;
+    let result: { data: unknown; error: unknown } = await supabase
+      .from("workspaces")
+      .select("id, name, folder, created_at, updated_at")
+      .eq("owner_id", uid)
+      .order("created_at", { ascending: true });
+    if (result.error) {
+      foldersSupported = false;
+      result = await supabase
+        .from("workspaces")
+        .select("id, name, created_at, updated_at")
+        .eq("owner_id", uid)
+        .order("created_at", { ascending: true });
+    }
+    if (result.error) throw result.error;
+    const list = ((result.data ?? []) as unknown as Record<string, unknown>[]).map(toSummary);
+    useWorkspaceManagerStore.getState().setWorkspaces(list, foldersSupported);
+    return list;
+  };
+
+  const loadWorkspace = async (
+    uid: string,
+    opts: { workspaceId?: string; seed?: WorkspaceSeed } = {}
+  ) => {
     const ep = epoch;
     cloud().setStatus("loading", null);
 
     try {
-      // 1. Primer workspace del usuario (o uno nuevo).
-      const { data: existing, error: wsError } = await supabase
-        .from("workspaces")
-        .select("id")
-        .eq("owner_id", uid)
-        .order("created_at", { ascending: true })
-        .limit(1);
-      if (wsError) throw wsError;
-
-      let wsId = (existing?.[0] as { id: string } | undefined)?.id ?? null;
+      // 1. Espacio pedido, último usado, o el primero del usuario (o uno nuevo).
+      const list = await refreshWorkspaceList(uid);
+      let wsId: string | null = null;
+      if (opts.workspaceId && list.some((w) => w.id === opts.workspaceId)) {
+        wsId = opts.workspaceId;
+      } else {
+        const last = readLastWorkspace(uid);
+        wsId = (last && list.find((w) => w.id === last)?.id) || list[0]?.id || null;
+      }
       if (!wsId) {
         const { data: created, error: createError } = await supabase
           .from("workspaces")
@@ -666,7 +790,9 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
           .single();
         if (createError) throw createError;
         wsId = (created as { id: string }).id;
+        await refreshWorkspaceList(uid);
       }
+      writeLastWorkspace(uid, wsId);
 
       // 2. Nodos, cables y trazos de tinta guardados.
       const [nodesResult, connectionsResult, strokesResult] = await Promise.all([
@@ -696,12 +822,21 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
         : [];
 
       if (nodeRows.length === 0 && connectionRows.length === 0 && loadedStrokes.length === 0) {
-        // Primera vez: el lienzo local actual se convierte en el lienzo en la nube.
         nodeSnapshot = new Map();
         connectionSnapshot = new Map();
         strokesSnapshot = strokesAvailable ? "[]" : null;
         syncedStoragePaths = new Set();
         ready = true;
+        if (opts.seed) {
+          // Espacio nuevo con contenido (importado de un .andros.zip).
+          useWorkspaceStore.getState().hydrateWorkspace(opts.seed.nodes, opts.seed.connections);
+          useWorkspaceStore.getState().hydrateCanvasStrokes(opts.seed.strokes);
+        } else if (opts.workspaceId) {
+          // Espacio vacío abierto desde el gestor: lienzo en blanco.
+          useWorkspaceStore.getState().hydrateWorkspace([], []);
+          useWorkspaceStore.getState().hydrateCanvasStrokes([]);
+        }
+        // Si no, es la primera vez: el lienzo local actual pasa a ser el de la nube.
         await syncNow();
         queueUploads();
         return;
@@ -751,6 +886,233 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
         `No se pudo cargar tu lienzo de la nube (${describeError(error)}). Recarga la página para reintentar.`
       );
     }
+  };
+
+  // --------------------------------------------------------------------------
+  // Gestor de espacios: abrir, crear, renombrar, mover, duplicar y borrar
+  // --------------------------------------------------------------------------
+
+  const manager = useWorkspaceManagerStore.getState;
+
+  /** Envuelve una operación: marca "ocupado" y muestra el error si falla. */
+  const guarded = async <T,>(op: () => Promise<T>): Promise<T | null> => {
+    manager().setBusy(true);
+    manager().setMessage(null);
+    try {
+      return await op();
+    } catch (error) {
+      manager().setMessage({ kind: "error", text: describeError(error) });
+      return null;
+    } finally {
+      manager().setBusy(false);
+    }
+  };
+
+  const openWorkspaceRaw = async (id: string, seed?: WorkspaceSeed): Promise<void> => {
+    const uid = userId;
+    if (!uid || disposed) return;
+    if (id === workspaceId && !seed) return;
+    // Lo pendiente del espacio actual se guarda antes de salir de él.
+    if (ready) {
+      await uploadChain;
+      await syncNow();
+    }
+    resetSession();
+    userId = uid;
+    await loadWorkspace(uid, { workspaceId: id, seed });
+  };
+
+  const createWorkspace = async (
+    name: string,
+    folder: string,
+    seed?: WorkspaceSeed
+  ): Promise<string | null> =>
+    guarded(async () => {
+      const uid = userId;
+      if (!uid) throw new Error("Inicia sesión para crear espacios.");
+      const row: Record<string, unknown> = {
+        owner_id: uid,
+        name: name.trim() || "Nuevo espacio",
+      };
+      if (folder.trim()) {
+        if (!manager().foldersSupported) throw new Error(FOLDERS_SETUP_HINT);
+        row.folder = folder.trim();
+      }
+      const { data, error } = await supabase.from("workspaces").insert(row).select("id").single();
+      if (error) throw error;
+      const id = (data as { id: string }).id;
+      await openWorkspaceRaw(id, seed ?? { nodes: [], connections: [], strokes: [] });
+      return id;
+    });
+
+  const renameWorkspace = async (id: string, name: string): Promise<void> => {
+    await guarded(async () => {
+      const clean = name.trim();
+      if (!clean) return;
+      const { error } = await supabase.from("workspaces").update({ name: clean }).eq("id", id);
+      if (error) throw error;
+      if (userId) await refreshWorkspaceList(userId);
+    });
+  };
+
+  const moveWorkspace = async (id: string, folder: string): Promise<void> => {
+    await guarded(async () => {
+      if (!manager().foldersSupported) throw new Error(FOLDERS_SETUP_HINT);
+      const { error } = await supabase
+        .from("workspaces")
+        .update({ folder: folder.trim() })
+        .eq("id", id);
+      if (error) throw error;
+      if (userId) await refreshWorkspaceList(userId);
+    });
+  };
+
+  const renameFolder = async (from: string, to: string): Promise<void> => {
+    await guarded(async () => {
+      if (!userId) return;
+      if (!manager().foldersSupported) throw new Error(FOLDERS_SETUP_HINT);
+      const { error } = await supabase
+        .from("workspaces")
+        .update({ folder: to.trim() })
+        .eq("owner_id", userId)
+        .eq("folder", from);
+      if (error) throw error;
+      await refreshWorkspaceList(userId);
+    });
+  };
+
+  const duplicateWorkspace = async (id: string): Promise<void> => {
+    await guarded(async () => {
+      const uid = userId;
+      if (!uid) return;
+      if (id === workspaceId && ready) {
+        await uploadChain;
+        await syncNow();
+      }
+      const source = manager().workspaces.find((w) => w.id === id);
+      const [nodesResult, connectionsResult, strokesResult] = await Promise.all([
+        supabase.from("workspace_nodes").select(NODE_COLUMNS).eq("workspace_id", id),
+        supabase.from("workspace_connections").select(CONNECTION_COLUMNS).eq("workspace_id", id),
+        supabase.from("workspaces").select("canvas_strokes").eq("id", id).maybeSingle(),
+      ]);
+      if (nodesResult.error) throw nodesResult.error;
+      if (connectionsResult.error) throw connectionsResult.error;
+
+      const insertRow: Record<string, unknown> = {
+        owner_id: uid,
+        name: (source?.name ?? "Espacio") + " (copia)",
+      };
+      if (source?.folder && manager().foldersSupported) insertRow.folder = source.folder;
+      if (!strokesResult.error) {
+        insertRow.canvas_strokes =
+          (strokesResult.data as { canvas_strokes?: unknown } | null)?.canvas_strokes ?? [];
+      }
+      const { data: created, error: createError } = await supabase
+        .from("workspaces")
+        .insert(insertRow)
+        .select("id")
+        .single();
+      if (createError) throw createError;
+      const newId = (created as { id: string }).id;
+
+      try {
+        const nodeRows = (nodesResult.data ?? []) as unknown as NodeRow[];
+        const newNodes: NodeRow[] = [];
+        for (const row of nodeRows) {
+          const copy: NodeRow = { ...row, workspace_id: newId, owner_id: uid };
+          if (row.type === "file-node" && row.payload && typeof row.payload === "object") {
+            const payload = { ...(row.payload as FileNodePayload) };
+            if (payload.storagePath) {
+              // Cada espacio tiene su propia copia: borrar un archivo en uno no rompe el otro.
+              const oldPath = payload.storagePath;
+              const prefix = uid + "/" + id + "/";
+              const newPath = oldPath.startsWith(prefix)
+                ? uid + "/" + newId + "/" + oldPath.slice(prefix.length)
+                : uid +
+                  "/" +
+                  newId +
+                  "/" +
+                  safeStorageName(row.id) +
+                  "/" +
+                  safeStorageName(payload.fileName);
+              const { error: copyError } = await supabase.storage
+                .from(PRINT_FILES_BUCKET)
+                .copy(oldPath, newPath);
+              if (copyError) {
+                delete payload.storagePath;
+                payload.status = "error";
+                payload.errorMessage = "No se pudo copiar este archivo. Vuelve a adjuntarlo.";
+              } else {
+                payload.storagePath = newPath;
+              }
+            }
+            copy.payload = payload;
+          }
+          newNodes.push(copy);
+        }
+        if (newNodes.length > 0) {
+          const { error } = await supabase.from("workspace_nodes").insert(newNodes);
+          if (error) throw error;
+        }
+        const newConnections = ((connectionsResult.data ?? []) as unknown as ConnectionRow[]).map(
+          (c) => ({ ...c, workspace_id: newId, owner_id: uid })
+        );
+        if (newConnections.length > 0) {
+          const { error } = await supabase.from("workspace_connections").insert(newConnections);
+          if (error) throw error;
+        }
+      } catch (error) {
+        // Sin copia a medias: se borra el espacio recién creado.
+        await supabase.from("workspaces").delete().eq("id", newId);
+        throw error;
+      }
+
+      await refreshWorkspaceList(uid);
+      manager().setMessage({ kind: "info", text: "Espacio duplicado." });
+    });
+  };
+
+  const deleteWorkspace = async (id: string): Promise<void> => {
+    await guarded(async () => {
+      const uid = userId;
+      if (!uid) return;
+
+      // Si es el espacio abierto, primero se pasa a otro (o se crea uno en blanco).
+      if (id === workspaceId) {
+        const other = manager().workspaces.find((w) => w.id !== id);
+        if (other) {
+          await openWorkspaceRaw(other.id);
+        } else {
+          const { data, error } = await supabase
+            .from("workspaces")
+            .insert({ owner_id: uid, name: "Mi primer espacio" })
+            .select("id")
+            .single();
+          if (error) throw error;
+          await openWorkspaceRaw((data as { id: string }).id, {
+            nodes: [],
+            connections: [],
+            strokes: [],
+          });
+        }
+        if (workspaceId === id) throw new Error("No se pudo cambiar de espacio antes de borrar.");
+      }
+
+      // Archivos del bucket que solo usaba este espacio.
+      const { data: fileRows } = await supabase
+        .from("workspace_nodes")
+        .select("payload")
+        .eq("workspace_id", id)
+        .eq("type", "file-node");
+      const paths = ((fileRows ?? []) as { payload: FileNodePayload | null }[])
+        .map((r) => r.payload?.storagePath)
+        .filter((p): p is string => typeof p === "string" && p.length > 0);
+
+      const { error } = await supabase.from("workspaces").delete().eq("id", id);
+      if (error) throw error;
+      if (paths.length > 0) void supabase.storage.from(PRINT_FILES_BUCKET).remove(paths);
+      await refreshWorkspaceList(uid);
+    });
   };
 
   // --------------------------------------------------------------------------
@@ -808,6 +1170,15 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
     pause: () => {
       resetSession();
     },
+    openWorkspace: async (id, seed) => {
+      await guarded(() => openWorkspaceRaw(id, seed));
+    },
+    createWorkspace,
+    renameWorkspace,
+    moveWorkspace,
+    renameFolder,
+    duplicateWorkspace,
+    deleteWorkspace,
     retryUpload: (nodeId: string) => {
       for (const key of [...failedUploads]) {
         if (key.startsWith(`${nodeId}|`)) failedUploads.delete(key);
@@ -864,8 +1235,28 @@ export async function signOutFromCloud(): Promise<void> {
   useWorkspaceStore.getState().hydrateWorkspace(INITIAL_NODES, INITIAL_CONNECTIONS);
   useWorkspaceStore.getState().hydrateCanvasStrokes([]);
   useCloudStore.getState().setUser(null);
+  useWorkspaceManagerStore.getState().setWorkspaces([]);
   useCloudStore.getState().setStatus("signed-out", null);
 }
+
+// Acciones del gestor de espacios (las usa WorkspaceManagerDrawer).
+export const openCloudWorkspace = async (id: string, seed?: WorkspaceSeed): Promise<void> =>
+  activeEngine?.openWorkspace(id, seed);
+export const createCloudWorkspace = async (
+  name: string,
+  folder: string,
+  seed?: WorkspaceSeed
+): Promise<string | null> => (await activeEngine?.createWorkspace(name, folder, seed)) ?? null;
+export const renameCloudWorkspace = async (id: string, name: string): Promise<void> =>
+  activeEngine?.renameWorkspace(id, name);
+export const moveCloudWorkspace = async (id: string, folder: string): Promise<void> =>
+  activeEngine?.moveWorkspace(id, folder);
+export const renameCloudFolder = async (from: string, to: string): Promise<void> =>
+  activeEngine?.renameFolder(from, to);
+export const duplicateCloudWorkspace = async (id: string): Promise<void> =>
+  activeEngine?.duplicateWorkspace(id);
+export const deleteCloudWorkspace = async (id: string): Promise<void> =>
+  activeEngine?.deleteWorkspace(id);
 
 /** Reintenta subir a la nube el archivo de un nodo cuya subida falló. */
 export function retryFileUpload(nodeId: string): void {
