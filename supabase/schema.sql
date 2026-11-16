@@ -36,9 +36,14 @@ create table if not exists public.profiles (
   email       text,
   full_name   text,
   avatar_url  text,
+  -- Ajustes de comodidad (tema, cuadricula, cables...) sincronizados entre dispositivos.
+  preferences jsonb not null default '{}'::jsonb,
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now()
 );
+
+-- Para bases de datos ya creadas: anade la columna si falta.
+alter table public.profiles add column if not exists preferences jsonb not null default '{}'::jsonb;
 
 drop trigger if exists profiles_set_updated_at on public.profiles;
 create trigger profiles_set_updated_at

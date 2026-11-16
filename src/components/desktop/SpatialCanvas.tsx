@@ -1,5 +1,7 @@
 "use client";
 
+import { SNAP_GRID_SIZE, useSettingsStore, type CableStyle } from "@/store/useSettingsStore";
+
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Check, Trash2, X } from "lucide-react";
 import {
@@ -111,8 +113,34 @@ function buildCable(
   start: Point,
   startPort: PortPosition,
   end: Point,
-  endPort: PortPosition | null
+  endPort: PortPosition | null,
+  style: CableStyle = "bezier"
 ): { d: string; mid: Point } {
+  if (style === "straight") {
+    return {
+      d: `M ${start.x} ${start.y} L ${end.x} ${end.y}`,
+      mid: { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 },
+    };
+  }
+  if (style === "orthogonal") {
+    const stub = 24;
+    const sv = PORT_VECTORS[startPort];
+    const s1: Point = { x: start.x + sv.x * stub, y: start.y + sv.y * stub };
+    const ev = endPort ? PORT_VECTORS[endPort] : null;
+    const e1: Point = ev ? { x: end.x + ev.x * stub, y: end.y + ev.y * stub } : end;
+    const horizontal = sv.x !== 0;
+    const c1: Point = horizontal
+      ? { x: (s1.x + e1.x) / 2, y: s1.y }
+      : { x: s1.x, y: (s1.y + e1.y) / 2 };
+    const c2: Point = horizontal
+      ? { x: (s1.x + e1.x) / 2, y: e1.y }
+      : { x: e1.x, y: (s1.y + e1.y) / 2 };
+    const pts = [start, s1, c1, c2, e1, end];
+    return {
+      d: pts.map((q, i) => `${i === 0 ? "M" : "L"} ${q.x} ${q.y}`).join(" "),
+      mid: { x: (c1.x + c2.x) / 2, y: (c1.y + c2.y) / 2 },
+    };
+  }
   const reach = Math.min(Math.max(distanceBetween(start, end) * 0.4, 36), 160);
   const startVector = PORT_VECTORS[startPort];
   const c1: Point = {
@@ -320,6 +348,10 @@ export const SpatialCanvas: React.FC = () => {
   const canvasTransform = useWorkspaceStore((s) => s.canvasTransform);
   const setCanvasTransform = useWorkspaceStore((s) => s.setCanvasTransform);
   const activeTool = useWorkspaceStore((s) => s.activeTool);
+  const cableStyle = useSettingsStore((s) => s.cableStyle);
+  const snapToGrid = useSettingsStore((s) => s.snapToGrid);
+  const canvasBackground = useSettingsStore((s) => s.canvasBackground);
+  const animations = useSettingsStore((s) => s.animations);
 
   const connectingFrom = useWorkspaceStore((s) => s.connectingFrom);
   const selectedConnectionId = useWorkspaceStore((s) => s.selectedConnectionId);
@@ -667,6 +699,7 @@ export const SpatialCanvas: React.FC = () => {
   let liveOriginPoint: Point | null = null;
   let liveTarget: PortTarget | null = null;
   let liveCable: { d: string; mid: Point } | null = null;
+  let liveTargetPoint: Point | null = null;
 
   if (connectingFrom && originNode && pointer) {
     const originSize = getSize(originNode.id);
@@ -684,11 +717,12 @@ export const SpatialCanvas: React.FC = () => {
           getSize(targetNode.id),
           liveTarget.port
         );
-        liveCable = buildCable(liveOriginPoint, liveOriginPort, targetPoint, liveTarget.port);
+        liveTargetPoint = targetPoint;
+        liveCable = buildCable(liveOriginPoint, liveOriginPort, targetPoint, liveTarget.port, cableStyle);
       }
     }
     if (!liveCable) {
-      liveCable = buildCable(liveOriginPoint, liveOriginPort, pointer, null);
+      liveCable = buildCable(liveOriginPoint, liveOriginPort, pointer, null, cableStyle);
     }
   }
 
@@ -994,11 +1028,13 @@ export const SpatialCanvas: React.FC = () => {
 
     if (draggingNodeId) {
       const point = toCanvasPoint(e.clientX, e.clientY);
-      updateNodePosition(
-        draggingNodeId,
-        point.x - dragOffset.current.x,
-        point.y - dragOffset.current.y
-      );
+      let nx = point.x - dragOffset.current.x;
+      let ny = point.y - dragOffset.current.y;
+      if (snapToGrid) {
+        nx = Math.round(nx / SNAP_GRID_SIZE) * SNAP_GRID_SIZE;
+        ny = Math.round(ny / SNAP_GRID_SIZE) * SNAP_GRID_SIZE;
+      }
+      updateNodePosition(draggingNodeId, nx, ny);
     }
   };
 
@@ -1126,7 +1162,9 @@ export const SpatialCanvas: React.FC = () => {
         // Con el Lápiz, el botón lateral del stylus no debe abrir el menú.
         if (isDrawTool) e.preventDefault();
       }}
-      className={`w-screen h-screen relative overflow-hidden canvas-grid select-none touch-none ${cursorClass}`}
+      className={`w-screen h-screen relative overflow-hidden canvas-grid ${
+        canvasBackground === "grid" ? "canvas-bg-grid" : canvasBackground === "plain" ? "canvas-bg-plain" : ""
+      } select-none touch-none ${cursorClass}`}
       style={{
         backgroundPosition: `${canvasTransform.x}px ${canvasTransform.y}px`,
         backgroundSize: `${gridSize}px ${gridSize}px`,
@@ -1192,7 +1230,8 @@ export const SpatialCanvas: React.FC = () => {
               getPortPoint(from, getSize(from.id), conn.fromPort),
               conn.fromPort,
               getPortPoint(to, getSize(to.id), conn.toPort),
-              conn.toPort
+              conn.toPort,
+              cableStyle
             );
             const isSelected = conn.id === selectedConnectionId;
             const isActive = isSelected || conn.id === hoveredConnectionId;
@@ -1233,6 +1272,11 @@ export const SpatialCanvas: React.FC = () => {
                 >
                   <title>Clic para cambiar la etiqueta o borrar este cable</title>
                 </path>
+                {animations === "full" && (
+                  <circle r={2.5} fill="var(--accent-primary)" opacity={0.85}>
+                    <animateMotion dur="3.2s" repeatCount="indefinite" path={cable.d} />
+                  </circle>
+                )}
                 {conn.label && (
                   <text
                     x={cable.mid.x}
@@ -1270,6 +1314,21 @@ export const SpatialCanvas: React.FC = () => {
                 strokeLinecap="round"
                 markerEnd="url(#andros-arrow-active)"
               />
+              {liveCable && liveTarget && liveTargetPoint && (
+                <circle
+                  cx={liveTargetPoint.x}
+                  cy={liveTargetPoint.y}
+                  r={9}
+                  fill="var(--accent-primary)"
+                  fillOpacity={0.18}
+                  stroke="var(--accent-primary)"
+                  strokeWidth={1.5}
+                >
+                  {animations === "full" && (
+                    <animate attributeName="r" values="7;12;7" dur="0.9s" repeatCount="indefinite" />
+                  )}
+                </circle>
+              )}
               <circle
                 cx={liveOriginPoint.x}
                 cy={liveOriginPoint.y}
@@ -1287,6 +1346,7 @@ export const SpatialCanvas: React.FC = () => {
               key={node.id}
               node={node}
               variant="canvas"
+              isDragging={draggingNodeId === node.id}
               onPointerDownCanvas={handleNodePointerDown}
               onPortPointerDown={handlePortPointerDown}
               showPorts={Boolean(connectingFrom) || isConnectTool}

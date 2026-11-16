@@ -18,6 +18,7 @@ import { useEffect } from "react";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { getSupabaseBrowserClient, PRINT_FILES_BUCKET } from "@/lib/supabase/client";
 import { useCloudStore, type CloudUser } from "@/store/useCloudStore";
+import { AUTOSAVE_DELAY_MS, useSettingsStore } from "@/store/useSettingsStore";
 import {
   createEmptyCalcLatexPayload,
   createEmptyCodeLabPayload,
@@ -494,7 +495,7 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
     timer = setTimeout(() => {
       timer = null;
       void syncNow();
-    }, SAVE_DEBOUNCE_MS);
+    }, AUTOSAVE_DELAY_MS[useSettingsStore.getState().autosave] ?? SAVE_DEBOUNCE_MS);
   };
 
   // --------------------------------------------------------------------------

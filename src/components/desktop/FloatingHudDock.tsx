@@ -1,6 +1,8 @@
 "use client";
 
-import React from "react";
+import React, { useRef } from "react";
+import { motion, useMotionValue, useSpring } from "framer-motion";
+import { useSettingsStore } from "@/store/useSettingsStore";
 import {
   MousePointer,
   PlusCircle,
@@ -229,14 +231,92 @@ const InkToolbar: React.FC = () => {
 };
 
 // ============================================================================
-// 3. DOCK PRINCIPAL
+// 3. DOCK PRINCIPAL (física elástica, atracción magnética y pastilla activa)
 // ============================================================================
+
+const DOCK_SPRING = { type: "spring", stiffness: 450, damping: 32, mass: 0.8 } as const;
+const MAGNET_RANGE = 70; // px alrededor del botón donde empieza a atraer
+const MAGNET_PULL = 0.18; // fracción de la distancia al cursor que se desplaza
+
+interface DockButtonProps {
+  onClick: () => void;
+  title: string;
+  active?: boolean;
+  accent?: boolean;
+  pressed?: boolean;
+  full: boolean;
+  children: React.ReactNode;
+}
+
+const DockButton: React.FC<DockButtonProps> = ({
+  onClick,
+  title,
+  active = false,
+  accent = false,
+  pressed,
+  full,
+  children,
+}) => {
+  const ref = useRef<HTMLButtonElement>(null);
+  const mx = useMotionValue(0);
+  const my = useMotionValue(0);
+  const x = useSpring(mx, DOCK_SPRING);
+  const y = useSpring(my, DOCK_SPRING);
+
+  const handleMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (!full || e.pointerType === "touch" || !ref.current) return;
+    const r = ref.current.getBoundingClientRect();
+    const dx = e.clientX - (r.left + r.width / 2);
+    const dy = e.clientY - (r.top + r.height / 2);
+    if (Math.hypot(dx, dy) > MAGNET_RANGE) return;
+    mx.set(dx * MAGNET_PULL);
+    my.set(dy * MAGNET_PULL);
+  };
+  const resetMagnet = () => {
+    mx.set(0);
+    my.set(0);
+  };
+
+  return (
+    <motion.button
+      ref={ref}
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-pressed={pressed}
+      onPointerMove={handleMove}
+      onPointerLeave={resetMagnet}
+      style={full ? { x, y } : undefined}
+      whileHover={full ? { scale: 1.07 } : undefined}
+      whileTap={full ? { scale: 0.92 } : { scale: 0.97 }}
+      transition={full ? DOCK_SPRING : { duration: 0 }}
+      className={`relative flex items-center gap-1.5 p-2.5 rounded-xl ${
+        active
+          ? accent
+            ? "text-andros-accent"
+            : "text-andros-primary"
+          : "text-andros-muted hover:text-andros-primary hover:bg-andros-border/30"
+      }`}
+    >
+      {active && (
+        <motion.span
+          layoutId="activeToolPill"
+          aria-hidden="true"
+          className="absolute inset-0 rounded-xl bg-andros-border/70"
+          transition={full ? DOCK_SPRING : { duration: 0 }}
+        />
+      )}
+      <span className="relative z-10 flex items-center gap-1.5">{children}</span>
+    </motion.button>
+  );
+};
 
 export const FloatingHudDock: React.FC = () => {
   const activeTool = useWorkspaceStore((s) => s.activeTool);
   const setActiveTool = useWorkspaceStore((s) => s.setActiveTool);
   const spawnNode = useWorkspaceStore((s) => s.spawnNode);
   const setOracleModalOpen = useWorkspaceStore((s) => s.setOracleModalOpen);
+  const full = useSettingsStore((s) => s.animations) === "full";
 
   return (
     <>
@@ -245,94 +325,52 @@ export const FloatingHudDock: React.FC = () => {
 
     <nav
       aria-label="Herramientas del Lienzo"
-      className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1 px-3 py-2 rounded-2xl bg-andros-surface backdrop-blur-xl border border-andros-border shadow-hud-light dark:shadow-hud-dark spring-micro"
+      className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1 px-3 py-2 rounded-2xl bg-andros-surface backdrop-blur-xl border border-andros-border shadow-hud-light dark:shadow-hud-dark"
     >
-      {/* 1. Puntero (V) */}
-      <button
-        type="button"
-        onClick={() => setActiveTool("pointer")}
-        title="Puntero (V)"
-        className={`flex items-center gap-1.5 p-2.5 rounded-xl hover:scale-105 active:scale-95 spring-micro ${
-          activeTool === "pointer"
-            ? "text-andros-primary bg-andros-border/70"
-            : "text-andros-muted hover:text-andros-primary hover:bg-andros-border/30"
-        }`}
-      >
+      <DockButton full={full} title="Puntero (V)" active={activeTool === "pointer"} onClick={() => setActiveTool("pointer")}>
         <MousePointer className="w-4 h-4" />
         <kbd className="text-[10px] font-mono opacity-60">V</kbd>
-      </button>
+      </DockButton>
 
-      {/* 2. Nuevo Nodo (N) */}
-      <button
-        type="button"
-        onClick={() => spawnNode()}
-        title="Nuevo Nodo (N)"
-        className="flex items-center gap-1.5 p-2.5 rounded-xl text-andros-muted hover:text-andros-primary hover:bg-andros-border/30 hover:scale-105 active:scale-95 spring-micro"
-      >
+      <DockButton full={full} title="Nuevo Nodo (N)" onClick={() => spawnNode()}>
         <PlusCircle className="w-4 h-4" />
         <kbd className="text-[10px] font-mono opacity-60">N</kbd>
-      </button>
+      </DockButton>
 
-      {/* 3. Conexión (C) */}
-      <button
-        type="button"
-        onClick={() => setActiveTool("connect")}
-        title="Conexión (C)"
-        className={`flex items-center gap-1.5 p-2.5 rounded-xl hover:scale-105 active:scale-95 spring-micro ${
-          activeTool === "connect"
-            ? "text-andros-primary bg-andros-border/70"
-            : "text-andros-muted hover:text-andros-primary hover:bg-andros-border/30"
-        }`}
-      >
+      <DockButton full={full} title="Conexión (C)" active={activeTool === "connect"} onClick={() => setActiveTool("connect")}>
         <GitBranch className="w-4 h-4" />
         <kbd className="text-[10px] font-mono opacity-60">C</kbd>
-      </button>
+      </DockButton>
 
-      {/* 4. Lápiz / Tinta Libre (D) */}
-      <button
-        type="button"
-        onClick={() => setActiveTool(activeTool === "draw" ? "pointer" : "draw")}
+      <DockButton
+        full={full}
         title="Lápiz / Tinta Libre (D)"
-        aria-pressed={activeTool === "draw"}
-        className={`flex items-center gap-1.5 p-2.5 rounded-xl hover:scale-105 active:scale-95 spring-micro ${
-          activeTool === "draw"
-            ? "text-andros-accent bg-andros-border/70"
-            : "text-andros-muted hover:text-andros-primary hover:bg-andros-border/30"
-        }`}
+        active={activeTool === "draw"}
+        accent
+        pressed={activeTool === "draw"}
+        onClick={() => setActiveTool(activeTool === "draw" ? "pointer" : "draw")}
       >
         <PenLine className="w-4 h-4" />
         <kbd className="text-[10px] font-mono opacity-60">D</kbd>
-      </button>
+      </DockButton>
 
       <div className="w-px h-5 bg-andros-border mx-1" />
 
-      {/* 5. Enlace / Fuente (L) */}
-      <button
-        type="button"
-        onClick={() => spawnNode({ type: "resource-link-node" })}
-        title="Enlace / Fuente (L)"
-        className="flex items-center gap-1.5 p-2.5 rounded-xl text-andros-muted hover:text-andros-primary hover:bg-andros-border/30 hover:scale-105 active:scale-95 spring-micro"
-      >
+      <DockButton full={full} title="Enlace / Fuente (L)" onClick={() => spawnNode({ type: "resource-link-node" })}>
         <Link2 className="w-4 h-4" />
         <kbd className="text-[10px] font-mono opacity-60">L</kbd>
-      </button>
+      </DockButton>
 
-      {/* 6. Código / Cálculo (M) */}
-      <button
-        type="button"
-        onClick={() => spawnNode({ type: "code-lab-node" })}
-        title="Código / Cálculo (M)"
-        className="flex items-center gap-1.5 p-2.5 rounded-xl text-andros-muted hover:text-andros-primary hover:bg-andros-border/30 hover:scale-105 active:scale-95 spring-micro"
-      >
+      <DockButton full={full} title="Código / Cálculo (M)" onClick={() => spawnNode({ type: "code-lab-node" })}>
         <Terminal className="w-4 h-4" />
         <kbd className="text-[10px] font-mono opacity-60">M</kbd>
-      </button>
+      </DockButton>
 
       <div className="w-px h-5 bg-andros-border mx-1" />
 
-      {/* 7. Biblioteca Técnica (B) */}
-      <button
-        type="button"
+      <DockButton
+        full={full}
+        title="Insertar desde Biblioteca Técnica (B)"
         onClick={() =>
           spawnNode({
             type: "reference",
@@ -342,26 +380,26 @@ export const FloatingHudDock: React.FC = () => {
               "Diseño de uniones tubulares soldadas sometidas a fatiga multiaxial.",
           })
         }
-        title="Insertar desde Biblioteca Técnica (B)"
-        className="flex items-center gap-1.5 p-2.5 rounded-xl text-andros-muted hover:text-andros-primary hover:bg-andros-border/30 hover:scale-105 active:scale-95 spring-micro"
       >
         <Library className="w-4 h-4" />
         <kbd className="text-[10px] font-mono opacity-60">B</kbd>
-      </button>
+      </DockButton>
 
-      {/* 8. Oráculo IA (⌘K) */}
-      <button
+      <motion.button
         type="button"
         onClick={() => setOracleModalOpen(true)}
         title="Oráculo IA (⌘K)"
-        className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-andros-primary text-andros-canvas hover:opacity-90 hover:scale-105 active:scale-95 spring-micro ml-1 shadow-sm"
+        whileHover={full ? { scale: 1.06 } : undefined}
+        whileTap={{ scale: full ? 0.92 : 0.97 }}
+        transition={full ? DOCK_SPRING : { duration: 0 }}
+        className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-andros-primary text-andros-canvas hover:opacity-90 ml-1 shadow-sm"
       >
         <Sparkles className="w-3.5 h-3.5 text-andros-accent" />
         <span className="text-xs font-semibold tracking-wide">Oráculo</span>
         <kbd className="text-[10px] font-mono opacity-70 bg-andros-canvas/20 px-1 py-0.5 rounded">
           ⌘K
         </kbd>
-      </button>
+      </motion.button>
     </nav>
     </>
   );

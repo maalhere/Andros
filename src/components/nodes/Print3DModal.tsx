@@ -1,5 +1,6 @@
 "use client";
 
+import { celebrate } from "@/lib/effects/celebrate";
 import React, { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -180,6 +181,7 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
       return;
     }
     setOpenHint("tried");
+    void celebrate();
     window.location.href = `${slicer.scheme}${encodeURIComponent(cloudLink)}`;
   };
 

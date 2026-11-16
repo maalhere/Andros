@@ -3,6 +3,8 @@
 import React from "react";
 import { useDeviceLayout } from "@/hooks/useDeviceLayout";
 import { useCloudSync } from "@/hooks/useCloudSync";
+import { useSettingsSync } from "@/hooks/useSettingsSync";
+import { QualityOfLifeModal } from "@/components/settings/QualityOfLifeModal";
 import { TopStatusBar } from "@/components/shared/TopStatusBar";
 import { OracleModal } from "@/components/shared/OracleModal";
 import { SpatialCanvas } from "@/components/desktop/SpatialCanvas";
@@ -17,6 +19,8 @@ export default function AndrosWorkspacePage() {
   const { isMobile, isMounted } = useDeviceLayout();
   // Login con Google + guardado automático en Supabase (no hace nada en modo local).
   useCloudSync();
+  // Ajustes de comodidad: localStorage + perfil de Supabase.
+  useSettingsSync();
   const showLanding = useLandingStore((s) => s.phase !== "workspace");
 
   if (!isMounted) {
@@ -26,6 +30,7 @@ export default function AndrosWorkspacePage() {
   return (
     <div className="relative w-full min-h-screen overflow-hidden">
       <TopStatusBar isMobile={isMobile} />
+      <QualityOfLifeModal />
 
       {isMobile ? (
         /* MODO TELÉFONO (< 768px): Tactile Deck & Bottom Sheet Mode */

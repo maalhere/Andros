@@ -1,6 +1,9 @@
 "use client";
 
 import React from "react";
+import { motion } from "framer-motion";
+import { useSettingsStore } from "@/store/useSettingsStore";
+import { celebrate } from "@/lib/effects/celebrate";
 import {
   ArrowLeft,
   ArrowRight,
@@ -29,6 +32,8 @@ import { CodeLabNodeView } from "@/components/nodes/CodeLabNode";
 interface EngineeringNodeProps {
   node: EngineeringNodeData;
   variant: "canvas" | "stack";
+  /** PC: el nodo se está arrastrando ahora mismo (elevación + borde iluminado). */
+  isDragging?: boolean;
   /** PC: se llama al presionar el cuerpo del nodo (arrastrar o conectar). */
   onPointerDownCanvas?: (
     e: React.PointerEvent<HTMLDivElement>,
@@ -89,12 +94,15 @@ const SketchNotePreview: React.FC<{ node: SketchNoteEngineeringNode }> = ({
     );
   }
 
-  const toggleChecklistItem = (itemId: string) =>
-    updateNodePayload(node.id, {
-      checklistItems: data.checklistItems.map((item) =>
-        item.id === itemId ? { ...item, checked: !item.checked } : item
-      ),
-    });
+  const toggleChecklistItem = (itemId: string) => {
+    const next = data.checklistItems.map((item) =>
+      item.id === itemId ? { ...item, checked: !item.checked } : item
+    );
+    updateNodePayload(node.id, { checklistItems: next });
+    if (next.length > 0 && next.every((item) => item.checked) && !data.checklistItems.every((item) => item.checked)) {
+      void celebrate();
+    }
+  };
 
   return (
     <div className="py-3 space-y-3">
@@ -349,6 +357,7 @@ const NodeConnectionList: React.FC<{ nodeId: string }> = ({ nodeId }) => {
 export const EngineeringNode: React.FC<EngineeringNodeProps> = ({
   node,
   variant,
+  isDragging = false,
   onPointerDownCanvas,
   onPortPointerDown,
   showPorts = false,
@@ -368,6 +377,8 @@ export const EngineeringNode: React.FC<EngineeringNodeProps> = ({
   );
 
   const isSelected = selectedNodeId === node.id;
+  const animations = useSettingsStore((s) => s.animations);
+  const full = animations === "full";
 
   const renderTypeIcon = () => {
     switch (node.type) {
@@ -410,6 +421,8 @@ export const EngineeringNode: React.FC<EngineeringNodeProps> = ({
   const containerClasses =
     variant === "canvas"
       ? `group/node absolute w-80 rounded-2xl bg-andros-card border shadow-card-light dark:shadow-card-dark p-4 cursor-grab active:cursor-grabbing spring-micro select-none ${
+          isDragging ? "shadow-2xl border-andros-accent ring-2 ring-andros-accent/60 z-40" : ""
+        } ${
           isSelected
             ? "border-andros-accent ring-2 ring-andros-accent/40 z-30"
             : "border-andros-border z-10 hover:border-andros-border-active"
@@ -421,8 +434,20 @@ export const EngineeringNode: React.FC<EngineeringNodeProps> = ({
         }`;
 
   return (
-    <div
+    <motion.div
       data-node-id={node.id}
+      initial={variant === "canvas" && full ? { scale: 0.85, opacity: 0 } : false}
+      animate={{ scale: isDragging && full ? 1.025 : 1, opacity: 1 }}
+      transition={
+        full ? { type: "spring", stiffness: 450, damping: 32, mass: 0.8 } : { duration: 0 }
+      }
+      onPointerMove={(e) => {
+        if (variant !== "canvas" || !full) return;
+        const r = e.currentTarget.getBoundingClientRect();
+        const k = r.width ? 320 / r.width : 1;
+        e.currentTarget.style.setProperty("--sx", `${(e.clientX - r.left) * k}px`);
+        e.currentTarget.style.setProperty("--sy", `${(e.clientY - r.top) * k}px`);
+      }}
       style={
         variant === "canvas"
           ? {
@@ -446,6 +471,7 @@ export const EngineeringNode: React.FC<EngineeringNodeProps> = ({
       }}
       className={containerClasses}
     >
+      {variant === "canvas" && full && <span aria-hidden="true" className="node-spotlight" />}
       {/* Cabecera Técnica del Nodo */}
       <div className="flex items-center justify-between pb-3 border-b border-andros-border gap-2">
         <div className="flex items-center gap-2 min-w-0">
@@ -569,6 +595,6 @@ export const EngineeringNode: React.FC<EngineeringNodeProps> = ({
             </button>
           );
         })}
-    </div>
+    </motion.div>
   );
 };

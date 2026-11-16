@@ -1,7 +1,8 @@
 "use client";
 
 import React from "react";
-import { RotateCcw } from "lucide-react";
+import { RotateCcw, Settings } from "lucide-react";
+import { useSettingsStore } from "@/store/useSettingsStore";
 import { ThemeToggle } from "./ThemeToggle";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { useCloudStore } from "@/store/useCloudStore";
@@ -17,7 +18,8 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({ isMobile }) => {
   const nodesCount = useWorkspaceStore((s) => s.nodes.length);
   const resetCanvasView = useWorkspaceStore((s) => s.resetCanvasView);
   const isCloudActive = useCloudStore((s) => s.user !== null && s.status !== "error");
-  const openLanding = useLandingStore((s) => s.openLanding);
+  const setSettingsOpen = useSettingsStore((s) => s.setModalOpen);
+  const openLanding =useLandingStore((s) => s.openLanding);
   const isLandingDone = useLandingStore((s) => s.phase === "workspace");
 
   return (
@@ -75,6 +77,16 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({ isMobile }) => {
         )}
 
         <ThemeToggle />
+
+        <button
+          type="button"
+          onClick={() => setSettingsOpen(true)}
+          aria-label="Abrir ajustes de comodidad"
+          title="Ajustes"
+          className="min-w-[40px] min-h-[40px] md:min-w-0 md:min-h-0 p-2 rounded-xl bg-andros-surface backdrop-blur-md border border-andros-border text-andros-muted hover:text-andros-primary shadow-sm hover:scale-105 hover:rotate-45 active:scale-95 spring-micro flex items-center justify-center"
+        >
+          <Settings className="w-4 h-4" />
+        </button>
 
         {/* Cuenta de Google + estado de guardado en la nube */}
         <GoogleAuthButton isMobile={isMobile} />

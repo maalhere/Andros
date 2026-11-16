@@ -179,6 +179,49 @@
     transition: background-color 300ms var(--ease-spring);
   }
 
+  /* Cuadrícula milimetrada (mismo paso que la retícula) */
+  .canvas-grid.canvas-bg-grid {
+    background-image:
+      linear-gradient(var(--grid-dot) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-dot) 1px, transparent 1px);
+  }
+
+  /* Lienzo liso sin retícula */
+  .canvas-grid.canvas-bg-plain {
+    background-image: none;
+  }
+
+  /* Spotlight de 1px: borde que se ilumina siguiendo el puntero */
+  .node-spotlight {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 200ms ease-out;
+    background: radial-gradient(
+      140px circle at var(--sx, 50%) var(--sy, 50%),
+      var(--accent-primary),
+      transparent 70%
+    );
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  }
+  [data-node-id]:hover > .node-spotlight {
+    opacity: 1;
+  }
+
+  /* Animaciones reducidas: todo es instantáneo */
+  html[data-motion="reduced"] *,
+  html[data-motion="reduced"] *::before,
+  html[data-motion="reduced"] *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+  }
+
   /* Retícula compacta para el Mapa Miniatura 2D en Móvil */
   .canvas-grid-mini {
     background-color: var(--bg-canvas);

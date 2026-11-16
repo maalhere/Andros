@@ -5,6 +5,7 @@ import { AlertCircle, Play } from "lucide-react";
 import { CodeLabEngineeringNode } from "@/types/workspace";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { runCodeLab } from "@/lib/codelab/interpreter";
+import { celebrate } from "@/lib/effects/celebrate";
 
 // ============================================================================
 // NODO TIPO 5 — LABORATORIO DE CÓDIGO / CÁLCULO RÁPIDO (TIPO MATLAB LIGERO)
@@ -48,6 +49,7 @@ export const CodeLabNodeView: React.FC<CodeLabNodeProps> = ({ node }) => {
   const run = () => {
     const result = runCodeLab(data.code);
     updateNodePayload(node.id, { result, lastRunAt: "Ahora mismo" });
+    if (!result.errorMessage) void celebrate();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
