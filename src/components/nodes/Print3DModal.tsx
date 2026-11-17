@@ -1,29 +1,51 @@
 "use client";
 
 import { celebrate } from "@/lib/effects/celebrate";
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
+  AlertTriangle,
   Check,
+  CheckCircle2,
+  ChevronDown,
   Download,
   ExternalLink,
-  Feather,
   Gem,
+  LoaderCircle,
+  Minimize2,
   Printer,
   ShieldCheck,
+  Usb,
+  Wifi,
+  WifiOff,
   X,
+  Zap,
 } from "lucide-react";
 import { getCloudFileLink } from "@/hooks/useCloudSync";
 import { useCloudStore } from "@/store/useCloudStore";
 import { formatMm, type ModelDimensions } from "@/components/nodes/Model3DPreview";
+import { isSliceable, loadTriangleSoup, triangleBounds } from "@/lib/slicer/meshLoader";
+import {
+  ADV3_BED_MM,
+  QUALITY_PRESETS,
+  describeSettings,
+  generateFlashForgeGx,
+  prepareMesh,
+  renderMeshImage,
+  type QualityId,
+  type SliceStats,
+} from "@/lib/slicer/flashforgeGxGenerator";
 
 // ============================================================================
-// ASISTENTE GUIADO DE IMPRESIÓN 3D
-// Pensado para alguien que nunca ha usado una impresora 3D: 3 pasos, sin jerga.
-//   1. Elegir el tipo de pieza  →  la configuración se recomienda sola.
-//   2. Abrir el archivo en el programa de la impresora (o descargarlo).
-//   3. Imprimir / guardar en PDF una hoja de control.
-// La pieza nunca se modifica: sus medidas son solo informativas.
+// IMPRIMIR EN 3D — TAN FÁCIL COMO IMPRIMIR UN DOCUMENTO
+//   · Una sola vista, como el diálogo de impresión de Google Docs:
+//     vista previa a la izquierda, opciones a la derecha y un botón gigante.
+//   · Destino por defecto: FlashForge Adventurer 3 (Automático). Andros lamina
+//     la pieza en el navegador y genera un .gx listo para imprimir.
+//   · Con la IP de la impresora: "Imprimir Ahora" la envía por Wi-Fi y la
+//     impresora empieza a calentar e imprimir sola.
+//   · Sin Wi-Fi: descarga del .gx (USB / FlashPrint) con instrucciones de 2 pasos.
+//   · Bambu Lab, Prusa y Cura como destinos secundarios (abren su programa).
 // ============================================================================
 
 const PRINTABLE_EXTENSIONS = ["stl", "obj", "3mf", "step", "stp", "gcode"];
@@ -32,92 +54,133 @@ export function isPrintable3D(extension: string): boolean {
   return PRINTABLE_EXTENSIONS.includes(extension.toLowerCase());
 }
 
-type ProfileId = "prototype" | "strong" | "detail";
+type Destination = "adv3" | "bambu" | "prusa" | "cura";
 
-interface PrintProfile {
-  id: ProfileId;
-  title: string;
-  everyday: string;
-  icon: React.ReactNode;
-  settings: { label: string; value: string }[];
+const DESTINATIONS: { id: Destination; label: string; program: string; scheme: string }[] = [
+  { id: "adv3", label: "FlashForge Adventurer 3 (Automático)", program: "FlashPrint", scheme: "" },
+  { id: "bambu", label: "Bambu Lab · abrir en Bambu Studio", program: "Bambu Studio", scheme: "bambustudio://open?file=" },
+  { id: "prusa", label: "Prusa · abrir en PrusaSlicer", program: "PrusaSlicer", scheme: "prusaslicer://open?file=" },
+  { id: "cura", label: "Otra impresora · abrir en Cura", program: "Cura", scheme: "cura://open?file=" },
+];
+
+const QUALITY_ORDER: { id: QualityId; icon: React.ReactNode; recommended?: boolean }[] = [
+  { id: "draft", icon: <Zap className="w-5 h-5" /> },
+  { id: "standard", icon: <ShieldCheck className="w-5 h-5" />, recommended: true },
+  { id: "high", icon: <Gem className="w-5 h-5" /> },
+];
+
+const FLASHPRINT_DOWNLOAD_URL = "https://www.flashforge.com/download-center/63";
+
+/** Materiales sugeridos (patrocinios / afiliados): cambia `href` por el enlace real. */
+const SPONSORED_MATERIALS: { name: string; note: string; href: string }[] = [
+  { name: "PLA estándar 1.75 mm", note: "económico y fácil", href: "https://www.google.com/search?q=filamento+PLA+1.75mm" },
+  { name: "PETG 1.75 mm", note: "resistente y flexible", href: "https://www.google.com/search?q=filamento+PETG+1.75mm" },
+];
+
+const DESTINATION_KEY = "andros-print-printer";
+const LEGACY_SLICER_KEY = "andros-print-program";
+const ADV3_IP_KEY = "andros-adv3-ip";
+const ADV3_PORT_KEY = "andros-adv3-port";
+
+function readStorage(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
 }
 
-const PROFILES: PrintProfile[] = [
-  {
-    id: "prototype",
-    title: "Prototipo Rápido / Adorno",
-    everyday: "Figuras, maquetas y pruebas. Sale rápido y gasta poco material.",
-    icon: <Feather className="w-5 h-5" />,
-    settings: [
-      { label: "Material", value: "Plástico PLA estándar" },
-      { label: "Relleno interior", value: "Ligero · 15 %" },
-      { label: "Altura de capa", value: "0.20 mm (estándar)" },
-      { label: "Acabado", value: "Rápido" },
-    ],
-  },
-  {
-    id: "strong",
-    title: "Pieza Resistente / Uso Diario",
-    everyday: "Soportes, ganchos y repuestos que van a aguantar peso o uso.",
-    icon: <ShieldCheck className="w-5 h-5" />,
-    settings: [
-      { label: "Material", value: "PETG o PLA+" },
-      { label: "Relleno interior", value: "Medio · 40 %" },
-      { label: "Altura de capa", value: "0.20 mm (estándar)" },
-      { label: "Acabado", value: "Mayor firmeza" },
-    ],
-  },
-  {
-    id: "detail",
-    title: "Alta Precisión / Detalle Fino",
-    everyday: "Miniaturas y piezas que deben encajar o verse muy lisas. Tarda más.",
-    icon: <Gem className="w-5 h-5" />,
-    settings: [
-      { label: "Material", value: "Plástico PLA estándar" },
-      { label: "Altura de capa", value: "Capas finas · 0.12 mm" },
-      { label: "Velocidad", value: "Suave (lenta)" },
-      { label: "Acabado", value: "Detalle fino" },
-    ],
-  },
-];
-
-/**
- * Materiales sugeridos por perfil. Preparado para patrocinios técnicos o
- * enlaces de afiliado: basta con cambiar `href` por el enlace real.
- */
-const SPONSORED_MATERIALS: Record<ProfileId, { name: string; note: string; href: string }[]> = {
-  prototype: [
-    { name: "PLA estándar 1.75 mm", note: "económico y fácil", href: "https://www.google.com/search?q=filamento+PLA+1.75mm" },
-    { name: "PLA Silk", note: "acabado brillante", href: "https://www.google.com/search?q=filamento+PLA+silk" },
-  ],
-  strong: [
-    { name: "PETG 1.75 mm", note: "resistente y flexible", href: "https://www.google.com/search?q=filamento+PETG+1.75mm" },
-    { name: "PLA+ reforzado", note: "más firme que el PLA", href: "https://www.google.com/search?q=filamento+PLA%2B" },
-  ],
-  detail: [
-    { name: "PLA de precisión ±0.02 mm", note: "capas finas limpias", href: "https://www.google.com/search?q=filamento+PLA+precision+0.02" },
-    { name: "Resina estándar", note: "si tu impresora es de resina", href: "https://www.google.com/search?q=resina+3d+estandar" },
-  ],
-};
-
-type SlicerId = "bambu" | "prusa" | "cura";
-
-const SLICERS: { id: SlicerId; name: string; scheme: string }[] = [
-  { id: "bambu", name: "Bambu Studio", scheme: "bambustudio://open?file=" },
-  { id: "prusa", name: "PrusaSlicer", scheme: "prusaslicer://open?file=" },
-  { id: "cura", name: "Cura", scheme: "cura://open?file=" },
-];
-
-const SLICER_STORAGE_KEY = "andros-print-program";
-
-function readSavedSlicer(): SlicerId {
+function writeStorage(key: string, value: string) {
   try {
-    const saved = window.localStorage.getItem(SLICER_STORAGE_KEY);
-    if (saved === "bambu" || saved === "prusa" || saved === "cura") return saved;
+    window.localStorage.setItem(key, value);
   } catch {
-    // Sin acceso a localStorage: se usa el valor por defecto.
+    // Sin acceso a localStorage: no pasa nada.
   }
-  return "bambu";
+}
+
+function readSavedDestination(): Destination {
+  const saved = readStorage(DESTINATION_KEY);
+  if (saved === "adv3" || saved === "bambu" || saved === "prusa" || saved === "cura") return saved;
+  if (saved === "other") {
+    const legacy = readStorage(LEGACY_SLICER_KEY);
+    if (legacy === "bambu" || legacy === "prusa" || legacy === "cura") return legacy;
+  }
+  return "adv3";
+}
+
+/** Nombre limpio: ANDROS_[nombre] (sin extensión). */
+function cleanBaseName(pieceName: string, fileName: string): string {
+  const base = (pieceName || fileName.replace(/\.[^.]+$/, ""))
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 40);
+  return `ANDROS_${base || "pieza"}`;
+}
+
+function formatDuration(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.max(1, Math.round((seconds % 3600) / 60));
+  return h > 0 ? `${h} h ${m} min` : `${m} min`;
+}
+
+function accentRgb(): [number, number, number] {
+  const hex = getComputedStyle(document.documentElement).getPropertyValue("--accent-primary").trim();
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex);
+  if (!m) return [201, 90, 59];
+  const n = parseInt(m[1], 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function renderPreview(soup: Float32Array): string | null {
+  const width = 360;
+  const height = 270;
+  const rgba = renderMeshImage(prepareMesh(soup), width, height, accentRgb());
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.putImageData(new ImageData(rgba, width, height), 0, 0);
+  return canvas.toDataURL("image/png");
+}
+
+function downloadBytes(bytes: Uint8Array<ArrayBuffer>, name: string) {
+  const href = URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }));
+  const a = document.createElement("a");
+  a.href = href;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.setTimeout(() => URL.revokeObjectURL(href), 10_000);
+}
+
+interface PrinterStatus {
+  ok: boolean;
+  error?: string;
+  machine?: { type: string | null; name: string | null; firmware: string | null };
+  temperatures?: {
+    extruder: { current: number; target: number } | null;
+    bed: { current: number; target: number } | null;
+  };
+  progress?: { printing: boolean; percent: number; layer: string | null };
+}
+
+type MeshState =
+  | { phase: "loading" }
+  | { phase: "ready"; soup: Float32Array; size: { x: number; y: number; z: number }; preview: string | null }
+  | { phase: "error" }
+  | { phase: "none" };
+
+type WifiState = "none" | "checking" | "online" | "offline";
+type JobPhase = "idle" | "slicing" | "sending" | "printing" | "file-ready" | "error";
+
+interface PrintJob {
+  bytes: Uint8Array<ArrayBuffer>;
+  fileName: string;
+  stats: SliceStats | null;
 }
 
 interface Print3DModalProps {
@@ -131,13 +194,24 @@ interface Print3DModalProps {
   onClose: () => void;
 }
 
-function StepHeader({ number, title }: { number: number; title: string }) {
+function SettingsList({ settings }: { settings: { label: string; value: string }[] }) {
   return (
-    <div className="flex items-center gap-2.5">
-      <span className="shrink-0 w-7 h-7 rounded-full bg-andros-accent text-white text-sm font-semibold flex items-center justify-center">
-        {number}
-      </span>
-      <h3 className="text-sm font-semibold text-andros-primary">{title}</h3>
+    <dl className="space-y-1.5 text-xs">
+      {settings.map((setting) => (
+        <div key={setting.label} className="flex justify-between gap-3">
+          <dt className="text-andros-muted">{setting.label}</dt>
+          <dd className="text-andros-primary font-medium text-right">{setting.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="grid gap-2 sm:grid-cols-[84px_minmax(0,1fr)] sm:gap-3 sm:items-start">
+      <span className="text-xs font-semibold text-andros-muted sm:pt-2.5">{label}</span>
+      <div className="min-w-0">{children}</div>
     </div>
   );
 }
@@ -152,19 +226,84 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
   onClose,
 }) => {
   const isSignedIn = useCloudStore((s) => s.user !== null);
+  const ext = extension.toLowerCase();
+  const isGcode = ext === "gcode";
+  const sliceable = isSliceable(ext);
+  const baseName = cleanBaseName(pieceName, fileName);
 
-  const [profileId, setProfileId] = useState<ProfileId | null>(null);
-  const [slicerId, setSlicerId] = useState<SlicerId>(readSavedSlicer);
-  const [cloudLink, setCloudLink] = useState<string | null>(
-    /^https?:/.test(downloadUrl) ? downloadUrl : null
-  );
+  const [destination, setDestination] = useState<Destination>(readSavedDestination);
+  const [quality, setQuality] = useState<QualityId>("standard");
+  const [autoScale, setAutoScale] = useState(false);
+  const [mesh, setMesh] = useState<MeshState>(() => (sliceable ? { phase: "loading" } : { phase: "none" }));
+
+  // Impresión / archivo preparado
+  const [phase, setPhase] = useState<JobPhase>("idle");
+  const [progress, setProgress] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [job, setJob] = useState<PrintJob | null>(null);
+  const [showSteps, setShowSteps] = useState(false);
+  const jobRef = useRef<{ key: string; job: PrintJob } | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  // Wi-Fi
+  const [ip, setIp] = useState(() => readStorage(ADV3_IP_KEY) ?? "");
+  const [port, setPort] = useState(() => readStorage(ADV3_PORT_KEY) ?? "8899");
+  const [wifi, setWifi] = useState<WifiState>(() => (readStorage(ADV3_IP_KEY) ? "checking" : "none"));
+  const [status, setStatus] = useState<PrinterStatus | null>(null);
+  const [editingWifi, setEditingWifi] = useState(false);
+  const checkingRef = useRef(false);
+
+  // Otros programas
+  const [cloudLink, setCloudLink] = useState<string | null>(/^https?:/.test(downloadUrl) ? downloadUrl : null);
   const [openHint, setOpenHint] = useState<"none" | "tried" | "needs-cloud">("none");
 
-  const profile = PROFILES.find((p) => p.id === profileId) ?? null;
-  const slicer = SLICERS.find((s) => s.id === slicerId) ?? SLICERS[0];
-  const isGcode = extension.toLowerCase() === "gcode";
+  const isAdv3 = destination === "adv3";
+  const dest = DESTINATIONS.find((d) => d.id === destination) ?? DESTINATIONS[0];
+  const preset = QUALITY_PRESETS[quality];
 
-  // Enlace temporal de la nube: es lo que el programa de impresión puede abrir.
+  // --- Medidas y verificación de cabida ---------------------------------------
+  const size =
+    mesh.phase === "ready"
+      ? mesh.size
+      : dimensions
+        ? { x: dimensions.widthMm, y: dimensions.depthMm, z: dimensions.heightMm }
+        : null;
+  const biggest = size ? Math.max(size.x, size.y, size.z) : 0;
+  const fits = size ? biggest <= ADV3_BED_MM + 0.05 : true;
+  const fitPercent = size && biggest > 0 ? Math.floor((ADV3_BED_MM / biggest) * 1000) / 10 : 100;
+  const scale = !fits && autoScale ? fitPercent / 100 : 1;
+  const shown = size ? { x: size.x * scale, y: size.y * scale, z: size.z * scale } : null;
+  const sizeText = shown ? `${formatMm(shown.x)} × ${formatMm(shown.y)} × ${formatMm(shown.z)} mm` : null;
+  const canAutoPrint = isGcode || (sliceable && mesh.phase === "ready" && (fits || autoScale));
+  const busy = phase === "slicing" || phase === "sending";
+
+  // --- Cargar la pieza (vista previa + medidas reales) ------------------------
+  useEffect(() => {
+    if (!sliceable || !downloadUrl) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const soup = await loadTriangleSoup(downloadUrl, ext);
+        if (cancelled) return;
+        const b = triangleBounds(soup);
+        const meshSize = { x: b.max[0] - b.min[0], y: b.max[1] - b.min[1], z: b.max[2] - b.min[2] };
+        let preview: string | null = null;
+        try {
+          preview = renderPreview(soup);
+        } catch {
+          // Sin vista previa: se imprime igual.
+        }
+        if (!cancelled) setMesh({ phase: "ready", soup, size: meshSize, preview });
+      } catch {
+        if (!cancelled) setMesh({ phase: "error" });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [downloadUrl, ext, sliceable]);
+
+  // Enlace temporal de la nube (lo usan Bambu Studio / PrusaSlicer / Cura).
   useEffect(() => {
     if (!storagePath || !isSignedIn) return;
     let cancelled = false;
@@ -184,14 +323,185 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
 
-  const chooseSlicer = (id: SlicerId) => {
-    setSlicerId(id);
+  useEffect(() => () => abortRef.current?.abort(), []);
+
+  // --- Wi-Fi -------------------------------------------------------------------
+  const checkPrinter = useCallback(
+    async (targetIp: string, targetPort: string, quiet = false) => {
+      if (checkingRef.current || !targetIp.trim()) return;
+      checkingRef.current = true;
+      if (!quiet) setWifi("checking");
+      try {
+        const res = await fetch(
+          `/api/printer/flashforge?ip=${encodeURIComponent(targetIp.trim())}&port=${encodeURIComponent(targetPort.trim() || "8899")}`,
+          { cache: "no-store" }
+        );
+        const data = (await res.json()) as PrinterStatus;
+        setStatus(data);
+        if (!quiet || data.ok) setWifi(data.ok ? "online" : "offline");
+      } catch {
+        setStatus({ ok: false, error: "No se pudo contactar el servidor local de Andros." });
+        if (!quiet) setWifi("offline");
+      } finally {
+        checkingRef.current = false;
+      }
+    },
+    []
+  );
+
+  // Al abrir: si ya hay una IP guardada, se comprueba sola.
+  useEffect(() => {
+    const savedIp = readStorage(ADV3_IP_KEY);
+    if (savedIp) void checkPrinter(savedIp, readStorage(ADV3_PORT_KEY) ?? "8899");
+  }, [checkPrinter]);
+
+  // Mientras imprime: estado en vivo cada 5 s.
+  useEffect(() => {
+    if (phase !== "printing" || !ip) return;
+    const id = window.setInterval(() => void checkPrinter(ip, port, true), 5000);
+    return () => window.clearInterval(id);
+  }, [phase, ip, port, checkPrinter]);
+
+  const connectWifi = () => {
+    writeStorage(ADV3_IP_KEY, ip.trim());
+    writeStorage(ADV3_PORT_KEY, port.trim() || "8899");
+    setEditingWifi(false);
+    void checkPrinter(ip, port);
+  };
+
+  // --- Cambios de opciones ------------------------------------------------------
+  const resetResult = () => {
+    if (phase === "file-ready" || phase === "error") setPhase("idle");
+    setError(null);
+    setShowSteps(false);
+  };
+
+  const chooseDestination = (next: Destination) => {
+    setDestination(next);
     setOpenHint("none");
-    try {
-      window.localStorage.setItem(SLICER_STORAGE_KEY, id);
-    } catch {
-      // No pasa nada si no se puede recordar la elección.
+    resetResult();
+    writeStorage(DESTINATION_KEY, next);
+  };
+
+  const chooseQuality = (next: QualityId) => {
+    setQuality(next);
+    resetResult();
+  };
+
+  const toggleAutoScale = (on: boolean) => {
+    setAutoScale(on);
+    resetResult();
+  };
+
+  // --- Preparar el trabajo (.gx laminado, o el .gcode tal cual) ----------------
+  const ensureJob = async (): Promise<PrintJob> => {
+    const key = `${quality}|${scale}`;
+    if (jobRef.current?.key === key) return jobRef.current.job;
+
+    let prepared: PrintJob;
+    if (isGcode) {
+      const res = await fetch(downloadUrl);
+      if (!res.ok) throw new Error("No se pudo leer el archivo G-code.");
+      prepared = { bytes: new Uint8Array(await res.arrayBuffer()), fileName: `${baseName}.g`, stats: null };
+    } else if (mesh.phase === "ready") {
+      setPhase("slicing");
+      setProgress(0);
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+      const result = await generateFlashForgeGx(mesh.soup, {
+        quality,
+        scale,
+        baseName,
+        signal: controller.signal,
+        onProgress: (f) => setProgress(f),
+      });
+      prepared = { bytes: result.bytes, fileName: result.fileName, stats: result.stats };
+    } else {
+      throw new Error("La pieza todavía no está lista.");
     }
+    jobRef.current = { key, job: prepared };
+    setJob(prepared);
+    return prepared;
+  };
+
+  /** Botón principal "Imprimir Ahora". */
+  const printNow = async () => {
+    if (busy || !canAutoPrint) return;
+    setError(null);
+    setShowSteps(false);
+
+    let prepared: PrintJob;
+    try {
+      prepared = await ensureJob();
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
+      setPhase("error");
+      setError(e instanceof Error ? e.message : "No se pudo preparar la pieza.");
+      return;
+    }
+
+    if (wifi !== "online") {
+      setPhase("file-ready");
+      return;
+    }
+
+    setPhase("sending");
+    try {
+      const query = new URLSearchParams({
+        action: "print",
+        ip: ip.trim(),
+        port: port.trim() || "8899",
+        name: prepared.fileName,
+      });
+      const res = await fetch(`/api/printer/flashforge?${query.toString()}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: new Blob([prepared.bytes]),
+      });
+      const data = (await res.json()) as { ok: boolean; error?: string };
+      if (!data.ok) throw new Error(data.error ?? "La impresora no aceptó el trabajo.");
+      setPhase("printing");
+      void celebrate();
+      void checkPrinter(ip, port, true);
+    } catch (e) {
+      setPhase("error");
+      setError(
+        `No se pudo enviar por Wi-Fi. ${e instanceof Error ? e.message : ""} Puedes imprimir por USB o FlashPrint con el archivo ya preparado.`
+      );
+    }
+  };
+
+  const downloadJob = () => {
+    if (!job) return;
+    downloadBytes(job.bytes, job.fileName);
+    void celebrate();
+  };
+
+  const openInFlashPrint = () => {
+    if (!job) return;
+    downloadBytes(job.bytes, job.fileName);
+    setShowSteps(true);
+  };
+
+  /** Descarga el archivo original con nombre limpio. */
+  const downloadOriginal = async () => {
+    const name = `${baseName}.${ext}`;
+    try {
+      const res = await fetch(downloadUrl);
+      if (res.ok) {
+        downloadBytes(new Uint8Array(await res.arrayBuffer()), name);
+        return;
+      }
+    } catch {
+      // Se usa el enlace directo.
+    }
+    const a = document.createElement("a");
+    a.href = downloadUrl;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
   };
 
   const openInSlicer = () => {
@@ -201,26 +511,66 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
     }
     setOpenHint("tried");
     void celebrate();
-    window.location.href = `${slicer.scheme}${encodeURIComponent(cloudLink)}`;
+    window.location.href = `${dest.scheme}${encodeURIComponent(cloudLink)}`;
   };
 
-  const dimensionsText = dimensions
-    ? `${formatMm(dimensions.widthMm)} × ${formatMm(dimensions.depthMm)} × ${formatMm(dimensions.heightMm)} mm`
-    : "No disponibles para este tipo de archivo";
+  const today = new Date().toLocaleDateString("es", { year: "numeric", month: "long", day: "numeric" });
+  const successBox = "border-andros-success/50 bg-andros-success/10 text-andros-success";
+  const technical = describeSettings(preset.settings);
 
-  const today = new Date().toLocaleDateString("es", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
+  // --- Texto del botón principal ------------------------------------------------
+  let mainLabel = "Imprimir Ahora";
+  let mainHint = "";
+  if (isAdv3) {
+    if (phase === "slicing") mainLabel = `Preparando la pieza… ${Math.round(progress * 100)} %`;
+    else if (phase === "sending") mainLabel = "Enviando a la impresora…";
+    else if (phase === "printing") mainLabel = "¡Imprimiendo!";
+    if (!canAutoPrint) {
+      mainHint =
+        mesh.phase === "loading"
+          ? "Analizando la pieza…"
+          : !fits && sliceable && mesh.phase === "ready"
+            ? "Activa el ajuste automático de tamaño para poder imprimir."
+            : "Este archivo se prepara en FlashPrint: usa la descarga de abajo.";
+    } else if (wifi === "online") {
+      mainHint = "Se enviará por Wi-Fi: la Adventurer 3 empezará a calentar e imprimir sola.";
+    } else {
+      mainHint = "Se preparará un archivo .gx listo para imprimir por USB o con FlashPrint.";
+    }
+  }
 
-  const lockedStep = profile ? "" : "opacity-45 pointer-events-none select-none";
+  const wifiChip = (() => {
+    if (wifi === "online") {
+      return (
+        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-andros-success">
+          <span className="w-2 h-2 rounded-full bg-andros-success" />
+          Lista por Wi-Fi · {ip}
+        </span>
+      );
+    }
+    if (wifi === "checking") {
+      return (
+        <span className="inline-flex items-center gap-1.5 text-xs text-andros-muted">
+          <LoaderCircle className="w-3.5 h-3.5 animate-spin" /> Buscando la impresora en {ip}…
+        </span>
+      );
+    }
+    if (wifi === "offline") {
+      return (
+        <span className="inline-flex items-center gap-1.5 text-xs text-andros-muted">
+          <WifiOff className="w-3.5 h-3.5 text-red-500" /> Sin respuesta en {ip} · se usará USB / FlashPrint
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-andros-muted">
+        <Usb className="w-3.5 h-3.5" /> USB / FlashPrint
+      </span>
+    );
+  })();
 
   return createPortal(
     <>
-      {/* ------------------------------------------------------------------
-          VENTANA DEL ASISTENTE
-          ------------------------------------------------------------------ */}
       <div
         className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center sm:p-4 bg-black/50 backdrop-blur-sm"
         onClick={(e) => {
@@ -237,19 +587,18 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
           aria-modal="true"
           aria-label="Imprimir en 3D"
           onClick={(e) => e.stopPropagation()}
-          className="w-full sm:max-w-xl max-h-[92dvh] overflow-y-auto rounded-t-3xl sm:rounded-3xl bg-andros-card border border-andros-border shadow-hud-light dark:shadow-hud-dark"
+          className="w-full sm:max-w-3xl max-h-[94dvh] flex flex-col rounded-t-3xl sm:rounded-3xl bg-andros-card border border-andros-border shadow-hud-light dark:shadow-hud-dark overflow-hidden"
         >
           {/* Cabecera */}
-          <div className="sticky top-0 z-10 flex items-start justify-between gap-3 px-5 pt-5 pb-4 bg-andros-card border-b border-andros-border">
-            <div className="flex items-start gap-3 min-w-0">
+          <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-andros-border">
+            <div className="flex items-center gap-3 min-w-0">
               <div className="shrink-0 p-2 rounded-xl bg-andros-accent/10 text-andros-accent">
                 <Printer className="w-5 h-5" />
               </div>
               <div className="min-w-0">
-                <h2 className="text-base font-semibold text-andros-primary">Imprimir en 3D</h2>
+                <h2 className="text-base font-semibold text-andros-primary">Imprimir</h2>
                 <p className="text-xs text-andros-muted truncate" title={fileName}>
-                  {fileName}
-                  {dimensions ? ` · ${dimensionsText}` : ""}
+                  {pieceName || fileName}
                 </p>
               </div>
             </div>
@@ -263,256 +612,495 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
             </button>
           </div>
 
-          <div className="px-5 py-5 space-y-7">
-            {/* ---------------- PASO 1 ---------------- */}
-            <section className="space-y-3">
-              <StepHeader number={1} title="¿Qué tipo de pieza quieres?" />
-              <div className="space-y-2">
-                {PROFILES.map((option) => {
-                  const selected = option.id === profileId;
-                  return (
-                    <button
-                      key={option.id}
-                      type="button"
-                      aria-pressed={selected}
-                      onClick={() => setProfileId(option.id)}
-                      className={`w-full text-left px-4 py-3.5 rounded-2xl border flex items-center gap-3.5 active:scale-[0.99] spring-micro ${
-                        selected
-                          ? "border-andros-accent bg-andros-accent/10 ring-1 ring-andros-accent/40"
-                          : "border-andros-border-active bg-andros-canvas hover:border-andros-accent"
-                      }`}
-                    >
-                      <span
-                        className={`shrink-0 w-11 h-11 rounded-xl flex items-center justify-center ${
-                          selected
-                            ? "bg-andros-accent text-white"
-                            : "bg-andros-accent/10 text-andros-accent"
-                        }`}
-                      >
-                        {selected ? <Check className="w-5 h-5" /> : option.icon}
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block text-sm font-semibold text-andros-primary">
-                          {option.title}
-                        </span>
-                        <span className="block mt-0.5 text-xs leading-relaxed text-andros-muted">
-                          {option.everyday}
-                        </span>
-                      </span>
-                    </button>
-                  );
-                })}
+          <div className="flex-1 overflow-y-auto">
+            <div className="grid md:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+              {/* ---------------- VISTA PREVIA ---------------- */}
+              <div className="px-5 pt-5 md:pb-5 md:border-r border-andros-border space-y-3">
+                <div className="aspect-[4/3] rounded-2xl bg-andros-canvas border border-andros-border flex items-center justify-center overflow-hidden">
+                  {mesh.phase === "ready" && mesh.preview ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={mesh.preview} alt={`Vista previa de ${pieceName || fileName}`} className="w-full h-full object-contain" />
+                  ) : mesh.phase === "loading" ? (
+                    <span className="flex flex-col items-center gap-2 text-xs text-andros-muted">
+                      <LoaderCircle className="w-6 h-6 animate-spin text-andros-accent" />
+                      Analizando la pieza…
+                    </span>
+                  ) : (
+                    <Printer className="w-10 h-10 text-andros-muted/60" />
+                  )}
+                </div>
+                <div className="text-xs text-andros-muted space-y-0.5">
+                  <p className="truncate" title={fileName}>{fileName}</p>
+                  <p className="text-andros-primary font-medium">{sizeText ?? "Medidas no disponibles"}</p>
+                  {job?.stats && phase !== "slicing" && (
+                    <p>
+                      ≈ {formatDuration(job.stats.printTimeSec)} · {job.stats.filamentGrams.toFixed(0)} g de PLA ·{" "}
+                      {job.stats.layers} capas
+                    </p>
+                  )}
+                </div>
               </div>
 
-              {profile && (
-                <div className="rounded-2xl border border-andros-border bg-andros-canvas px-4 py-3">
-                  <p className="text-xs font-semibold text-andros-primary">
-                    Te recomendamos esta configuración:
-                  </p>
-                  <dl className="mt-2 space-y-1.5 text-xs">
-                    {profile.settings.map((setting) => (
-                      <div key={setting.label} className="flex justify-between gap-3">
-                        <dt className="text-andros-muted">{setting.label}</dt>
-                        <dd className="text-andros-primary font-medium text-right">
-                          {setting.value}
-                        </dd>
+              {/* ---------------- OPCIONES ---------------- */}
+              <div className="px-5 py-5 space-y-5">
+                <Row label="Destino">
+                  <div className="relative">
+                    <select
+                      value={destination}
+                      onChange={(e) => chooseDestination(e.target.value as Destination)}
+                      aria-label="Impresora de destino"
+                      className="w-full appearance-none min-h-[44px] pl-3 pr-9 rounded-xl border border-andros-border-active bg-andros-canvas text-sm font-medium text-andros-primary focus:outline-none focus:border-andros-accent"
+                    >
+                      {DESTINATIONS.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.label}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-andros-muted" />
+                  </div>
+                </Row>
+
+                {isAdv3 && (
+                  <Row label="Conexión">
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2 min-h-[28px]">
+                        {wifiChip}
+                        <button
+                          type="button"
+                          onClick={() => setEditingWifi((v) => !v)}
+                          className="shrink-0 text-xs font-semibold text-andros-accent hover:underline"
+                        >
+                          {editingWifi ? "Cerrar" : wifi === "none" ? "Conectar por Wi-Fi" : "Cambiar"}
+                        </button>
                       </div>
-                    ))}
-                  </dl>
-                  <p className="mt-2 text-[11px] leading-relaxed text-andros-muted">
-                    {isGcode
-                      ? "Tu archivo ya viene preparado para una impresora (G-code), así que estos valores son solo de referencia."
-                      : "Elige estos mismos valores en tu programa de impresión. El tamaño de la pieza no cambia."}
-                  </p>
-                </div>
-              )}
-            </section>
+                      {editingWifi && (
+                        <div className="rounded-2xl border border-andros-border bg-andros-canvas p-3 space-y-2">
+                          <p className="text-[11px] leading-relaxed text-andros-muted">
+                            Escribe la IP que muestra la pantalla de tu Adventurer 3 (Ajustes → Wi-Fi). Funciona
+                            con Andros corriendo en tu misma red (<code>npm run dev</code>).
+                          </p>
+                          <div className="grid grid-cols-[1fr_76px] gap-2">
+                            <input
+                              value={ip}
+                              onChange={(e) => setIp(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") connectWifi();
+                              }}
+                              inputMode="decimal"
+                              placeholder="192.168.1.XX"
+                              aria-label="IP local de la impresora"
+                              className="min-h-[40px] px-3 rounded-xl border border-andros-border-active bg-andros-card text-sm text-andros-primary"
+                            />
+                            <input
+                              value={port}
+                              onChange={(e) => setPort(e.target.value)}
+                              inputMode="numeric"
+                              aria-label="Puerto"
+                              className="min-h-[40px] px-3 rounded-xl border border-andros-border-active bg-andros-card text-sm text-andros-primary"
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            disabled={!ip.trim() || wifi === "checking"}
+                            onClick={connectWifi}
+                            className="w-full min-h-[40px] rounded-xl bg-andros-accent text-white text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-50 hover:opacity-90 spring-micro"
+                          >
+                            <Wifi className="w-4 h-4" /> Conectar
+                          </button>
+                          {wifi === "offline" && status?.error && (
+                            <p role="alert" className="text-[11px] leading-relaxed text-red-500">
+                              {status.error}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </Row>
+                )}
 
-            {/* ---------------- PASO 2 ---------------- */}
-            <section className={`space-y-3 ${lockedStep}`} aria-disabled={!profile}>
-              <StepHeader number={2} title="Llévalo a tu impresora" />
+                <Row label="Calidad">
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-3 gap-2">
+                      {QUALITY_ORDER.map((option) => {
+                        const p = QUALITY_PRESETS[option.id];
+                        const selected = option.id === quality;
+                        return (
+                          <button
+                            key={option.id}
+                            type="button"
+                            aria-pressed={selected}
+                            onClick={() => chooseQuality(option.id)}
+                            disabled={busy}
+                            className={`relative min-h-[92px] px-2 py-3 rounded-2xl border flex flex-col items-center justify-center gap-1.5 text-center active:scale-[0.98] spring-micro disabled:opacity-60 ${
+                              selected
+                                ? "border-andros-accent bg-andros-accent/10 ring-1 ring-andros-accent/40"
+                                : "border-andros-border-active bg-andros-canvas hover:border-andros-accent"
+                            }`}
+                          >
+                            <span
+                              className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                                selected ? "bg-andros-accent text-white" : "bg-andros-accent/10 text-andros-accent"
+                              }`}
+                            >
+                              {selected ? <Check className="w-5 h-5" /> : option.icon}
+                            </span>
+                            <span className="text-xs font-semibold leading-tight text-andros-primary">{p.title}</span>
+                            {option.recommended && (
+                              <span className="text-[10px] font-semibold uppercase tracking-wide text-andros-accent">
+                                Recomendado
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[11px] text-andros-muted">{preset.everyday}</p>
+                    <details className="group rounded-2xl border border-andros-border bg-andros-canvas">
+                      <summary className="cursor-pointer list-none px-3 py-2 text-xs font-medium text-andros-muted flex items-center justify-between">
+                        Ver detalles técnicos
+                        <ChevronDown className="w-4 h-4 group-open:rotate-180 transition-transform" />
+                      </summary>
+                      <div className="px-3 pb-3">
+                        <SettingsList
+                          settings={
+                            isAdv3
+                              ? [...technical, { label: "Impresora", value: "Adventurer 3 · 150 × 150 × 150 mm" }]
+                              : technical.slice(0, 5)
+                          }
+                        />
+                        {!isAdv3 && (
+                          <p className="mt-2 text-[11px] text-andros-muted">Valores sugeridos para aplicar en {dest.program}.</p>
+                        )}
+                      </div>
+                    </details>
+                  </div>
+                </Row>
 
-              <div className="space-y-2">
-                <p className="text-xs text-andros-muted">¿Qué programa usa tu impresora?</p>
-                <div className="grid grid-cols-3 gap-2">
-                  {SLICERS.map((option) => (
-                    <button
-                      key={option.id}
-                      type="button"
-                      aria-pressed={option.id === slicerId}
-                      onClick={() => chooseSlicer(option.id)}
-                      className={`min-h-[40px] px-2 rounded-xl border text-xs font-medium spring-micro active:scale-95 ${
-                        option.id === slicerId
-                          ? "border-andros-accent bg-andros-accent/10 text-andros-primary"
-                          : "border-andros-border-active text-andros-muted hover:border-andros-accent"
-                      }`}
-                    >
-                      {option.name}
-                    </button>
-                  ))}
-                </div>
+                {isAdv3 && (
+                  <Row label="Tamaño">
+                    {!size ? (
+                      <p className="text-xs text-andros-muted pt-2.5">
+                        {mesh.phase === "loading"
+                          ? "Comprobando si cabe en la cama…"
+                          : "No se pueden leer las medidas: comprueba en FlashPrint que no supere 150 × 150 × 150 mm."}
+                      </p>
+                    ) : fits || autoScale ? (
+                      <div role="status" className={`rounded-2xl border px-3 py-2.5 text-xs font-semibold flex items-start gap-2 ${successBox}`}>
+                        <CheckCircle2 className="w-4 h-4 shrink-0 mt-px" />
+                        <span className="flex-1">
+                          {fits
+                            ? "Cabe en la Adventurer 3 (150 × 150 × 150 mm)"
+                            : `Ajustada al ${fitPercent.toFixed(1)} % para que quepa (${sizeText})`}
+                        </span>
+                        {!fits && (
+                          <button type="button" onClick={() => toggleAutoScale(false)} className="shrink-0 underline font-medium">
+                            Deshacer
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <div role="alert" className="rounded-2xl border border-red-500/60 bg-red-500/10 px-3 py-2.5 space-y-2 text-xs text-andros-primary">
+                        <p className="flex items-start gap-2">
+                          <AlertTriangle className="w-4 h-4 shrink-0 mt-px text-red-500" />
+                          <span>
+                            <strong>No cabe:</strong> mide {formatMm(biggest)} mm en su lado más largo y la cama es de 150 mm.
+                          </span>
+                        </p>
+                        {sliceable && (
+                          <button
+                            type="button"
+                            onClick={() => toggleAutoScale(true)}
+                            className="w-full min-h-[40px] rounded-xl bg-andros-accent text-white font-semibold flex items-center justify-center gap-2 hover:opacity-90 spring-micro"
+                          >
+                            <Minimize2 className="w-4 h-4" /> Ajustar automáticamente ({fitPercent.toFixed(1)} %)
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </Row>
+                )}
               </div>
+            </div>
 
-              <button
-                type="button"
-                onClick={openInSlicer}
-                className="w-full min-h-[48px] px-4 rounded-2xl bg-andros-accent text-white text-sm font-semibold flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] spring-micro"
-              >
-                <ExternalLink className="w-4 h-4" />
-                <span>Abrir en mi programa de impresión</span>
-              </button>
+            {/* ---------------- RESULTADO / SIGUIENTES PASOS ---------------- */}
+            {isAdv3 && (phase === "printing" || phase === "error" || phase === "file-ready") && (
+              <div className="px-5 pb-5 space-y-3">
+                {phase === "printing" && (
+                  <div role="status" className={`rounded-2xl border px-4 py-3 space-y-2 text-xs ${successBox}`}>
+                    <p className="font-semibold flex items-center gap-1.5 text-sm">
+                      <CheckCircle2 className="w-4 h-4" /> ¡Enviado! La Adventurer 3 está calentando y empezará sola.
+                    </p>
+                    {status?.ok && (
+                      <div className="text-andros-primary">
+                        <SettingsList
+                          settings={[
+                            {
+                              label: "Boquilla",
+                              value: status.temperatures?.extruder
+                                ? `${status.temperatures.extruder.current} / ${status.temperatures.extruder.target} °C`
+                                : "—",
+                            },
+                            {
+                              label: "Cama",
+                              value: status.temperatures?.bed
+                                ? `${status.temperatures.bed.current} / ${status.temperatures.bed.target} °C`
+                                : "—",
+                            },
+                            {
+                              label: "Progreso",
+                              value: status.progress?.printing
+                                ? `${status.progress.percent} %${status.progress.layer ? ` · capa ${status.progress.layer}` : ""}`
+                                : "Calentando…",
+                            },
+                          ]}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
 
-              {openHint === "tried" && (
-                <p className="text-xs leading-relaxed text-andros-muted" role="status">
-                  Si tu navegador pregunta, acepta abrir {slicer.name}. ¿No pasó nada? Puede que
-                  el programa no esté instalado en este equipo o no acepte abrir archivos desde
-                  la web: usa el botón de descarga de aquí abajo.
-                </p>
-              )}
-              {openHint === "needs-cloud" && (
-                <p className="text-xs leading-relaxed text-andros-muted" role="status">
-                  {isSignedIn
-                    ? "El archivo todavía se está guardando en tu nube. Espera unos segundos y vuelve a intentarlo, o usa el botón de descarga."
-                    : "Para abrirlo directamente, primero inicia sesión con Google (arriba) para guardar el archivo en tu nube. Mientras tanto, usa el botón de descarga."}
-                </p>
-              )}
+                {phase === "error" && error && (
+                  <p role="alert" className="rounded-2xl border border-red-500/60 bg-red-500/10 px-4 py-3 text-xs leading-relaxed text-andros-primary">
+                    {error}
+                  </p>
+                )}
 
-              <a
-                href={downloadUrl}
-                download={fileName}
-                className="w-full min-h-[48px] px-4 rounded-2xl border border-andros-border-active bg-andros-canvas text-andros-primary text-sm font-semibold flex items-center justify-center gap-2 hover:border-andros-accent active:scale-[0.98] spring-micro"
-              >
-                <Download className="w-4 h-4 text-andros-accent" />
-                <span>Descargar archivo listo para imprimir</span>
-              </a>
+                {job && (phase === "file-ready" || phase === "error") && (
+                  <div className="rounded-2xl border border-andros-border bg-andros-canvas p-4 space-y-3">
+                    <p className="text-sm font-semibold text-andros-primary flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-andros-success" /> {job.fileName} está listo para imprimir
+                    </p>
+                    <div className="grid sm:grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={downloadJob}
+                        className="min-h-[48px] px-3 rounded-2xl bg-andros-accent text-white text-sm font-semibold flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] spring-micro"
+                      >
+                        <Download className="w-4 h-4 shrink-0" />
+                        <span>Descargar {job.fileName.endsWith(".gx") ? ".GX" : ".G"} listo (USB / FlashPrint)</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={openInFlashPrint}
+                        className="min-h-[48px] px-3 rounded-2xl border border-andros-border-active bg-andros-card text-andros-primary text-sm font-semibold flex items-center justify-center gap-2 hover:border-andros-accent active:scale-[0.98] spring-micro"
+                      >
+                        <ExternalLink className="w-4 h-4 shrink-0 text-andros-accent" />
+                        <span>Abrir directo en FlashPrint</span>
+                      </button>
+                    </div>
+                    {showSteps ? (
+                      <ol role="status" className="space-y-1.5 text-xs leading-relaxed text-andros-primary">
+                        <li>
+                          <span className="font-semibold">1.</span> Abre <strong>{job.fileName}</strong> desde tu carpeta
+                          de Descargas (doble clic): se abre en FlashPrint 5.
+                        </li>
+                        <li>
+                          <span className="font-semibold">2.</span> Pulsa <strong>Imprimir</strong> y elige tu Adventurer 3.
+                          No hace falta cortar: ya va laminado.
+                        </li>
+                      </ol>
+                    ) : (
+                      <p className="text-[11px] leading-relaxed text-andros-muted">
+                        <strong>Por USB:</strong> copia el archivo a una memoria USB, conéctala a la Adventurer 3 y elige
+                        Imprimir → USB. No hace falta ningún otro programa.
+                      </p>
+                    )}
+                    <a
+                      href={FLASHPRINT_DOWNLOAD_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-andros-accent hover:underline"
+                    >
+                      <Download className="w-3.5 h-3.5" /> ¿No tienes FlashPrint 5? Descárgalo gratis (oficial)
+                    </a>
+                  </div>
+                )}
+              </div>
+            )}
 
-              <ol className="rounded-2xl bg-andros-canvas border border-andros-border px-4 py-3 space-y-1.5 text-xs leading-relaxed text-andros-primary">
-                <li>
-                  <span className="font-semibold">1.</span> Descarga el archivo.
-                </li>
-                <li>
-                  <span className="font-semibold">2.</span> Arrástralo a tu programa de impresora
-                  (Cura / Bambu Studio / PrusaSlicer) y dale a <strong>Imprimir</strong>.
-                </li>
-              </ol>
-            </section>
-
-            {/* ---------------- MATERIALES RECOMENDADOS (patrocinios / afiliados) ---------------- */}
-            {profile && (
+            {/* ---------------- EXTRAS ---------------- */}
+            <div className="px-5 pb-5 grid sm:grid-cols-2 gap-3">
               <section className="rounded-2xl border border-dashed border-andros-border px-4 py-3 space-y-2">
                 <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-xs font-semibold text-andros-primary">
-                    Filamentos y materiales recomendados
-                  </h3>
-                  <span className="text-[10px] uppercase tracking-wider text-andros-muted">
-                    Publicidad
-                  </span>
+                  <h3 className="text-xs font-semibold text-andros-primary">Filamentos recomendados</h3>
+                  <span className="text-[10px] uppercase tracking-wider text-andros-muted">Publicidad</span>
                 </div>
                 <ul className="space-y-1.5">
-                  {SPONSORED_MATERIALS[profile.id].map((item) => (
+                  {SPONSORED_MATERIALS.map((item) => (
                     <li key={item.name} className="flex items-center justify-between gap-3 text-xs">
                       <span className="text-andros-primary">
                         {item.name}
                         <span className="text-andros-muted"> · {item.note}</span>
                       </span>
-                      {/* Sustituye `href` por el enlace de afiliado o patrocinador real. */}
-                      <a
-                        href={item.href}
-                        target="_blank"
-                        rel="sponsored noopener noreferrer"
-                        className="shrink-0 text-andros-accent hover:underline"
-                      >
+                      <a href={item.href} target="_blank" rel="sponsored noopener noreferrer" className="shrink-0 text-andros-accent hover:underline">
                         Ver
                       </a>
                     </li>
                   ))}
                 </ul>
-                <p className="text-[10px] text-andros-muted">
-                  Algunos enlaces pueden ser de afiliado: nos ayudan a mantener Andros sin costo
-                  extra para ti.
-                </p>
               </section>
-            )}
+              <div className="flex flex-col gap-2">
+                {isAdv3 && (
+                  <button
+                    type="button"
+                    onClick={() => void downloadOriginal()}
+                    className="min-h-[40px] px-3 rounded-xl border border-andros-border-active text-andros-primary text-xs font-medium flex items-center justify-center gap-2 hover:border-andros-accent spring-micro"
+                  >
+                    <Download className="w-3.5 h-3.5 text-andros-accent" /> Descargar archivo original ({ext.toUpperCase()})
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="min-h-[40px] px-3 rounded-xl border border-andros-border-active text-andros-primary text-xs font-medium flex items-center justify-center gap-2 hover:border-andros-accent spring-micro"
+                >
+                  <Printer className="w-3.5 h-3.5 text-andros-accent" /> Hoja de control (papel / PDF)
+                </button>
+              </div>
+            </div>
+          </div>
 
-            {/* ---------------- PASO 3 ---------------- */}
-            <section className={`space-y-3 ${lockedStep}`} aria-disabled={!profile}>
-              <StepHeader number={3} title="Hoja de control (opcional)" />
-              <p className="text-xs leading-relaxed text-andros-muted">
-                Una ficha de una página con el nombre de la pieza, sus medidas y la
-                configuración que elegiste, para tenerla junto a la impresora.
-              </p>
-              <button
-                type="button"
-                onClick={() => window.print()}
-                className="w-full min-h-[44px] px-4 rounded-2xl border border-andros-border-active text-andros-primary text-sm font-medium flex items-center justify-center gap-2 hover:border-andros-accent active:scale-[0.98] spring-micro"
-              >
-                <Printer className="w-4 h-4 text-andros-accent" />
-                <span>Imprimir o guardar en PDF la hoja de control</span>
-              </button>
-            </section>
+          {/* ---------------- PIE: BOTÓN PRINCIPAL ---------------- */}
+          <div className="border-t border-andros-border px-5 py-4 bg-andros-card space-y-2">
+            {isAdv3 ? (
+              <>
+                {canAutoPrint ? (
+                  <button
+                    type="button"
+                    onClick={() => void printNow()}
+                    disabled={busy || phase === "printing"}
+                    className="relative w-full min-h-[60px] px-5 rounded-2xl bg-andros-accent text-white text-base font-semibold flex items-center justify-center gap-2.5 overflow-hidden hover:opacity-95 active:scale-[0.99] spring-micro disabled:cursor-default"
+                  >
+                    {phase === "slicing" && (
+                      <span
+                        aria-hidden
+                        className="absolute inset-y-0 left-0 bg-white/20 transition-[width] duration-300"
+                        style={{ width: `${Math.round(progress * 100)}%` }}
+                      />
+                    )}
+                    <span className="relative flex items-center gap-2.5">
+                      {busy ? (
+                        <LoaderCircle className="w-5 h-5 animate-spin" />
+                      ) : phase === "printing" ? (
+                        <CheckCircle2 className="w-5 h-5" />
+                      ) : wifi === "online" ? (
+                        <Wifi className="w-5 h-5" />
+                      ) : (
+                        <Printer className="w-5 h-5" />
+                      )}
+                      {mainLabel}
+                    </span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void downloadOriginal()}
+                    disabled={mesh.phase === "loading"}
+                    className="w-full min-h-[60px] px-5 rounded-2xl bg-andros-accent text-white text-base font-semibold flex items-center justify-center gap-2.5 disabled:opacity-50 hover:opacity-95 active:scale-[0.99] spring-micro"
+                  >
+                    {mesh.phase === "loading" ? <LoaderCircle className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
+                    {mesh.phase === "loading" ? "Analizando la pieza…" : "Descargar para FlashPrint"}
+                  </button>
+                )}
+                {mainHint && <p className="text-[11px] text-center text-andros-muted">{mainHint}</p>}
+              </>
+            ) : (
+              <>
+                <div className="grid sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-2">
+                  <button
+                    type="button"
+                    onClick={openInSlicer}
+                    className="min-h-[60px] px-5 rounded-2xl bg-andros-accent text-white text-base font-semibold flex items-center justify-center gap-2.5 hover:opacity-95 active:scale-[0.99] spring-micro"
+                  >
+                    <ExternalLink className="w-5 h-5" /> Abrir en {dest.program}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void downloadOriginal()}
+                    className="min-h-[60px] px-4 rounded-2xl border border-andros-border-active text-andros-primary text-sm font-semibold flex items-center justify-center gap-2 hover:border-andros-accent spring-micro"
+                  >
+                    <Download className="w-4 h-4 text-andros-accent" /> Descargar
+                  </button>
+                </div>
+                {openHint === "tried" && (
+                  <p role="status" className="text-[11px] text-center text-andros-muted">
+                    Si tu navegador pregunta, acepta abrir {dest.program}. ¿No pasó nada? Usa Descargar.
+                  </p>
+                )}
+                {openHint === "needs-cloud" && (
+                  <p role="status" className="text-[11px] text-center text-andros-muted">
+                    {isSignedIn
+                      ? "El archivo todavía se está guardando en tu nube. Espera unos segundos o usa Descargar."
+                      : "Para abrirlo directamente, inicia sesión con Google para guardar el archivo en tu nube. Mientras, usa Descargar."}
+                  </p>
+                )}
+              </>
+            )}
           </div>
         </div>
       </div>
 
-      {/* ------------------------------------------------------------------
-          HOJA DE CONTROL — solo visible al imprimir (ver globals.css)
-          ------------------------------------------------------------------ */}
-      {profile && (
-        <div className="andros-print-sheet">
-          <header className="aps-header">
-            <div>
-              <p className="aps-brand">ANDROS · Hoja de control de impresión 3D</p>
-              <h1>{pieceName || fileName}</h1>
-            </div>
-            <p className="aps-date">{today}</p>
-          </header>
+      {/* Hoja de control — solo visible al imprimir (ver globals.css) */}
+      <div className="andros-print-sheet">
+        <header className="aps-header">
+          <div>
+            <p className="aps-brand">ANDROS · Hoja de control de impresión 3D</p>
+            <h1>{pieceName || fileName}</h1>
+          </div>
+          <p className="aps-date">{today}</p>
+        </header>
 
-          <h2>Pieza</h2>
-          <table>
-            <tbody>
-              <tr>
-                <th>Nombre de la pieza</th>
-                <td>{pieceName || fileName}</td>
+        <h2>Pieza</h2>
+        <table>
+          <tbody>
+            <tr>
+              <th>Nombre de la pieza</th>
+              <td>{pieceName || fileName}</td>
+            </tr>
+            <tr>
+              <th>Archivo</th>
+              <td>{job?.fileName ?? fileName}</td>
+            </tr>
+            <tr>
+              <th>Dimensiones (Ancho × Profundidad × Alto)</th>
+              <td>{sizeText ?? "No disponibles"}</td>
+            </tr>
+            <tr>
+              <th>Impresora</th>
+              <td>{isAdv3 ? "FlashForge Adventurer 3 (150 × 150 × 150 mm)" : dest.label}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h2>Configuración — {preset.title}</h2>
+        <table>
+          <tbody>
+            {technical.map((setting) => (
+              <tr key={setting.label}>
+                <th>{setting.label}</th>
+                <td>{setting.value}</td>
               </tr>
-              <tr>
-                <th>Archivo</th>
-                <td>{fileName}</td>
-              </tr>
-              <tr>
-                <th>Dimensiones (Ancho × Profundidad × Alto)</th>
-                <td>{dimensionsText}</td>
-              </tr>
-            </tbody>
-          </table>
+            ))}
+          </tbody>
+        </table>
 
-          <h2>Configuración sugerida — {profile.title}</h2>
-          <table>
-            <tbody>
-              {profile.settings.map((setting) => (
-                <tr key={setting.label}>
-                  <th>{setting.label}</th>
-                  <td>{setting.value}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <h2>Antes de imprimir</h2>
+        <ul className="aps-checklist">
+          <li>Filamento PLA de 1.75 mm cargado en la impresora</li>
+          <li>Base de impresión limpia y despejada</li>
+          <li>Primera capa revisada (se pega bien a la base)</li>
+        </ul>
 
-          <h2>Antes de imprimir</h2>
-          <ul className="aps-checklist">
-            <li>Material cargado en la impresora</li>
-            <li>Base de impresión limpia y despejada</li>
-            <li>Configuración de arriba elegida en el programa</li>
-            <li>Primera capa revisada (se pega bien a la base)</li>
-          </ul>
+        <h2>Notas</h2>
+        <div className="aps-notes" />
 
-          <h2>Notas</h2>
-          <div className="aps-notes" />
-
-          <p className="aps-footer">
-            Las dimensiones son las reales del archivo y no se modifican en Andros.
-          </p>
-        </div>
-      )}
+        <p className="aps-footer">
+          {scale !== 1
+            ? `La pieza se imprime escalada al ${fitPercent.toFixed(1)} % para caber en la cama.`
+            : "Las dimensiones son las reales del archivo."}
+        </p>
+      </div>
     </>,
     document.body
   );
