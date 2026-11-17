@@ -20,6 +20,8 @@ export interface Preferences {
   canvasBackground: CanvasBackground;
   animations: AnimationLevel;
   autosave: AutosaveMode;
+  /** `true` cuando el usuario terminó o saltó el tutorial guiado de 4 pasos. */
+  onboardingDone: boolean;
 }
 
 export const DEFAULT_PREFERENCES: Preferences = {
@@ -29,6 +31,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   canvasBackground: "dots",
   animations: "full",
   autosave: "instant",
+  onboardingDone: false,
 };
 
 /** Tamaño del imán de alineación (igual que la retícula del lienzo). */
@@ -52,6 +55,7 @@ export function sanitizePreferences(raw: unknown): Partial<Preferences> {
     out.canvasBackground = r.canvasBackground;
   if (r.animations === "full" || r.animations === "reduced") out.animations = r.animations;
   if (r.autosave === "instant" || r.autosave === "moderate") out.autosave = r.autosave;
+  if (typeof r.onboardingDone === "boolean") out.onboardingDone = r.onboardingDone;
   return out;
 }
 
@@ -70,11 +74,14 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   canvasBackground: DEFAULT_PREFERENCES.canvasBackground,
   animations: DEFAULT_PREFERENCES.animations,
   autosave: DEFAULT_PREFERENCES.autosave,
+  onboardingDone: DEFAULT_PREFERENCES.onboardingDone,
   modalOpen: false,
   setModalOpen: (modalOpen) => set({ modalOpen }),
   applyPreferences: (prefs) => {
     const rest: Partial<Preferences> = { ...prefs };
     delete rest.theme;
+    // El tutorial, una vez visto en cualquier dispositivo, no vuelve a salir solo.
+    if (rest.onboardingDone === false) delete rest.onboardingDone;
     set(rest);
   },
 }));

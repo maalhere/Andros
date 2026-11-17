@@ -1,119 +1,67 @@
 "use client";
 
 import React from "react";
-import { Crown, RotateCcw, Settings, Swords } from "lucide-react";
-import { useMarketStore } from "@/store/useMarketStore";
-import { useSettingsStore } from "@/store/useSettingsStore";
 import { ThemeToggle } from "./ThemeToggle";
-import { useWorkspaceStore } from "@/store/useWorkspaceStore";
-import { useCloudStore } from "@/store/useCloudStore";
+import { MoreMenu } from "./MoreMenu";
 import { useLandingStore } from "@/store/useLandingStore";
 import { GoogleAuthButton } from "@/components/auth/GoogleAuthButton";
 import { WorkspaceQuickSwitcher } from "@/components/workspaces/WorkspaceQuickSwitcher";
 import { AndrosMark } from "@/components/brand/AndrosMark";
+import { InstallAppButton } from "@/components/pwa/InstallAppButton";
+
+// ============================================================================
+// ANDROS — BARRA SUPERIOR (mínima)
+//   Izquierda: logo + selector de proyecto/carpeta.
+//   Derecha:   Día/Noche · Instalar App · Cuenta de Google · ⋯ Más opciones.
+// ============================================================================
 
 interface TopStatusBarProps {
   isMobile: boolean;
 }
 
 export const TopStatusBar: React.FC<TopStatusBarProps> = ({ isMobile }) => {
-  const nodesCount = useWorkspaceStore((s) => s.nodes.length);
-  const resetCanvasView = useWorkspaceStore((s) => s.resetCanvasView);
-  const isCloudActive = useCloudStore((s) => s.user !== null && s.status !== "error");
-  const setSettingsOpen = useSettingsStore((s) => s.setModalOpen);
-  const setArenaOpen = useMarketStore((s) => s.setArenaOpen);
-  const setUpgradeOpen = useMarketStore((s) => s.setUpgradeOpen);
-  const openLanding =useLandingStore((s) => s.openLanding);
+  const openLanding = useLandingStore((s) => s.openLanding);
   const isLandingDone = useLandingStore((s) => s.phase === "workspace");
 
   return (
-    <header className="fixed top-3 md:top-4 left-3 right-3 md:left-6 md:right-6 z-40 flex items-center justify-between pointer-events-none">
-      {/* Identidad del proyecto y migas de pan */}
-      <div className="pointer-events-auto flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-andros-surface backdrop-blur-md border border-andros-border shadow-sm">
+    <header className="fixed top-3 md:top-4 left-3 right-3 md:left-6 md:right-6 z-40 flex items-center justify-between gap-2 pointer-events-none">
+      {/* Logo + proyecto actual */}
+      <div className="pointer-events-auto min-w-0 flex items-center gap-2 px-2.5 md:px-3 h-9 md:h-10 rounded-xl bg-andros-surface backdrop-blur-md border border-andros-border shadow-sm">
         {/* Destino del vuelo de la marca de la portada (LandingOverlay) */}
         <button
           type="button"
           onClick={openLanding}
-          title="Volver al inicio"
+          title="Volver a la portada"
           aria-label="Volver a la portada de Andros"
           data-andros-mark
-          className="w-6 h-6 flex items-center justify-center spring-bounce hover:scale-110 hover:-translate-y-0.5 active:scale-95"
+          className="w-6 h-6 shrink-0 flex items-center justify-center spring-bounce hover:scale-110 active:scale-95"
           style={{ opacity: isLandingDone ? 1 : 0 }}
         >
           <AndrosMark className="w-6 h-6" />
         </button>
-        <div className="flex items-center gap-1.5 text-xs">
+        <div className="min-w-0 flex items-center gap-1.5 text-xs">
           {/* Destino del vuelo del logo mutante (LandingOverlay) */}
           <button
             type="button"
             onClick={openLanding}
-            title="Volver al inicio"
+            title="Volver a la portada"
             data-andros-wordmark
-            className="font-semibold text-andros-primary hover:text-andros-accent transition-colors"
+            className="hidden sm:inline font-semibold text-andros-primary hover:text-andros-accent transition-colors"
             style={{ opacity: isLandingDone ? 1 : 0 }}
           >
             Andros
           </button>
-          <span className="text-andros-muted">/</span>
+          <span className="hidden sm:inline text-andros-muted">/</span>
           <WorkspaceQuickSwitcher />
         </div>
-        <div
-          className={`w-1.5 h-1.5 rounded-full ml-0.5 ${
-            isCloudActive ? "bg-andros-success animate-pulse" : "bg-andros-muted"
-          }`}
-          title={isCloudActive ? "Sincronización con la nube activa" : "Modo local"}
-        />
       </div>
 
-      {/* Acciones rápidas y Colaboradores */}
-      <div className="pointer-events-auto flex items-center gap-2">
-        {!isMobile && (
-          <button
-            onClick={resetCanvasView}
-            className="px-2.5 py-1.5 rounded-xl bg-andros-surface backdrop-blur-md border border-andros-border text-[11px] font-mono text-andros-muted hover:text-andros-primary flex items-center gap-1.5 spring-micro active:scale-95"
-            title="Centrar vista del lienzo"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <span>{nodesCount} nodos</span>
-          </button>
-        )}
-
-        <button
-          type="button"
-          onClick={() => setArenaOpen(true)}
-          aria-label="Abrir Arena y Empleos"
-          title="Arena & Empleos"
-          className="min-h-[40px] md:min-h-0 px-2.5 py-1.5 rounded-xl bg-andros-surface backdrop-blur-md border border-andros-border text-[11px] font-medium text-andros-muted hover:text-andros-primary shadow-sm active:scale-95 spring-micro flex items-center gap-1.5"
-        >
-          <Swords className="w-3.5 h-3.5" />
-          {!isMobile && <span>Arena &amp; Empleos</span>}
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setUpgradeOpen(true)}
-          aria-label="Ver planes y suscripciones"
-          title="Andros Pro"
-          className="min-h-[40px] md:min-h-0 px-2.5 py-1.5 rounded-xl bg-andros-accent text-white text-[11px] font-semibold shadow-sm active:scale-95 spring-micro flex items-center gap-1.5 hover:opacity-90"
-        >
-          <Crown className="w-3.5 h-3.5" />
-          {!isMobile && <span>Pro</span>}
-        </button>
-
+      {/* Acciones: solo lo esencial */}
+      <div className="pointer-events-auto shrink-0 flex items-center gap-1.5 md:gap-2">
         <ThemeToggle />
-
-        <button
-          type="button"
-          onClick={() => setSettingsOpen(true)}
-          aria-label="Abrir ajustes de comodidad"
-          title="Ajustes"
-          className="min-w-[40px] min-h-[40px] md:min-w-0 md:min-h-0 p-2 rounded-xl bg-andros-surface backdrop-blur-md border border-andros-border text-andros-muted hover:text-andros-primary shadow-sm hover:scale-105 hover:rotate-45 active:scale-95 spring-micro flex items-center justify-center"
-        >
-          <Settings className="w-4 h-4" />
-        </button>
-
-        {/* Cuenta de Google + estado de guardado en la nube */}
+        <InstallAppButton isMobile={isMobile} />
         <GoogleAuthButton isMobile={isMobile} />
+        <MoreMenu />
       </div>
     </header>
   );

@@ -25,12 +25,11 @@ import {
   createEmptyFilePayload,
   createEmptyResourceLinkPayload,
   createEmptySketchNotePayload,
-  INITIAL_CONNECTIONS,
-  INITIAL_NODES,
   MAX_FILE_SIZE_BYTES,
   MAX_FILE_SIZE_LABEL,
   useWorkspaceStore,
 } from "@/store/useWorkspaceStore";
+import { useLandingStore } from "@/store/useLandingStore";
 import { sanitizeCanvasStrokes } from "@/lib/canvas/inkGeometry";
 import {
   useWorkspaceManagerStore,
@@ -1221,8 +1220,9 @@ export async function signInWithGoogle(): Promise<void> {
 }
 
 /**
- * Guarda lo pendiente, cierra la sesión y deja el lienzo de demostración
- * (así el siguiente usuario de este equipo no ve los datos del anterior).
+ * Guarda lo pendiente, cierra la sesión, deja el lienzo en blanco (así el
+ * siguiente usuario de este equipo no ve los datos del anterior) y vuelve a
+ * la portada, que es la entrada para quien no tiene sesión.
  */
 export async function signOutFromCloud(): Promise<void> {
   const supabase = getSupabaseBrowserClient();
@@ -1232,11 +1232,12 @@ export async function signOutFromCloud(): Promise<void> {
   activeEngine?.pause();
   await supabase.auth.signOut();
 
-  useWorkspaceStore.getState().hydrateWorkspace(INITIAL_NODES, INITIAL_CONNECTIONS);
+  useWorkspaceStore.getState().hydrateWorkspace([], []);
   useWorkspaceStore.getState().hydrateCanvasStrokes([]);
   useCloudStore.getState().setUser(null);
   useWorkspaceManagerStore.getState().setWorkspaces([]);
   useCloudStore.getState().setStatus("signed-out", null);
+  useLandingStore.getState().resetToLanding();
 }
 
 // Acciones del gestor de espacios (las usa WorkspaceManagerDrawer).

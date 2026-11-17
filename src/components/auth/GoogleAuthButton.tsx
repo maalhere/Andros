@@ -13,7 +13,7 @@ import { signInWithGoogle, signOutFromCloud } from "@/hooks/useCloudSync";
 // ============================================================================
 
 /** Logotipo oficial "G" de Google (requerido por sus normas de marca). */
-const GoogleGlyph: React.FC<{ className?: string }> = ({ className }) => (
+export const GoogleGlyph: React.FC<{ className?: string }> = ({ className }) => (
   <svg viewBox="0 0 48 48" className={className} aria-hidden="true">
     <path
       fill="#FFC107"

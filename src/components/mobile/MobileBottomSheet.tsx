@@ -1,19 +1,22 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
-  BookOpen,
+  Box,
   Cable,
+  Calculator,
   Check,
   FileBox,
   Link2,
   NotebookPen,
   Sigma,
+  StickyNote,
   Terminal,
   X,
 } from "lucide-react";
+import { QUICK_ADD_OPTIONS, quickAdd, type QuickAddKind } from "@/lib/canvas/quickAdd";
 import { NODE_ARCHETYPE_LABELS, useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { EngineeringNodeData, NodeArchetype } from "@/types/workspace";
 import { OracleModal } from "@/components/shared/OracleModal";
@@ -300,45 +303,82 @@ const ConnectSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 // Cajón inferior deslizable (Teléfono < 768px)
 // ============================================================================
 
-const NEW_NODE_OPTIONS: {
-  type: NodeArchetype;
-  name: string;
-  description: string;
-}[] = [
-  {
-    type: "file-node",
-    name: "Archivo Descargable",
-    description: "CAD, STL, PDF, ZIP o datasets · cualquier peso",
-  },
-  {
-    type: "sketch-note-node",
-    name: "Cuaderno de Notas y Boceto",
-    description: "Texto, listas de verificación y dibujo a mano",
-  },
-  {
-    type: "calc-latex-node",
-    name: "Hoja de Cálculo + LaTeX",
-    description: "Celdas con fórmulas y ecuaciones justificadas",
-  },
-  {
-    type: "resource-link-node",
-    name: "Enlace / Fuente",
-    description: "YouTube, GitHub, papers y perfiles con vista previa",
-  },
-  {
-    type: "code-lab-node",
-    name: "Código / Cálculo Rápido",
-    description: "Variables, funciones matemáticas y gráficas plot(x, y)",
-  },
-];
+const QUICK_ADD_ICONS: Record<QuickAddKind, React.ReactNode> = {
+  file3d: <Box className="w-5 h-5" />,
+  note: <StickyNote className="w-5 h-5" />,
+  link: <Link2 className="w-5 h-5" />,
+  calc: <Calculator className="w-5 h-5" />,
+};
+
+/** Las 4 opciones de "+ Agregar" (las mismas que el dock de escritorio). */
+const AddSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  const nodesCount = useWorkspaceStore((s) => s.nodes.length);
+  const setActiveMobileSheet = useWorkspaceStore((s) => s.setActiveMobileSheet);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (file) quickAdd("file3d", file);
+  };
+
+  return (
+    <div className="space-y-3">
+      <SheetHeader title="Agregar" onClose={onClose} />
+
+      {/* Sin `accept`: iOS deshabilita .stl / .3mf si se filtra por extensión */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        onChange={handleFile}
+        aria-label="Subir archivo 3D"
+      />
+
+      <div className="grid grid-cols-2 gap-2.5">
+        {QUICK_ADD_OPTIONS.map((option) => (
+          <button
+            key={option.kind}
+            type="button"
+            onClick={() =>
+              option.kind === "file3d" ? fileInputRef.current?.click() : quickAdd(option.kind)
+            }
+            className="min-h-[96px] p-3.5 rounded-2xl bg-andros-canvas border border-andros-border flex flex-col items-start gap-2 text-left active:scale-98 spring-micro"
+          >
+            <span className="w-9 h-9 rounded-xl bg-andros-accent/10 text-andros-accent flex items-center justify-center">
+              {QUICK_ADD_ICONS[option.kind]}
+            </span>
+            <span className="min-w-0">
+              <span className="block text-[13px] font-semibold text-andros-primary">{option.label}</span>
+              <span className="block text-[11px] leading-snug text-andros-muted">{option.description}</span>
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {nodesCount >= 2 && (
+        <button
+          type="button"
+          onClick={() => setActiveMobileSheet("connect")}
+          className="w-full min-h-[44px] flex items-center justify-center gap-2 text-xs text-andros-muted active:scale-98 spring-micro"
+        >
+          <Cable className="w-3.5 h-3.5" />
+          <span>Conectar piezas entre sí</span>
+        </button>
+      )}
+    </div>
+  );
+};
 
 export const MobileBottomSheet: React.FC = () => {
   const activeMobileSheet = useWorkspaceStore((s) => s.activeMobileSheet);
   const setActiveMobileSheet = useWorkspaceStore((s) => s.setActiveMobileSheet);
-  const spawnNode = useWorkspaceStore((s) => s.spawnNode);
-  const nodesCount = useWorkspaceStore((s) => s.nodes.length);
 
-  if (activeMobileSheet === "none" || activeMobileSheet === "node-detail") {
+  if (
+    activeMobileSheet === "none" ||
+    activeMobileSheet === "node-detail" ||
+    activeMobileSheet === "library"
+  ) {
     return null;
   }
 
@@ -360,77 +400,9 @@ export const MobileBottomSheet: React.FC = () => {
 
         {activeMobileSheet === "connect" && <ConnectSheet onClose={closeSheet} />}
 
-        {activeMobileSheet === "new-node" && (
-          <div className="space-y-3">
-            <SheetHeader title="Crear Nuevo Nodo" onClose={closeSheet} />
-
-            <div className="grid grid-cols-1 gap-2.5">
-              {NEW_NODE_OPTIONS.map((option) => (
-                <button
-                  key={option.type}
-                  type="button"
-                  onClick={() => spawnNode({ type: option.type })}
-                  className="min-h-[56px] p-3.5 rounded-xl bg-andros-canvas border border-andros-border flex items-center gap-3 text-left active:scale-98 spring-micro"
-                >
-                  {renderArchetypeIcon(
-                    option.type,
-                    "w-5 h-5 text-andros-accent shrink-0"
-                  )}
-                  <div className="min-w-0">
-                    <div className="text-xs font-semibold text-andros-primary">
-                      {option.name}
-                    </div>
-                    <div className="text-[11px] text-andros-muted font-mono">
-                      {option.description}
-                    </div>
-                  </div>
-                </button>
-              ))}
-            </div>
-
-            {/* Acceso directo al menú táctil de conexión */}
-            <button
-              type="button"
-              onClick={() => setActiveMobileSheet("connect")}
-              disabled={nodesCount < 2}
-              className="w-full min-h-[48px] px-3.5 rounded-xl border border-dashed border-andros-border-active flex items-center justify-center gap-2 text-xs font-medium text-andros-primary active:scale-98 spring-micro disabled:opacity-50"
-            >
-              <Cable className="w-4 h-4 text-andros-accent" />
-              <span>Conectar nodos existentes</span>
-            </button>
-          </div>
-        )}
-
-        {activeMobileSheet === "library" && (
-          <div className="space-y-3">
-            <SheetHeader title="Biblioteca Técnica Rápida" onClose={closeSheet} />
-
-            <button
-              type="button"
-              onClick={() =>
-                spawnNode({
-                  type: "sketch-note-node",
-                  title: "ASTM A500 Structural Tubing",
-                  codeTag: "STD-ASTM",
-                  summary:
-                    "Especificación estándar para tubería estructural de acero al carbono formada en frío.",
-                })
-              }
-              className="w-full min-h-[56px] p-3.5 rounded-xl bg-andros-canvas border border-andros-border flex items-center gap-3 text-left active:scale-98 spring-micro"
-            >
-              <BookOpen className="w-5 h-5 text-andros-accent shrink-0" />
-              <div className="min-w-0">
-                <div className="text-xs font-semibold text-andros-primary">
-                  Insertar Norma ASTM A500
-                </div>
-                <div className="text-[11px] font-mono text-andros-muted">
-                  Se agrega como cuaderno a la pila de trabajo
-                </div>
-              </div>
-            </button>
-          </div>
-        )}
+        {activeMobileSheet === "new-node" && <AddSheet onClose={closeSheet} />}
       </div>
     </div>
   );
 };
+

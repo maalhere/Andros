@@ -1115,8 +1115,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       return { theme };
     }),
 
-  nodes: INITIAL_NODES,
-  connections: INITIAL_CONNECTIONS,
+  // El lienzo arranca 100 % vacío: cada persona empieza desde cero.
+  // (INITIAL_NODES / INITIAL_CONNECTIONS quedan como material de demostración.)
+  nodes: [],
+  connections: [],
   selectedNodeId: null,
 
   connectingFrom: null,

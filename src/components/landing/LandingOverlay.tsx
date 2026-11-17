@@ -2,20 +2,27 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { motion, useAnimate, useReducedMotion, useSpring, useTransform } from "framer-motion";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Loader2 } from "lucide-react";
 import { MutantAndrosLogo } from "./MutantAndrosLogo";
 import { BlackHoleCanvas } from "./BlackHoleCanvas";
 import { AndrosMark } from "@/components/brand/AndrosMark";
 import { ThemeToggle } from "@/components/shared/ThemeToggle";
-import { GoogleAuthButton } from "@/components/auth/GoogleAuthButton";
+import { GoogleGlyph } from "@/components/auth/GoogleAuthButton";
+import { signInWithGoogle } from "@/hooks/useCloudSync";
+import { useCloudStore } from "@/store/useCloudStore";
 import { useLandingStore } from "@/store/useLandingStore";
 
 // ============================================================================
 // ANDROS — LANDING EDITORIAL (Swiss / aeroespacial)
 //   Agujero negro procedural de fondo + logo mutante como punto focal.
-//   "Enter Workspace": las letras se alinean y vuelan hasta el "Andros" de la
-//   barra superior, la marca de doble chevrón vuela a su sitio y la portada
-//   se desvanece revelando el lienzo infinito.
+//
+//   Entrada:
+//   · Botón principal "Continuar con Google" → login OAuth de Supabase.
+//     Al volver con sesión, la portada se cierra sola y abre su lienzo.
+//   · "Explorar primero sin cuenta" (discreto) → las letras se alinean y
+//     vuelan hasta el "Andros" de la barra superior y la portada se
+//     desvanece revelando el lienzo en modo local.
+//   · Sin claves de Supabase (modo local) el botón principal entra directo.
 // ============================================================================
 
 const wait = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
@@ -94,9 +101,23 @@ interface LandingOverlayProps {
 
 export const LandingOverlay: React.FC<LandingOverlayProps> = ({ isMobile }) => {
   const phase = useLandingStore((s) => s.phase);
+  const manual = useLandingStore((s) => s.manual);
   const startIgnition = useLandingStore((s) => s.startIgnition);
   const finishIgnition = useLandingStore((s) => s.finishIgnition);
+  const skipToWorkspace = useLandingStore((s) => s.skipToWorkspace);
+  const cloudStatus = useCloudStore((s) => s.status);
+  const user = useCloudStore((s) => s.user);
+  const cloudError = useCloudStore((s) => s.errorMessage);
+  const clearCloudError = useCloudStore((s) => s.clearError);
   const reduceMotion = useReducedMotion() ?? false;
+
+  // Con sesión de Google ya activa (o al volver del login) se entra directo al lienzo.
+  useEffect(() => {
+    if (user && !manual && useLandingStore.getState().phase === "landing") skipToWorkspace();
+  }, [user, manual, skipToWorkspace]);
+
+  const cloudDisabled = cloudStatus === "disabled";
+  const checkingSession = cloudStatus === "connecting" && !user;
 
   const [shuffleSignal, setShuffleSignal] = useState(0);
   const [logoScope, animateLogo] = useAnimate<HTMLDivElement>();
@@ -139,7 +160,8 @@ export const LandingOverlay: React.FC<LandingOverlayProps> = ({ isMobile }) => {
     // 2a) Las letras viajan hasta el "Andros" de la barra superior.
     const logo = logoScope.current;
     const wordmark = document.querySelector<HTMLElement>("[data-andros-wordmark]");
-    if (logo && wordmark) {
+    // En pantallas estrechas el "Andros" de la barra está oculto: solo se desvanece.
+    if (logo && wordmark && wordmark.getClientRects().length > 0) {
       const s = logo.getBoundingClientRect();
       const t = wordmark.getBoundingClientRect();
       const sourceSize = parseFloat(getComputedStyle(logo).fontSize) || 1;
@@ -237,7 +259,6 @@ export const LandingOverlay: React.FC<LandingOverlayProps> = ({ isMobile }) => {
           </div>
           <motion.div animate={fadeOut} className="flex items-center gap-2">
             <ThemeToggle />
-            <GoogleAuthButton isMobile={isMobile} />
           </motion.div>
         </header>
 
@@ -275,16 +296,54 @@ export const LandingOverlay: React.FC<LandingOverlayProps> = ({ isMobile }) => {
               </div>
 
               <p className="mt-8 md:mt-10 max-w-md text-base md:text-lg leading-snug text-andros-primary">
-                Infinite spatial workspace for 3D engineering, calculation, and AI-assisted
-                research.
+                Tu lienzo infinito para piezas 3D, cálculos e investigación con IA. Sube una
+                pieza, dibuja tu idea e imprímela en 1 clic.
               </p>
 
-              <div className="mt-7">
-                <SpringButton onClick={() => void handleStart()} disabled={igniting}>
-                  <AndrosMark className="w-5 h-5" tone="inverse" />
-                  <span>Enter Workspace</span>
-                  <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
-                </SpringButton>
+              <div className="mt-7 flex flex-col items-start gap-3">
+                {user || cloudDisabled ? (
+                  /* Ya hay sesión (portada abierta desde el logo) o modo local sin nube */
+                  <SpringButton onClick={() => void handleStart()} disabled={igniting}>
+                    <AndrosMark className="w-5 h-5" tone="inverse" />
+                    <span>{user ? "Ir a mi espacio" : "Entrar al espacio de trabajo"}</span>
+                    <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
+                  </SpringButton>
+                ) : (
+                  <SpringButton
+                    onClick={() => {
+                      clearCloudError();
+                      void signInWithGoogle();
+                    }}
+                    disabled={igniting || checkingSession}
+                  >
+                    {checkingSession ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <span className="w-6 h-6 rounded-full bg-white flex items-center justify-center">
+                        <GoogleGlyph className="w-4 h-4" />
+                      </span>
+                    )}
+                    <span>{checkingSession ? "Conectando…" : "Continuar con Google"}</span>
+                    <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
+                  </SpringButton>
+                )}
+
+                {!user && !cloudDisabled && (
+                  <button
+                    type="button"
+                    onClick={() => void handleStart()}
+                    disabled={igniting}
+                    className="text-xs text-andros-muted hover:text-andros-primary underline decoration-andros-border-active underline-offset-4 hover:decoration-andros-primary transition-colors"
+                  >
+                    Explorar primero sin cuenta
+                  </button>
+                )}
+
+                {cloudError && !user && (
+                  <p role="alert" className="max-w-sm text-xs leading-relaxed text-andros-accent">
+                    {cloudError}
+                  </p>
+                )}
               </div>
             </motion.div>
           </div>

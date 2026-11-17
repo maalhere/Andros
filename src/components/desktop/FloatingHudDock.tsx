@@ -1,23 +1,22 @@
 "use client";
 
-import React, { useRef } from "react";
-import { motion, useMotionValue, useSpring } from "framer-motion";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion, useMotionValue, useSpring } from "framer-motion";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import {
-  MousePointer,
-  PlusCircle,
-  GitBranch,
-  Library,
+  Box,
+  Calculator,
   Link2,
+  MousePointer2,
+  Plus,
   Sparkles,
   PenLine,
   Eraser,
-  Terminal,
+  StickyNote,
   Undo2,
   Minus,
-  Plus,
-  Scan,
 } from "lucide-react";
+import { QUICK_ADD_OPTIONS, quickAdd, type QuickAddKind } from "@/lib/canvas/quickAdd";
 import {
   INK_TIP_WIDTHS,
   MAX_CANVAS_SCALE,
@@ -27,8 +26,8 @@ import {
 import type { CanvasInkColor, CanvasInkTip } from "@/types/workspace";
 
 // ============================================================================
-// 1. HUD DE TELEMETRÍA DE CÁMARA (esquina inferior izquierda)
-//    [-] 100% [+] | [ ] Zoom Extents | 1:1
+// 1. INDICADOR DE ZOOM DISCRETO (esquina inferior izquierda)  − 100% +
+//    Clic en el porcentaje → vuelve al 100 %.
 // ============================================================================
 
 /** Paso de los botones +/- (20 % relativo por clic). */
@@ -37,10 +36,9 @@ const ZOOM_STEP = 1.2;
 const hudButtonClass =
   "flex items-center justify-center h-7 min-w-7 px-1.5 rounded-lg text-andros-muted hover:text-andros-primary hover:bg-andros-border/40 active:scale-95 disabled:opacity-35 disabled:pointer-events-none spring-micro";
 
-const CanvasTelemetryHud: React.FC = () => {
+const CanvasZoomIndicator: React.FC = () => {
   const scale = useWorkspaceStore((s) => s.canvasTransform.scale);
   const zoomCanvasAt = useWorkspaceStore((s) => s.zoomCanvasAt);
-  const requestZoomExtents = useWorkspaceStore((s) => s.requestZoomExtents);
 
   const percent = Math.round(scale * 100);
 
@@ -48,58 +46,38 @@ const CanvasTelemetryHud: React.FC = () => {
     <div
       role="toolbar"
       aria-label="Zoom del lienzo"
-      className="fixed left-6 bottom-6 max-[960px]:bottom-[5.25rem] z-40 flex items-center gap-0.5 px-1.5 py-1.5 rounded-xl bg-andros-surface backdrop-blur-xl border border-andros-border shadow-hud-light dark:shadow-hud-dark font-mono text-[11px]"
+      className="fixed left-6 bottom-6 max-[1000px]:bottom-[5.75rem] z-40 flex items-center gap-0.5 px-1 py-1 rounded-xl bg-andros-surface/80 backdrop-blur-xl border border-andros-border font-mono text-[11px] opacity-80 hover:opacity-100 spring-micro"
     >
       <button
         type="button"
         onClick={() => zoomCanvasAt(scale / ZOOM_STEP)}
         disabled={scale <= MIN_CANVAS_SCALE + 0.001}
-        title="Alejar (rueda abajo)"
+        title="Alejar (rueda del ratón)"
         aria-label="Alejar"
         className={hudButtonClass}
       >
         <Minus className="w-3.5 h-3.5" />
       </button>
 
-      <span
+      <button
+        type="button"
+        onClick={() => zoomCanvasAt(1)}
         aria-live="polite"
-        title="Zoom actual"
-        className="w-12 text-center tabular-nums text-andros-primary select-none"
+        title="Volver al 100 %"
+        className="w-11 h-7 text-center tabular-nums text-andros-primary rounded-lg hover:bg-andros-border/40 spring-micro"
       >
         {percent}%
-      </span>
+      </button>
 
       <button
         type="button"
         onClick={() => zoomCanvasAt(scale * ZOOM_STEP)}
         disabled={scale >= MAX_CANVAS_SCALE - 0.001}
-        title="Acercar (rueda arriba)"
+        title="Acercar (rueda del ratón)"
         aria-label="Acercar"
         className={hudButtonClass}
       >
         <Plus className="w-3.5 h-3.5" />
-      </button>
-
-      <div className="w-px h-4 bg-andros-border mx-1" />
-
-      <button
-        type="button"
-        onClick={requestZoomExtents}
-        title="Zoom Extents: encuadrar todo (doble clic en la rueda)"
-        aria-label="Zoom Extents"
-        className={hudButtonClass}
-      >
-        <Scan className="w-3.5 h-3.5" />
-      </button>
-
-      <button
-        type="button"
-        onClick={() => zoomCanvasAt(1)}
-        title="Escala real 1:1 (100 %)"
-        aria-label="Escala 1:1"
-        className={`${hudButtonClass} ${percent === 100 ? "text-andros-accent" : ""}`}
-      >
-        <span className="font-semibold tracking-tight">1:1</span>
       </button>
     </div>
   );
@@ -231,31 +209,38 @@ const InkToolbar: React.FC = () => {
 };
 
 // ============================================================================
-// 3. DOCK PRINCIPAL (física elástica, atracción magnética y pastilla activa)
+// 3. DOCK PRINCIPAL — 4 botones claros con icono + etiqueta
+//    Seleccionar · + Agregar · Dibujar · Oráculo IA
 // ============================================================================
 
 const DOCK_SPRING = { type: "spring", stiffness: 450, damping: 32, mass: 0.8 } as const;
 const MAGNET_RANGE = 70; // px alrededor del botón donde empieza a atraer
-const MAGNET_PULL = 0.18; // fracción de la distancia al cursor que se desplaza
+const MAGNET_PULL = 0.12; // fracción de la distancia al cursor que se desplaza
 
 interface DockButtonProps {
   onClick: () => void;
   title: string;
+  label: string;
+  icon: React.ReactNode;
   active?: boolean;
   accent?: boolean;
   pressed?: boolean;
+  expanded?: boolean;
+  tourId?: string;
   full: boolean;
-  children: React.ReactNode;
 }
 
 const DockButton: React.FC<DockButtonProps> = ({
   onClick,
   title,
+  label,
+  icon,
   active = false,
   accent = false,
   pressed,
+  expanded,
+  tourId,
   full,
-  children,
 }) => {
   const ref = useRef<HTMLButtonElement>(null);
   const mx = useMotionValue(0);
@@ -284,13 +269,15 @@ const DockButton: React.FC<DockButtonProps> = ({
       onClick={onClick}
       title={title}
       aria-pressed={pressed}
+      aria-expanded={expanded}
+      data-tour={tourId}
       onPointerMove={handleMove}
       onPointerLeave={resetMagnet}
       style={full ? { x, y } : undefined}
-      whileHover={full ? { scale: 1.07 } : undefined}
-      whileTap={full ? { scale: 0.92 } : { scale: 0.97 }}
+      whileHover={full ? { scale: 1.04 } : undefined}
+      whileTap={full ? { scale: 0.94 } : { scale: 0.97 }}
       transition={full ? DOCK_SPRING : { duration: 0 }}
-      className={`relative flex items-center gap-1.5 p-2.5 rounded-xl ${
+      className={`relative flex items-center gap-2 h-10 px-3.5 rounded-xl ${
         active
           ? accent
             ? "text-andros-accent"
@@ -306,101 +293,174 @@ const DockButton: React.FC<DockButtonProps> = ({
           transition={full ? DOCK_SPRING : { duration: 0 }}
         />
       )}
-      <span className="relative z-10 flex items-center gap-1.5">{children}</span>
+      <span className="relative z-10 flex items-center gap-2">
+        {icon}
+        <span className="text-[13px] font-medium">{label}</span>
+      </span>
     </motion.button>
+  );
+};
+
+const QUICK_ADD_ICONS: Record<QuickAddKind, React.ReactNode> = {
+  file3d: <Box className="w-4 h-4" />,
+  note: <StickyNote className="w-4 h-4" />,
+  link: <Link2 className="w-4 h-4" />,
+  calc: <Calculator className="w-4 h-4" />,
+};
+
+/** Menú emergente de "+ Agregar" con las 4 opciones. */
+const AddMenu: React.FC<{ onClose: () => void; onPickFile: () => void }> = ({
+  onClose,
+  onPickFile,
+}) => {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handlePointer = (e: PointerEvent) => {
+      const target = e.target as HTMLElement;
+      if (ref.current?.contains(target) || target.closest("[data-add-trigger]")) return;
+      onClose();
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("pointerdown", handlePointer);
+    window.addEventListener("keydown", handleKey);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointer);
+      window.removeEventListener("keydown", handleKey);
+    };
+  }, [onClose]);
+
+  return (
+    <motion.div
+      ref={ref}
+      role="menu"
+      aria-label="Agregar al lienzo"
+      initial={{ opacity: 0, y: 8, scale: 0.97 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: 6, scale: 0.97 }}
+      transition={{ duration: 0.16 }}
+      className="absolute bottom-[calc(100%+12px)] left-1/2 -ml-36 w-72 p-1.5 rounded-2xl bg-andros-card border border-andros-border shadow-hud-light dark:shadow-hud-dark"
+    >
+      {QUICK_ADD_OPTIONS.map((option) => (
+        <button
+          key={option.kind}
+          type="button"
+          role="menuitem"
+          onClick={() => {
+            if (option.kind === "file3d") {
+              onPickFile();
+            } else {
+              quickAdd(option.kind);
+            }
+            onClose();
+          }}
+          className="w-full flex items-center gap-3 px-2.5 py-2 rounded-xl text-left hover:bg-andros-border/40 spring-micro"
+        >
+          <span className="w-8 h-8 shrink-0 rounded-lg bg-andros-accent/10 text-andros-accent flex items-center justify-center">
+            {QUICK_ADD_ICONS[option.kind]}
+          </span>
+          <span className="min-w-0">
+            <span className="block text-[13px] font-semibold text-andros-primary">{option.label}</span>
+            <span className="block text-[11px] text-andros-muted truncate">{option.description}</span>
+          </span>
+        </button>
+      ))}
+    </motion.div>
   );
 };
 
 export const FloatingHudDock: React.FC = () => {
   const activeTool = useWorkspaceStore((s) => s.activeTool);
   const setActiveTool = useWorkspaceStore((s) => s.setActiveTool);
-  const spawnNode = useWorkspaceStore((s) => s.spawnNode);
   const setOracleModalOpen = useWorkspaceStore((s) => s.setOracleModalOpen);
   const full = useSettingsStore((s) => s.animations) === "full";
 
+  const [addOpen, setAddOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const closeAdd = useCallback(() => setAddOpen(false), []);
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (file) quickAdd("file3d", file);
+  };
+
+  const isDrawing = activeTool === "draw";
+
   return (
     <>
-    <CanvasTelemetryHud />
-    {activeTool === "draw" && <InkToolbar />}
+      <CanvasZoomIndicator />
+      {isDrawing && <InkToolbar />}
 
-    <nav
-      aria-label="Herramientas del Lienzo"
-      className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1 px-3 py-2 rounded-2xl bg-andros-surface backdrop-blur-xl border border-andros-border shadow-hud-light dark:shadow-hud-dark"
-    >
-      <DockButton full={full} title="Puntero (V)" active={activeTool === "pointer"} onClick={() => setActiveTool("pointer")}>
-        <MousePointer className="w-4 h-4" />
-        <kbd className="text-[10px] font-mono opacity-60">V</kbd>
-      </DockButton>
+      {/* Selector nativo de "Archivo 3D" (sin `accept`: iOS bloquea .stl/.3mf si se filtra) */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        onChange={handleFile}
+        aria-label="Subir archivo 3D"
+      />
 
-      <DockButton full={full} title="Nuevo Nodo (N)" onClick={() => spawnNode()}>
-        <PlusCircle className="w-4 h-4" />
-        <kbd className="text-[10px] font-mono opacity-60">N</kbd>
-      </DockButton>
-
-      <DockButton full={full} title="Conexión (C)" active={activeTool === "connect"} onClick={() => setActiveTool("connect")}>
-        <GitBranch className="w-4 h-4" />
-        <kbd className="text-[10px] font-mono opacity-60">C</kbd>
-      </DockButton>
-
-      <DockButton
-        full={full}
-        title="Lápiz / Tinta Libre (D)"
-        active={activeTool === "draw"}
-        accent
-        pressed={activeTool === "draw"}
-        onClick={() => setActiveTool(activeTool === "draw" ? "pointer" : "draw")}
+      <nav
+        aria-label="Herramientas del Lienzo"
+        className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1 p-1.5 rounded-2xl bg-andros-surface backdrop-blur-xl border border-andros-border shadow-hud-light dark:shadow-hud-dark"
       >
-        <PenLine className="w-4 h-4" />
-        <kbd className="text-[10px] font-mono opacity-60">D</kbd>
-      </DockButton>
+        <DockButton
+          full={full}
+          title="Seleccionar y mover piezas (V)"
+          label="Seleccionar"
+          icon={<MousePointer2 className="w-4 h-4" />}
+          active={!isDrawing && !addOpen}
+          onClick={() => setActiveTool("pointer")}
+        />
 
-      <div className="w-px h-5 bg-andros-border mx-1" />
+        <div className="relative" data-add-trigger>
+          <DockButton
+            full={full}
+            title="Agregar archivo 3D, nota, enlace o cálculo"
+            label="Agregar"
+            icon={<Plus className="w-4 h-4" />}
+            active={addOpen}
+            expanded={addOpen}
+            tourId="add"
+            onClick={() => setAddOpen((open) => !open)}
+          />
+          <AnimatePresence>
+            {addOpen && (
+              <AddMenu onClose={closeAdd} onPickFile={() => fileInputRef.current?.click()} />
+            )}
+          </AnimatePresence>
+        </div>
 
-      <DockButton full={full} title="Enlace / Fuente (L)" onClick={() => spawnNode({ type: "resource-link-node" })}>
-        <Link2 className="w-4 h-4" />
-        <kbd className="text-[10px] font-mono opacity-60">L</kbd>
-      </DockButton>
+        <DockButton
+          full={full}
+          title="Dibujar a mano alzada (D)"
+          label="Dibujar"
+          icon={<PenLine className="w-4 h-4" />}
+          active={isDrawing}
+          accent
+          pressed={isDrawing}
+          tourId="draw"
+          onClick={() => setActiveTool(isDrawing ? "pointer" : "draw")}
+        />
 
-      <DockButton full={full} title="Código / Cálculo (M)" onClick={() => spawnNode({ type: "code-lab-node" })}>
-        <Terminal className="w-4 h-4" />
-        <kbd className="text-[10px] font-mono opacity-60">M</kbd>
-      </DockButton>
-
-      <div className="w-px h-5 bg-andros-border mx-1" />
-
-      <DockButton
-        full={full}
-        title="Insertar desde Biblioteca Técnica (B)"
-        onClick={() =>
-          spawnNode({
-            type: "reference",
-            title: "Paper • Eurocode 3 Joints",
-            codeTag: "DOI-10.1016",
-            summary:
-              "Diseño de uniones tubulares soldadas sometidas a fatiga multiaxial.",
-          })
-        }
-      >
-        <Library className="w-4 h-4" />
-        <kbd className="text-[10px] font-mono opacity-60">B</kbd>
-      </DockButton>
-
-      <motion.button
-        type="button"
-        onClick={() => setOracleModalOpen(true)}
-        title="Oráculo IA (⌘K)"
-        whileHover={full ? { scale: 1.06 } : undefined}
-        whileTap={{ scale: full ? 0.92 : 0.97 }}
-        transition={full ? DOCK_SPRING : { duration: 0 }}
-        className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-andros-primary text-andros-canvas hover:opacity-90 ml-1 shadow-sm"
-      >
-        <Sparkles className="w-3.5 h-3.5 text-andros-accent" />
-        <span className="text-xs font-semibold tracking-wide">Oráculo</span>
-        <kbd className="text-[10px] font-mono opacity-70 bg-andros-canvas/20 px-1 py-0.5 rounded">
-          ⌘K
-        </kbd>
-      </motion.button>
-    </nav>
+        <motion.button
+          type="button"
+          onClick={() => setOracleModalOpen(true)}
+          title="Oráculo IA (Ctrl/⌘ + K)"
+          data-tour="oracle"
+          whileHover={full ? { scale: 1.04 } : undefined}
+          whileTap={{ scale: full ? 0.94 : 0.97 }}
+          transition={full ? DOCK_SPRING : { duration: 0 }}
+          className="flex items-center gap-2 h-10 px-3.5 ml-0.5 rounded-xl bg-andros-primary text-andros-canvas hover:opacity-90 shadow-sm"
+        >
+          <Sparkles className="w-4 h-4 text-andros-accent" />
+          <span className="text-[13px] font-semibold">Oráculo IA</span>
+        </motion.button>
+      </nav>
     </>
   );
 };
+

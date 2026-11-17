@@ -17,6 +17,7 @@ import { ThumbZoneBar } from "@/components/mobile/ThumbZoneBar";
 import { MobileBottomSheet } from "@/components/mobile/MobileBottomSheet";
 import { LandingOverlay } from "@/components/landing/LandingOverlay";
 import { useLandingStore } from "@/store/useLandingStore";
+import { OnboardingTour } from "@/components/onboarding/OnboardingTour";
 
 export default function AndrosWorkspacePage() {
   const { isMobile, isMounted } = useDeviceLayout();
@@ -54,7 +55,10 @@ export default function AndrosWorkspacePage() {
         </>
       )}
 
-      {/* Portada inmersiva: primera visita o al pulsar el logo de Andros */}
+      {/* Tutorial guiado de 4 pasos (1.ª vez en un lienzo vacío o desde ⋯ → Ver tutorial) */}
+      <OnboardingTour isMobile={isMobile} />
+
+      {/* Portada: entrada para quien no tiene sesión, o al pulsar el logo de Andros */}
       {showLanding && <LandingOverlay isMobile={isMobile} />}
     </div>
   );

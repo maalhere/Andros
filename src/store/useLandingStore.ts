@@ -5,43 +5,42 @@ import { create } from "zustand";
 //   · "landing"   → se muestra la portada con el logo mutante.
 //   · "igniting"  → transición de ignición: el logo vuela a la barra superior.
 //   · "workspace" → lienzo de trabajo normal.
-// La primera visita abre la landing; después se entra directo al lienzo.
-// Pulsar el logo de la barra superior vuelve a abrirla.
+//
+// Regla de entrada:
+//   · Sin sesión de Google → SIEMPRE se entra por la portada.
+//   · Con sesión activa    → se salta la portada y se abre el lienzo directo
+//                            (lo decide `LandingOverlay` al detectar el usuario).
+//   · Pulsar el logo de la barra superior vuelve a abrirla a propósito
+//     (`manual: true`), y entonces NO se cierra sola aunque haya sesión.
 // ============================================================================
 
 export type LandingPhase = "landing" | "igniting" | "workspace";
 
-const SEEN_KEY = "andros:landing-seen";
-
-function readInitialPhase(): LandingPhase {
-  if (typeof window === "undefined") return "landing";
-  try {
-    return window.localStorage.getItem(SEEN_KEY) ? "workspace" : "landing";
-  } catch {
-    return "landing";
-  }
-}
-
 interface LandingState {
   phase: LandingPhase;
+  /** `true` si la portada la abrió el usuario desde el logo (no se auto-cierra). */
+  manual: boolean;
+  /** Abre la portada a petición del usuario (logo de la barra superior). */
   openLanding: () => void;
+  /** Vuelve a la portada de entrada (p. ej. al cerrar sesión). */
+  resetToLanding: () => void;
   startIgnition: () => void;
   finishIgnition: () => void;
+  /** Entra al lienzo sin animación (sesión de Google ya activa). */
+  skipToWorkspace: () => void;
 }
 
 export const useLandingStore = create<LandingState>((set) => ({
-  phase: readInitialPhase(),
+  phase: "landing",
+  manual: false,
 
-  openLanding: () => set({ phase: "landing" }),
+  openLanding: () => set({ phase: "landing", manual: true }),
+
+  resetToLanding: () => set({ phase: "landing", manual: false }),
 
   startIgnition: () => set({ phase: "igniting" }),
 
-  finishIgnition: () => {
-    try {
-      window.localStorage.setItem(SEEN_KEY, "1");
-    } catch {
-      // Navegación privada / almacenamiento bloqueado: no pasa nada.
-    }
-    set({ phase: "workspace" });
-  },
+  finishIgnition: () => set({ phase: "workspace", manual: false }),
+
+  skipToWorkspace: () => set({ phase: "workspace", manual: false }),
 }));

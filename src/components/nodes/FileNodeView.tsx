@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   CircleAlert,
   CloudCheck,
@@ -33,6 +33,7 @@ import {
 } from "@/store/useWorkspaceStore";
 import { useCloudStore } from "@/store/useCloudStore";
 import { retryFileUpload } from "@/hooks/useCloudSync";
+import { takePendingFile } from "@/lib/canvas/quickAdd";
 import {
   Model3DPreview,
   isPreviewable3D,
@@ -308,6 +309,14 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
       if (isCurrentJob()) activeJobByNode.delete(node.id);
     }
   };
+
+  // Archivo elegido desde "+ Agregar → Archivo 3D": se adjunta al aparecer el nodo.
+  useEffect(() => {
+    const pending = takePendingFile(node.id);
+    if (pending) void Promise.resolve().then(() => attachFile(pending));
+    // Solo al montar el nodo: `attachFile` usa el estado de ese momento.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [node.id]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = e.target.files?.[0];

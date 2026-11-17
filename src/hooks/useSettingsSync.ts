@@ -28,6 +28,7 @@ export function collectPreferences(): Preferences {
     canvasBackground: s.canvasBackground,
     animations: s.animations,
     autosave: s.autosave,
+    onboardingDone: s.onboardingDone,
   };
 }
 

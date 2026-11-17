@@ -1,5 +1,5 @@
 # REGLAS DEL PROYECTO ANDROS (OPERADOR FÍSICO)
-- Stack real del proyecto: Next.js 16.4.3 (App Router), React, TypeScript estricto, Tailwind CSS 4.3.3 y Zustand.
+- Stack real del proyecto: Next.js 16.4.6 (App Router), React, TypeScript estricto, Tailwind CSS 4.3.3 y Zustand.
 - Sistema de Diseño Dual-Engine:
   - Modo Claro (Paper Modernist): fondo #F6F5F2, tarjetas #FFFFFF, texto #1A1A18, acento #C95A3B, éxito #4F6B58.
   - Modo Oscuro (Obsidian Monolith): fondo #0D0E11, tarjetas #16181D, texto #EDEDEF, acento #3B82F6, éxito #10B981.

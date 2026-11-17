@@ -103,7 +103,9 @@ export const TacticalCardStack: React.FC = () => {
           <div className="rounded-2xl bg-andros-card border border-andros-border p-8 text-center space-y-2">
             <Layers className="w-6 h-6 text-andros-muted mx-auto" />
             <p className="text-xs text-andros-muted">
-              No hay nodos en esta categoría todavía.
+              {nodes.length === 0
+                ? "Tu espacio está vacío. Pulsa “Agregar” abajo para subir tu primera pieza 3D, una nota o un enlace."
+                : "No hay nada en esta categoría todavía."}
             </p>
           </div>
         ) : (

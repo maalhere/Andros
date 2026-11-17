@@ -1,80 +1,77 @@
 "use client";
 
 import React from "react";
-import { Layers, PlusCircle, Library, Sparkles } from "lucide-react";
+import { MousePointer2, PenLine, Plus, Sparkles } from "lucide-react";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
+import { quickAddSketch } from "@/lib/canvas/quickAdd";
+
+// ============================================================================
+// ANDROS — BARRA INFERIOR DEL TELÉFONO (zona del pulgar)
+// 4 botones claros con icono + etiqueta: Seleccionar · Agregar · Dibujar · Oráculo IA
+// ============================================================================
+
+const BASE =
+  "flex-1 min-w-0 min-h-[52px] px-1 rounded-xl flex flex-col items-center justify-center gap-0.5 spring-micro active:scale-95";
 
 export const ThumbZoneBar: React.FC = () => {
   const activeMobileSheet = useWorkspaceStore((s) => s.activeMobileSheet);
   const setActiveMobileSheet = useWorkspaceStore((s) => s.setActiveMobileSheet);
+  const selectNode = useWorkspaceStore((s) => s.selectNode);
+
+  const toggle = (sheet: "new-node" | "oracle") =>
+    setActiveMobileSheet(activeMobileSheet === sheet ? "none" : sheet);
+
+  const isIdle = activeMobileSheet === "none" || activeMobileSheet === "node-detail";
 
   return (
     <nav
       aria-label="Navegación Táctil Inferior"
-      className="fixed bottom-3 left-3 right-3 z-40 flex items-center justify-around px-2 py-1.5 rounded-2xl bg-andros-surface backdrop-blur-xl border border-andros-border shadow-hud-light dark:shadow-hud-dark"
+      className="fixed bottom-3 left-3 right-3 z-40 flex items-center gap-1 p-1.5 rounded-2xl bg-andros-surface backdrop-blur-xl border border-andros-border shadow-hud-light dark:shadow-hud-dark"
+      style={{ marginBottom: "env(safe-area-inset-bottom)" }}
     >
-      {/* Vista Pila */}
       <button
         type="button"
-        onClick={() => setActiveMobileSheet("none")}
-        className={`min-w-[48px] min-h-[44px] px-3 rounded-xl flex flex-col items-center justify-center gap-0.5 spring-micro active:scale-95 ${
-          activeMobileSheet === "none"
-            ? "text-andros-primary bg-andros-border/60"
-            : "text-andros-muted"
-        }`}
+        onClick={() => {
+          setActiveMobileSheet("none");
+          selectNode(null);
+        }}
+        className={`${BASE} ${isIdle ? "text-andros-primary bg-andros-border/60" : "text-andros-muted"}`}
       >
-        <Layers className="w-4 h-4" />
-        <span className="text-[10px] font-medium">Nodos</span>
+        <MousePointer2 className="w-[18px] h-[18px]" />
+        <span className="text-[11px] font-medium">Seleccionar</span>
       </button>
 
-      {/* Crear Nodo */}
       <button
         type="button"
-        onClick={() =>
-          setActiveMobileSheet(
-            activeMobileSheet === "new-node" ? "none" : "new-node"
-          )
-        }
-        className={`min-w-[48px] min-h-[44px] px-3 rounded-xl flex flex-col items-center justify-center gap-0.5 spring-micro active:scale-95 ${
-          activeMobileSheet === "new-node"
-            ? "text-andros-primary bg-andros-border/60"
-            : "text-andros-muted"
+        data-tour="add"
+        onClick={() => toggle("new-node")}
+        aria-expanded={activeMobileSheet === "new-node"}
+        className={`${BASE} ${
+          activeMobileSheet === "new-node" ? "text-andros-primary bg-andros-border/60" : "text-andros-muted"
         }`}
       >
-        <PlusCircle className="w-4 h-4" />
-        <span className="text-[10px] font-medium">Nuevo</span>
+        <Plus className="w-[18px] h-[18px]" />
+        <span className="text-[11px] font-medium">Agregar</span>
       </button>
 
-      {/* Biblioteca */}
       <button
         type="button"
-        onClick={() =>
-          setActiveMobileSheet(
-            activeMobileSheet === "library" ? "none" : "library"
-          )
-        }
-        className={`min-w-[48px] min-h-[44px] px-3 rounded-xl flex flex-col items-center justify-center gap-0.5 spring-micro active:scale-95 ${
-          activeMobileSheet === "library"
-            ? "text-andros-primary bg-andros-border/60"
-            : "text-andros-muted"
-        }`}
+        data-tour="draw"
+        onClick={() => quickAddSketch()}
+        className={`${BASE} text-andros-muted`}
       >
-        <Library className="w-4 h-4" />
-        <span className="text-[10px] font-medium">Biblioteca</span>
+        <PenLine className="w-[18px] h-[18px]" />
+        <span className="text-[11px] font-medium">Dibujar</span>
       </button>
 
-      {/* Oráculo IA */}
       <button
         type="button"
-        onClick={() =>
-          setActiveMobileSheet(
-            activeMobileSheet === "oracle" ? "none" : "oracle"
-          )
-        }
-        className="min-w-[88px] min-h-[44px] px-3.5 rounded-xl bg-andros-primary text-andros-canvas flex items-center justify-center gap-1.5 spring-micro active:scale-95 shadow-sm"
+        data-tour="oracle"
+        onClick={() => toggle("oracle")}
+        className={`${BASE} bg-andros-primary text-andros-canvas shadow-sm`}
       >
-        <Sparkles className="w-4 h-4 text-andros-accent" />
-        <span className="text-xs font-semibold">Oráculo</span>
+        <Sparkles className="w-[18px] h-[18px] text-andros-accent" />
+        <span className="text-[11px] font-semibold">Oráculo IA</span>
       </button>
     </nav>
   );
