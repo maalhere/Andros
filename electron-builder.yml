@@ -1,0 +1,41 @@
+# ANDROS — Instalador de Windows (npm run desktop:build → dist-desktop/)
+# La app instalada abre la web de producción (electron/config.cjs) y añade el
+# puente nativo Wi-Fi de la impresora. No empaqueta Next.js ni node_modules.
+appId: com.andros.desktop
+productName: Andros
+copyright: Copyright © 2026 Andros
+
+directories:
+  output: dist-desktop
+
+extraMetadata:
+  main: electron/main.cjs
+
+files:
+  - package.json
+  - electron/main.cjs
+  - electron/preload.cjs
+  - electron/config.cjs
+  - electron/titlebar.html
+  - electron/generated/flashforge.cjs
+  - public/icons/icon-192.png
+  - public/icons/icon-512.png
+  - "!**/node_modules/**/*"
+
+asar: true
+npmRebuild: false
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: public/icons/icon-512.png
+
+nsis:
+  oneClick: true
+  perMachine: false
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: Andros
+  artifactName: Andros-Setup.${ext}
+  deleteAppDataOnUninstall: false

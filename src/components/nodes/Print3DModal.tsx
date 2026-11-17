@@ -13,7 +13,10 @@ import {
   Gem,
   LoaderCircle,
   Minimize2,
+  MonitorDown,
   Printer,
+  Radar,
+  RefreshCw,
   ShieldCheck,
   Usb,
   Wifi,
@@ -35,6 +38,14 @@ import {
   type QualityId,
   type SliceStats,
 } from "@/lib/slicer/flashforgeGxGenerator";
+import type { PrinterStatus } from "@/lib/printer/flashforgeShared";
+import {
+  DESKTOP_DOWNLOAD_URL,
+  canReachLocalNetwork,
+  discoverPrinters,
+  fetchPrinterStatus,
+  sendPrintJob,
+} from "@/lib/printer/printerClient";
 
 // ============================================================================
 // IMPRIMIR EN 3D — TAN FÁCIL COMO IMPRIMIR UN DOCUMENTO
@@ -42,8 +53,12 @@ import {
 //     vista previa a la izquierda, opciones a la derecha y un botón gigante.
 //   · Destino por defecto: FlashForge Adventurer 3 (Automático). Andros lamina
 //     la pieza en el navegador y genera un .gx listo para imprimir.
-//   · Con la IP de la impresora: "Imprimir Ahora" la envía por Wi-Fi y la
-//     impresora empieza a calentar e imprimir sola.
+//   · Autodetección: al abrir el modal, Andros busca sola la Adventurer 3 en
+//     el Wi-Fi (app de Windows o npm run dev) y guarda su IP y nombre.
+//     "Imprimir Ahora" lamina el .gx y lo envía en 1 clic: la impresora
+//     empieza a calentar e imprimir sola.
+//   · Web pública (Vercel): no puede ver el Wi-Fi local → descarga del .gx
+//     listo + botón para instalar la app de Windows.
 //   · Sin Wi-Fi: descarga del .gx (USB / FlashPrint) con instrucciones de 2 pasos.
 //   · Bambu Lab, Prusa y Cura como destinos secundarios (abren su programa).
 // ============================================================================
@@ -81,6 +96,7 @@ const DESTINATION_KEY = "andros-print-printer";
 const LEGACY_SLICER_KEY = "andros-print-program";
 const ADV3_IP_KEY = "andros-adv3-ip";
 const ADV3_PORT_KEY = "andros-adv3-port";
+const ADV3_NAME_KEY = "andros-adv3-name";
 
 function readStorage(key: string): string | null {
   try {
@@ -157,24 +173,13 @@ function downloadBytes(bytes: Uint8Array<ArrayBuffer>, name: string) {
   window.setTimeout(() => URL.revokeObjectURL(href), 10_000);
 }
 
-interface PrinterStatus {
-  ok: boolean;
-  error?: string;
-  machine?: { type: string | null; name: string | null; firmware: string | null };
-  temperatures?: {
-    extruder: { current: number; target: number } | null;
-    bed: { current: number; target: number } | null;
-  };
-  progress?: { printing: boolean; percent: number; layer: string | null };
-}
-
 type MeshState =
   | { phase: "loading" }
   | { phase: "ready"; soup: Float32Array; size: { x: number; y: number; z: number }; preview: string | null }
   | { phase: "error" }
   | { phase: "none" };
 
-type WifiState = "none" | "checking" | "online" | "offline";
+type WifiState = "none" | "searching" | "checking" | "online" | "offline";
 type JobPhase = "idle" | "slicing" | "sending" | "printing" | "file-ready" | "error";
 
 interface PrintJob {
@@ -245,13 +250,26 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
   const jobRef = useRef<{ key: string; job: PrintJob } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  // Wi-Fi
+  // Wi-Fi (solo si Andros puede ver la red local: app de Windows o npm run dev)
+  const [lanCapable] = useState(canReachLocalNetwork);
   const [ip, setIp] = useState(() => readStorage(ADV3_IP_KEY) ?? "");
   const [port, setPort] = useState(() => readStorage(ADV3_PORT_KEY) ?? "8899");
-  const [wifi, setWifi] = useState<WifiState>(() => (readStorage(ADV3_IP_KEY) ? "checking" : "none"));
+  const [printerName, setPrinterName] = useState(() => readStorage(ADV3_NAME_KEY));
+  const [wifi, setWifi] = useState<WifiState>(() => {
+    if (!lanCapable) return "none";
+    if (readStorage(ADV3_IP_KEY)) return "checking";
+    return readSavedDestination() === "adv3" ? "searching" : "none";
+  });
   const [status, setStatus] = useState<PrinterStatus | null>(null);
   const [editingWifi, setEditingWifi] = useState(false);
+  const [searchMissed, setSearchMissed] = useState(false);
   const checkingRef = useRef(false);
+  const searchingRef = useRef(false);
+  const autoConnectRef = useRef(false);
+  const wifiRef = useRef<WifiState>(wifi);
+  useEffect(() => {
+    wifiRef.current = wifi;
+  }, [wifi]);
 
   // Otros programas
   const [cloudLink, setCloudLink] = useState<string | null>(/^https?:/.test(downloadUrl) ? downloadUrl : null);
@@ -326,22 +344,21 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
   useEffect(() => () => abortRef.current?.abort(), []);
 
   // --- Wi-Fi -------------------------------------------------------------------
+  /** Comprueba la impresora en `targetIp`. Devuelve true si respondió. */
   const checkPrinter = useCallback(
-    async (targetIp: string, targetPort: string, quiet = false) => {
-      if (checkingRef.current || !targetIp.trim()) return;
+    async (targetIp: string, targetPort: string, quiet = false): Promise<boolean> => {
+      if (checkingRef.current || !targetIp.trim()) return false;
       checkingRef.current = true;
       if (!quiet) setWifi("checking");
       try {
-        const res = await fetch(
-          `/api/printer/flashforge?ip=${encodeURIComponent(targetIp.trim())}&port=${encodeURIComponent(targetPort.trim() || "8899")}`,
-          { cache: "no-store" }
-        );
-        const data = (await res.json()) as PrinterStatus;
+        const data = await fetchPrinterStatus(targetIp, targetPort.trim() || "8899");
         setStatus(data);
         if (!quiet || data.ok) setWifi(data.ok ? "online" : "offline");
+        return data.ok;
       } catch {
-        setStatus({ ok: false, error: "No se pudo contactar el servidor local de Andros." });
+        setStatus({ ok: false, error: "No se pudo contactar con la impresora desde este equipo." });
         if (!quiet) setWifi("offline");
+        return false;
       } finally {
         checkingRef.current = false;
       }
@@ -349,11 +366,52 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
     []
   );
 
-  // Al abrir: si ya hay una IP guardada, se comprueba sola.
-  useEffect(() => {
-    const savedIp = readStorage(ADV3_IP_KEY);
-    if (savedIp) void checkPrinter(savedIp, readStorage(ADV3_PORT_KEY) ?? "8899");
+  /** Busca la Adventurer 3 en el Wi-Fi, guarda su IP y nombre y la conecta. */
+  const findPrinter = useCallback(async () => {
+    if (searchingRef.current) return;
+    searchingRef.current = true;
+    setWifi("searching");
+    setSearchMissed(false);
+    let foundIp: string | null = null;
+    let foundPort = "8899";
+    try {
+      const result = await discoverPrinters();
+      const best = result.printers?.find((p) => p.isAdventurer3) ?? result.printers?.[0];
+      if (result.ok && best) {
+        foundIp = best.ip;
+        foundPort = String(best.port || 8899);
+        const label = best.name || best.type || "FlashForge Adventurer 3";
+        setIp(foundIp);
+        setPort(foundPort);
+        setPrinterName(label);
+        writeStorage(ADV3_IP_KEY, foundIp);
+        writeStorage(ADV3_PORT_KEY, foundPort);
+        writeStorage(ADV3_NAME_KEY, label);
+      }
+    } catch {
+      // Sin respuesta del buscador: queda USB / FlashPrint.
+    } finally {
+      searchingRef.current = false;
+    }
+    if (foundIp) {
+      await checkPrinter(foundIp, foundPort);
+    } else {
+      setWifi("none");
+      setSearchMissed(true);
+    }
   }, [checkPrinter]);
+
+  // Al abrir con la Adventurer 3: comprueba la IP guardada y, si no hay (o ya
+  // no responde porque el router le dio otra), la busca sola en el Wi-Fi.
+  useEffect(() => {
+    if (!lanCapable || !isAdv3 || autoConnectRef.current) return;
+    autoConnectRef.current = true;
+    const savedIp = readStorage(ADV3_IP_KEY);
+    void (async () => {
+      if (savedIp && (await checkPrinter(savedIp, readStorage(ADV3_PORT_KEY) ?? "8899"))) return;
+      await findPrinter();
+    })();
+  }, [lanCapable, isAdv3, checkPrinter, findPrinter]);
 
   // Mientras imprime: estado en vivo cada 5 s.
   useEffect(() => {
@@ -365,8 +423,15 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
   const connectWifi = () => {
     writeStorage(ADV3_IP_KEY, ip.trim());
     writeStorage(ADV3_PORT_KEY, port.trim() || "8899");
+    setPrinterName(null);
+    setSearchMissed(false);
     setEditingWifi(false);
     void checkPrinter(ip, port);
+  };
+
+  const searchAgain = () => {
+    setEditingWifi(false);
+    void findPrinter();
   };
 
   // --- Cambios de opciones ------------------------------------------------------
@@ -441,25 +506,20 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
       return;
     }
 
-    if (wifi !== "online") {
+    // Se lee el estado más reciente: la búsqueda pudo terminar mientras laminaba.
+    if (wifiRef.current !== "online") {
+      // Web pública: el .gx listo se descarga directamente.
+      if (!lanCapable) {
+        downloadBytes(prepared.bytes, prepared.fileName);
+        void celebrate();
+      }
       setPhase("file-ready");
       return;
     }
 
     setPhase("sending");
     try {
-      const query = new URLSearchParams({
-        action: "print",
-        ip: ip.trim(),
-        port: port.trim() || "8899",
-        name: prepared.fileName,
-      });
-      const res = await fetch(`/api/printer/flashforge?${query.toString()}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/octet-stream" },
-        body: new Blob([prepared.bytes]),
-      });
-      const data = (await res.json()) as { ok: boolean; error?: string };
+      const data = await sendPrintJob(ip, port.trim() || "8899", prepared.fileName, prepared.bytes);
       if (!data.ok) throw new Error(data.error ?? "La impresora no aceptó el trabajo.");
       setPhase("printing");
       void celebrate();
@@ -532,26 +592,56 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
           : !fits && sliceable && mesh.phase === "ready"
             ? "Activa el ajuste automático de tamaño para poder imprimir."
             : "Este archivo se prepara en FlashPrint: usa la descarga de abajo.";
+    } else if (!lanCapable) {
+      if (phase === "idle") mainLabel = "Descargar .gx listo para imprimir";
+      mainHint = "La impresión por Wi-Fi en 1 clic está en la app de Windows. Aquí descargas el .gx para USB o FlashPrint.";
     } else if (wifi === "online") {
       mainHint = "Se enviará por Wi-Fi: la Adventurer 3 empezará a calentar e imprimir sola.";
+    } else if (wifi === "searching" || wifi === "checking") {
+      mainHint = "Buscando tu impresora… si no aparece, se preparará el .gx para USB o FlashPrint.";
     } else {
       mainHint = "Se preparará un archivo .gx listo para imprimir por USB o con FlashPrint.";
     }
   }
 
   const wifiChip = (() => {
+    if (!lanCapable) {
+      return (
+        <span className="inline-flex items-center gap-1.5 text-xs text-andros-muted">
+          <MonitorDown className="w-3.5 h-3.5 shrink-0" /> El Wi-Fi directo funciona en la app de Windows
+        </span>
+      );
+    }
     if (wifi === "online") {
       return (
-        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-andros-success">
-          <span className="w-2 h-2 rounded-full bg-andros-success" />
-          Lista por Wi-Fi · {ip}
+        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-andros-success min-w-0">
+          <span className="w-2 h-2 shrink-0 rounded-full bg-andros-success" />
+          <span className="truncate">
+            Lista por Wi-Fi · {printerName ? `${printerName} · ` : ""}
+            {ip}
+          </span>
+        </span>
+      );
+    }
+    if (wifi === "searching") {
+      return (
+        <span role="status" className="inline-flex items-center gap-1.5 text-xs text-andros-muted">
+          <Radar className="w-3.5 h-3.5 shrink-0 animate-pulse text-andros-accent" /> Buscando tu FlashForge Adventurer 3
+          en el Wi-Fi…
         </span>
       );
     }
     if (wifi === "checking") {
       return (
         <span className="inline-flex items-center gap-1.5 text-xs text-andros-muted">
-          <LoaderCircle className="w-3.5 h-3.5 animate-spin" /> Buscando la impresora en {ip}…
+          <LoaderCircle className="w-3.5 h-3.5 animate-spin" /> Conectando con {printerName ?? "la impresora"} ({ip})…
+        </span>
+      );
+    }
+    if (searchMissed) {
+      return (
+        <span className="inline-flex items-center gap-1.5 text-xs text-andros-muted">
+          <WifiOff className="w-3.5 h-3.5 shrink-0" /> No la encontramos en tu Wi-Fi · se usará USB / FlashPrint
         </span>
       );
     }
@@ -666,19 +756,32 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
                     <div className="space-y-2">
                       <div className="flex items-center justify-between gap-2 min-h-[28px]">
                         {wifiChip}
-                        <button
-                          type="button"
-                          onClick={() => setEditingWifi((v) => !v)}
-                          className="shrink-0 text-xs font-semibold text-andros-accent hover:underline"
-                        >
-                          {editingWifi ? "Cerrar" : wifi === "none" ? "Conectar por Wi-Fi" : "Cambiar"}
-                        </button>
+                        {lanCapable && (
+                          <div className="shrink-0 flex items-center gap-3">
+                            {wifi !== "searching" && wifi !== "checking" && wifi !== "online" && (
+                              <button
+                                type="button"
+                                onClick={searchAgain}
+                                className="inline-flex items-center gap-1 text-xs font-semibold text-andros-accent hover:underline"
+                              >
+                                <RefreshCw className="w-3 h-3" /> Buscar
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setEditingWifi((v) => !v)}
+                              className="text-xs font-semibold text-andros-accent hover:underline"
+                            >
+                              {editingWifi ? "Cerrar" : wifi === "online" ? "Cambiar" : "IP manual"}
+                            </button>
+                          </div>
+                        )}
                       </div>
-                      {editingWifi && (
+                      {lanCapable && editingWifi && (
                         <div className="rounded-2xl border border-andros-border bg-andros-canvas p-3 space-y-2">
                           <p className="text-[11px] leading-relaxed text-andros-muted">
-                            Escribe la IP que muestra la pantalla de tu Adventurer 3 (Ajustes → Wi-Fi). Funciona
-                            con Andros corriendo en tu misma red (<code>npm run dev</code>).
+                            Andros busca tu impresora sola. Si no aparece, escribe la IP que muestra la pantalla de tu
+                            Adventurer 3 (Ajustes → Wi-Fi).
                           </p>
                           <div className="grid grid-cols-[1fr_76px] gap-2">
                             <input
@@ -986,6 +1089,8 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
                         <CheckCircle2 className="w-5 h-5" />
                       ) : wifi === "online" ? (
                         <Wifi className="w-5 h-5" />
+                      ) : !lanCapable ? (
+                        <Download className="w-5 h-5" />
                       ) : (
                         <Printer className="w-5 h-5" />
                       )}
@@ -1002,6 +1107,16 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
                     {mesh.phase === "loading" ? <LoaderCircle className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
                     {mesh.phase === "loading" ? "Analizando la pieza…" : "Descargar para FlashPrint"}
                   </button>
+                )}
+                {!lanCapable && (
+                  <a
+                    href={DESKTOP_DOWNLOAD_URL}
+                    rel="noopener noreferrer"
+                    className="w-full min-h-[48px] px-4 rounded-2xl border border-andros-border-active bg-andros-canvas text-andros-primary text-sm font-semibold flex items-center justify-center gap-2 hover:border-andros-accent active:scale-[0.99] spring-micro"
+                  >
+                    <MonitorDown className="w-4 h-4 shrink-0 text-andros-accent" />
+                    Descargar App para Windows (Impresión Wi-Fi en 1 clic)
+                  </a>
                 )}
                 {mainHint && <p className="text-[11px] text-center text-andros-muted">{mainHint}</p>}
               </>

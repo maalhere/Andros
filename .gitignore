@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# app de escritorio (Electron)
+/dist-desktop/
+/electron/generated/
