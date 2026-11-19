@@ -61,6 +61,7 @@ export const GoogleAuthButton: React.FC<GoogleAuthButtonProps> = ({ isMobile }) 
   const pendingUploads = useCloudStore((s) => s.pendingUploads);
   const errorMessage = useCloudStore((s) => s.errorMessage);
   const clearError = useCloudStore((s) => s.clearError);
+  const authNotice = useCloudStore((s) => s.authNotice);
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [avatarFailed, setAvatarFailed] = useState(false);
@@ -119,10 +120,19 @@ export const GoogleAuthButton: React.FC<GoogleAuthButtonProps> = ({ isMobile }) 
           <GoogleGlyph className="w-4 h-4" />
           <span>{isMobile ? "Entrar" : "Continuar con Google"}</span>
         </button>
-        {errorMessage && (
+        {errorMessage ? (
           <p className="absolute right-0 top-10 w-64 p-2.5 rounded-xl bg-andros-card border border-andros-border text-[11px] text-andros-accent shadow-sm">
             {errorMessage}
           </p>
+        ) : (
+          authNotice && (
+            <p
+              role="status"
+              className="absolute right-0 top-10 w-64 p-2.5 rounded-xl bg-andros-card border border-andros-border text-[11px] leading-snug text-andros-muted shadow-sm"
+            >
+              {authNotice}
+            </p>
+          )
         )}
       </div>
     );

@@ -46,6 +46,7 @@ import {
   fetchPrinterStatus,
   sendPrintJob,
 } from "@/lib/printer/printerClient";
+import { requestFileDownload } from "@/lib/downloadWithPermission";
 
 // ============================================================================
 // IMPRIMIR EN 3D — TAN FÁCIL COMO IMPRIMIR UN DOCUMENTO
@@ -162,15 +163,11 @@ function renderPreview(soup: Float32Array): string | null {
   return canvas.toDataURL("image/png");
 }
 
-function downloadBytes(bytes: Uint8Array<ArrayBuffer>, name: string) {
-  const href = URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }));
-  const a = document.createElement("a");
-  a.href = href;
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  window.setTimeout(() => URL.revokeObjectURL(href), 10_000);
+const GX_DESCRIPTION = "Pieza laminada por Andros, lista para la FlashForge Adventurer 3 (USB o FlashPrint).";
+
+/** Descarga con permiso previo del usuario. `true` si se inició. */
+function downloadBytes(bytes: Uint8Array<ArrayBuffer>, name: string, description = GX_DESCRIPTION): Promise<boolean> {
+  return requestFileDownload({ filename: name, blobOrUrl: bytes, description });
 }
 
 type MeshState =
@@ -245,6 +242,8 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
   const [phase, setPhase] = useState<JobPhase>("idle");
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  /** El último error fue del envío por Wi-Fi (el archivo laminado sigue listo). */
+  const [wifiFailed, setWifiFailed] = useState(false);
   const [job, setJob] = useState<PrintJob | null>(null);
   const [showSteps, setShowSteps] = useState(false);
   const jobRef = useRef<{ key: string; job: PrintJob } | null>(null);
@@ -265,6 +264,8 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
   const [searchMissed, setSearchMissed] = useState(false);
   const checkingRef = useRef(false);
   const searchingRef = useRef(false);
+  /** true mientras se transfiere el archivo: la Adventurer 3 solo admite 1 socket. */
+  const sendingRef = useRef(false);
   const autoConnectRef = useRef(false);
   const wifiRef = useRef<WifiState>(wifi);
   useEffect(() => {
@@ -347,11 +348,18 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
   /** Comprueba la impresora en `targetIp`. Devuelve true si respondió. */
   const checkPrinter = useCallback(
     async (targetIp: string, targetPort: string, quiet = false): Promise<boolean> => {
+      // Sondeo en pausa durante la transferencia (evita ECONNRESET en el 8899).
+      if (sendingRef.current) return true;
       if (checkingRef.current || !targetIp.trim()) return false;
       checkingRef.current = true;
       if (!quiet) setWifi("checking");
       try {
         const data = await fetchPrinterStatus(targetIp, targetPort.trim() || "8899");
+        if (data.busy) {
+          // Ocupada recibiendo un archivo: está en línea, se conserva el último estado.
+          if (!quiet) setWifi("online");
+          return true;
+        }
         setStatus(data);
         if (!quiet || data.ok) setWifi(data.ok ? "online" : "offline");
         return data.ok;
@@ -438,6 +446,7 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
   const resetResult = () => {
     if (phase === "file-ready" || phase === "error") setPhase("idle");
     setError(null);
+    setWifiFailed(false);
     setShowSteps(false);
   };
 
@@ -494,6 +503,7 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
   const printNow = async () => {
     if (busy || !canAutoPrint) return;
     setError(null);
+    setWifiFailed(false);
     setShowSteps(false);
 
     let prepared: PrintJob;
@@ -510,58 +520,63 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
     if (wifiRef.current !== "online") {
       // Web pública: el .gx listo se descarga directamente.
       if (!lanCapable) {
-        downloadBytes(prepared.bytes, prepared.fileName);
-        void celebrate();
+        void downloadBytes(prepared.bytes, prepared.fileName).then((ok) => {
+          if (ok) void celebrate();
+        });
       }
       setPhase("file-ready");
       return;
     }
 
     setPhase("sending");
+    sendingRef.current = true;
+    let sent = false;
     try {
       const data = await sendPrintJob(ip, port.trim() || "8899", prepared.fileName, prepared.bytes);
       if (!data.ok) throw new Error(data.error ?? "La impresora no aceptó el trabajo.");
+      sent = true;
+      setWifiFailed(false);
       setPhase("printing");
       void celebrate();
-      void checkPrinter(ip, port, true);
     } catch (e) {
       setPhase("error");
+      setWifiFailed(true);
       setError(
-        `No se pudo enviar por Wi-Fi. ${e instanceof Error ? e.message : ""} Puedes imprimir por USB o FlashPrint con el archivo ya preparado.`
+        `No se pudo enviar por Wi-Fi. ${e instanceof Error ? e.message : ""} El archivo ya está laminado: descárgalo y llévalo por USB o ábrelo en FlashPrint.`
       );
+    } finally {
+      sendingRef.current = false;
     }
+    // Primer estado tras liberar el socket (no durante la transferencia).
+    if (sent) void checkPrinter(ip, port, true);
   };
 
-  const downloadJob = () => {
+  const downloadJob = async () => {
     if (!job) return;
-    downloadBytes(job.bytes, job.fileName);
-    void celebrate();
+    if (await downloadBytes(job.bytes, job.fileName)) void celebrate();
   };
 
-  const openInFlashPrint = () => {
+  const openInFlashPrint = async () => {
     if (!job) return;
-    downloadBytes(job.bytes, job.fileName);
-    setShowSteps(true);
+    if (await downloadBytes(job.bytes, job.fileName)) setShowSteps(true);
   };
 
-  /** Descarga el archivo original con nombre limpio. */
+  /** Descarga el archivo original con nombre limpio (previo permiso). */
   const downloadOriginal = async () => {
-    const name = `${baseName}.${ext}`;
-    try {
-      const res = await fetch(downloadUrl);
-      if (res.ok) {
-        downloadBytes(new Uint8Array(await res.arrayBuffer()), name);
-        return;
-      }
-    } catch {
-      // Se usa el enlace directo.
-    }
-    const a = document.createElement("a");
-    a.href = downloadUrl;
-    a.download = name;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    await requestFileDownload({
+      filename: `${baseName}.${ext}`,
+      blobOrUrl: downloadUrl,
+      description: `Modelo original ${ext.toUpperCase()}, tal como se subió a Andros.`,
+    });
+  };
+
+  /** Instalador de la app de Windows (previo permiso). */
+  const downloadDesktopApp = () => {
+    void requestFileDownload({
+      filename: "Andros-Setup.exe",
+      blobOrUrl: DESKTOP_DOWNLOAD_URL,
+      description: "Instalador oficial de Andros para Windows (impresión Wi-Fi en 1 clic).",
+    });
   };
 
   const openInSlicer = () => {
@@ -964,9 +979,24 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
                 )}
 
                 {phase === "error" && error && (
-                  <p role="alert" className="rounded-2xl border border-red-500/60 bg-red-500/10 px-4 py-3 text-xs leading-relaxed text-andros-primary">
-                    {error}
-                  </p>
+                  <div
+                    role="alert"
+                    className="rounded-2xl border border-red-500/60 bg-red-500/10 px-4 py-3 space-y-3 text-xs leading-relaxed text-andros-primary"
+                  >
+                    <p>{error}</p>
+                    {wifiFailed && job && (
+                      <button
+                        type="button"
+                        onClick={downloadJob}
+                        className="w-full min-h-[48px] px-3 rounded-2xl bg-andros-accent text-white text-sm font-semibold flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] spring-micro"
+                      >
+                        <Download className="w-4 h-4 shrink-0" />
+                        <span>
+                          Descargar archivo {job.fileName.endsWith(".gx") ? ".GX" : ".G"} ya listo (para USB o FlashPrint)
+                        </span>
+                      </button>
+                    )}
+                  </div>
                 )}
 
                 {job && (phase === "file-ready" || phase === "error") && (
@@ -1109,14 +1139,14 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
                   </button>
                 )}
                 {!lanCapable && (
-                  <a
-                    href={DESKTOP_DOWNLOAD_URL}
-                    rel="noopener noreferrer"
+                  <button
+                    type="button"
+                    onClick={downloadDesktopApp}
                     className="w-full min-h-[48px] px-4 rounded-2xl border border-andros-border-active bg-andros-canvas text-andros-primary text-sm font-semibold flex items-center justify-center gap-2 hover:border-andros-accent active:scale-[0.99] spring-micro"
                   >
                     <MonitorDown className="w-4 h-4 shrink-0 text-andros-accent" />
                     Descargar App para Windows (Impresión Wi-Fi en 1 clic)
-                  </a>
+                  </button>
                 )}
                 {mainHint && <p className="text-[11px] text-center text-andros-muted">{mainHint}</p>}
               </>

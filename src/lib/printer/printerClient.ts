@@ -25,6 +25,13 @@ export interface AndrosDesktopBridge {
     status: (ip: string, port: number) => Promise<PrinterStatus>;
     print: (ip: string, port: number, fileName: string, data: Uint8Array) => Promise<PrintResult>;
   };
+  /** Login con Google en el navegador del sistema (app ≥ esta versión). */
+  auth?: {
+    begin: () => Promise<{ port: number; state: string }>;
+    openInBrowser: (url: string) => Promise<boolean>;
+    cancel: () => Promise<boolean>;
+    onResult: (callback: (result: { code?: string; error?: string }) => void) => () => void;
+  };
 }
 
 declare global {

@@ -6,8 +6,12 @@
 //     de la app en vivo, con los botones nativos de Windows.
 //   · Carga: npm run desktop:dev → http://localhost:3000
 //            app instalada       → la web de producción (electron/config.cjs)
-//   · Login con Google (Supabase OAuth) dentro de la ventana, descargas
-//     directas a la carpeta Descargas con aviso al terminar.
+//   · Login con Google en el NAVEGADOR del sistema (Google bloquea los
+//     navegadores embebidos): Andros abre un servidor temporal en 127.0.0.1,
+//     el navegador vuelve a él con el código OAuth, la ventana canjea la
+//     sesión de Supabase y se trae al frente.
+//   · Descargas: siempre con el diálogo nativo "Guardar como…" (el usuario
+//     elige carpeta o cancela antes de escribir nada en disco).
 //   · Puente nativo de impresora (preload.cjs → window.androsDesktop): busca la
 //     FlashForge Adventurer 3 en el Wi-Fi (UDP 19000/48899 + barrido TCP 8899),
 //     lee su estado y le envía el .gx — con sockets reales desde este equipo,
@@ -26,7 +30,9 @@ const {
   session,
   shell,
 } = require("electron");
+const crypto = require("node:crypto");
 const fs = require("node:fs");
+const http = require("node:http");
 const path = require("node:path");
 const config = require("./config.cjs");
 const printer = require("./generated/flashforge.cjs");
@@ -48,8 +54,11 @@ let loading = true;
 
 app.setName(config.productName);
 if (process.platform === "win32") app.setAppUserModelId(config.appId);
-// User-Agent de Chrome estándar: Google bloquea el login en navegadores "Electron".
-app.userAgentFallback = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${process.versions.chrome} Safari/537.36`;
+// User-Agent de Chrome estándar de Windows, sin "Electron/x" ni el nombre de
+// la app. (Google detecta los navegadores embebidos por más vías que el UA:
+// por eso el login va además al navegador del sistema; ver "Login con Google".)
+const CHROME_MAJOR = String(process.versions.chrome).split(".")[0];
+app.userAgentFallback = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${CHROME_MAJOR}.0.0.0 Safari/537.36`;
 
 // ---------------------------------------------------------------------------
 // Estado persistente (tema, tamaño de ventana, última impresora)
@@ -346,16 +355,18 @@ function createWindow() {
 }
 
 // ---------------------------------------------------------------------------
-// Descargas → carpeta Descargas, con progreso en la barra de tareas
+// Descargas → diálogo nativo "Guardar como…", con progreso en la barra de tareas
 // ---------------------------------------------------------------------------
 
-function uniquePath(dir, fileName) {
-  const safe = fileName.replace(/[<>:"/\\|?*\x00-\x1f]/g, "_") || "descarga";
-  const ext = path.extname(safe);
-  const base = safe.slice(0, safe.length - ext.length);
-  let candidate = path.join(dir, safe);
-  for (let i = 1; fs.existsSync(candidate); i += 1) candidate = path.join(dir, `${base} (${i})${ext}`);
-  return candidate;
+function safeFileName(fileName) {
+  return String(fileName || "").replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").trim() || "descarga";
+}
+
+/** Filtros del diálogo: la extensión del archivo primero (".andros.zip" → zip). */
+function saveDialogFilters(fileName) {
+  const ext = path.extname(fileName).slice(1).toLowerCase();
+  const all = { name: "Todos los archivos", extensions: ["*"] };
+  return ext ? [{ name: `Archivo .${ext.toUpperCase()}`, extensions: [ext] }, all] : [all];
 }
 
 function notify(title, body, onClick) {
@@ -369,20 +380,31 @@ function setupSession() {
   const ses = session.defaultSession;
   ses.setUserAgent(app.userAgentFallback);
 
+  // Sin setSavePath(): Electron muestra el diálogo "Guardar como…" de Windows
+  // y, si el usuario pulsa Cancelar, la descarga se anula sin tocar el disco.
   ses.on("will-download", (_event, item) => {
-    const target = uniquePath(app.getPath("downloads"), item.getFilename());
-    item.setSavePath(target);
+    const suggested = safeFileName(item.getFilename());
+    item.setSaveDialogOptions({
+      title: `Guardar "${suggested}" — Andros`,
+      defaultPath: path.join(app.getPath("downloads"), suggested),
+      buttonLabel: "Guardar",
+      filters: saveDialogFilters(suggested),
+      properties: ["createDirectory", "showOverwriteConfirmation"],
+    });
     item.on("updated", () => {
       const total = item.getTotalBytes();
       if (win && !win.isDestroyed() && total > 0) win.setProgressBar(item.getReceivedBytes() / total);
     });
     item.once("done", (_e, state) => {
       if (win && !win.isDestroyed()) win.setProgressBar(-1);
-      if (state === "completed") {
-        notify("Descarga completada", path.basename(target), () => shell.showItemInFolder(target));
+      const target = item.getSavePath();
+      const name = target ? path.basename(target) : suggested;
+      if (state === "completed" && target) {
+        notify("Descarga completada", name, () => shell.showItemInFolder(target));
       } else if (state === "interrupted") {
-        notify("La descarga no se completó", path.basename(target));
+        notify("La descarga no se completó", name);
       }
+      // "cancelled": el usuario cerró el diálogo → no se avisa de nada.
     });
   });
 
@@ -423,9 +445,15 @@ function parseTarget(ipRaw, portRaw) {
 }
 
 function connectionMessage(target, e) {
-  const message = e instanceof Error ? e.message : "Error desconocido";
-  return `No se pudo conectar con ${target.ip}:${target.port}. ${message}. Comprueba que la impresora está encendida y en el mismo Wi-Fi que este equipo.`;
+  return `No se pudo conectar con ${target.ip}:${target.port}. ${printer.describePrinterError(e)}. Comprueba que la impresora está encendida y en el mismo Wi-Fi que este equipo.`;
 }
+
+/** Sondeo de estado en pausa mientras se envía un archivo (un solo socket en el 8899). */
+const BUSY_STATUS = {
+  ok: false,
+  busy: true,
+  error: "Enviando el archivo a la impresora: el estado se reanuda al terminar.",
+};
 
 let discovering = null;
 
@@ -457,9 +485,11 @@ function setupPrinterBridge() {
     assertTrusted(event);
     const target = parseTarget(ip, port);
     if (typeof target === "string") return { ok: false, error: target };
+    if (printer.isPrinterTransferring(target.ip)) return BUSY_STATUS;
     try {
       return { ok: true, ...(await printer.readPrinterStatus(target.ip, target.port)) };
     } catch (e) {
+      if (printer.isPrinterBusyError(e)) return BUSY_STATUS;
       return { ok: false, error: connectionMessage(target, e) };
     }
   });
@@ -472,11 +502,15 @@ function setupPrinterBridge() {
       return { ok: false, error: "El archivo de impresión está vacío." };
     }
     if (data.byteLength > printer.MAX_UPLOAD_BYTES) return { ok: false, error: "El archivo supera 128 MB." };
+    if (printer.isPrinterTransferring(target.ip)) {
+      return { ok: false, error: "Ya se está enviando un archivo a esta impresora. Espera a que termine." };
+    }
     const bytes = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+    // Nombre remoto corto (≤ 12 caracteres): 0:/user/<nombre>.gx
     const name = printer.safePrinterFileName(String(fileName ?? "andros"), bytes);
     try {
-      await printer.uploadAndPrint(target.ip, target.port, name, bytes);
-      return { ok: true, fileName: name, bytes: bytes.length };
+      const remoteName = await printer.uploadAndPrint(target.ip, target.port, name, bytes);
+      return { ok: true, fileName: remoteName, bytes: bytes.length };
     } catch (e) {
       return { ok: false, error: connectionMessage(target, e) };
     }
@@ -489,6 +523,193 @@ function setupPrinterBridge() {
     } catch {
       // Ignorado: mensaje de una página que no es Andros.
     }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Login con Google en el navegador del sistema (RFC 8252, "loopback")
+//
+//   1. La web pide `andros:auth:begin` → aquí se abre un servidor temporal en
+//      http://127.0.0.1:<puerto libre> con un `state` aleatorio.
+//   2. La web genera la URL de Supabase (PKCE: el verificador se queda en las
+//      cookies de ESTA ventana) y pide `andros:auth:open` → navegador del sistema.
+//   3. Google → Supabase → /auth/callback de Andros, que redirige el código a
+//      http://127.0.0.1:<puerto>/auth-callback.
+//   4. Se valida el `state` (un solo uso), el código queda pendiente para la
+//      ventana (`andros:auth:ready` → `andros:auth:take`), que lo canjea con
+//      su verificador PKCE y sale de la portada; la ventana se trae al frente.
+//      (Los tokens nunca viajan por la URL del navegador.)
+// ---------------------------------------------------------------------------
+
+const AUTH_TIMEOUT_MS = 10 * 60 * 1000;
+
+/** @type {{ server: import("node:http").Server, state: string, port: number, timer: NodeJS.Timeout } | null} */
+let authFlow = null;
+
+function stopAuthFlow() {
+  if (!authFlow) return;
+  const { server, timer } = authFlow;
+  authFlow = null;
+  clearTimeout(timer);
+  server.close();
+  server.closeAllConnections?.();
+}
+
+/** Pide el foco una vez con el truco "siempre encima" (Windows bloquea robar el foco). */
+function raiseWindow() {
+  if (!win || win.isDestroyed()) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.setAlwaysOnTop(true);
+  win.focus();
+  win.setAlwaysOnTop(false);
+  win.moveTop();
+  view?.webContents.focus();
+}
+
+function bringToFront() {
+  if (!win || win.isDestroyed()) return;
+  raiseWindow();
+  // El navegador acaba de recibir la respuesta y a veces recupera el foco justo
+  // después: se reintenta tras un instante y, si Windows aún lo impide, la
+  // ventana parpadea en la barra de tareas hasta que el usuario la abre.
+  setTimeout(() => {
+    if (!win || win.isDestroyed() || win.isFocused()) return;
+    raiseWindow();
+    if (!win.isFocused()) {
+      win.flashFrame(true);
+      win.once("focus", () => win?.flashFrame(false));
+    }
+  }, 350);
+}
+
+// ---------------------------------------------------------------------------
+// Entrega del resultado del login a la ventana (exactamente una vez)
+//
+// El resultado se guarda aquí hasta que la web lo recoge (`andros:auth:take`).
+// Si la página estaba recargando cuando volvió el navegador, lo recoge al
+// terminar de cargar, en vez de perderse.
+// ---------------------------------------------------------------------------
+
+const AUTH_RESULT_TTL_MS = 5 * 60 * 1000;
+/** @type {{ payload: { code?: string, error?: string }, expires: number } | null} */
+let pendingAuthResult = null;
+
+function deliverAuthResult(payload) {
+  pendingAuthResult = { payload, expires: Date.now() + AUTH_RESULT_TTL_MS };
+  const target = view?.webContents;
+  if (target && !target.isDestroyed()) target.send("andros:auth:ready");
+}
+
+function takeAuthResult() {
+  const pending = pendingAuthResult;
+  pendingAuthResult = null;
+  return pending && pending.expires > Date.now() ? pending.payload : null;
+}
+
+function escapeHtml(text) {
+  return String(text).replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
+}
+
+function authResultPage(ok, message) {
+  const c = config.colors[theme];
+  const accent = ok ? (theme === "dark" ? "#10B981" : "#4F6B58") : theme === "dark" ? "#3B82F6" : "#C95A3B";
+  const title = ok ? "Sesión iniciada — volviendo a Andros" : "No se pudo iniciar sesión";
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Andros — ${title}</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;box-sizing:border-box;
+font-family:"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;background:${c.background};color:${c.text}}
+main{max-width:420px;text-align:center}.dot{width:44px;height:44px;border-radius:50%;margin:0 auto 16px;display:grid;place-items:center;
+background:${accent}22;color:${accent};font-size:22px;font-weight:700}h1{font-size:20px;margin:0 0 8px}
+p{font-size:14px;line-height:1.5;color:${c.muted};margin:0}</style></head><body><main>
+<div class="dot">${ok ? "✓" : "!"}</div><h1>${title}</h1><p>${escapeHtml(message)}</p></main>
+${ok ? "<script>setTimeout(function(){window.close()},1500)</script>" : ""}</body></html>`;
+}
+
+/** Procesa la vuelta del navegador. Devuelve el texto para la pestaña. */
+function handleAuthCallback(params) {
+  if (!authFlow || params.get("state") !== authFlow.state) {
+    return {
+      ok: false,
+      message: "Este inicio de sesión caducó o no lo pidió esta app. Vuelve a Andros y pulsa «Continuar con Google» otra vez.",
+    };
+  }
+  // Un solo uso: el servidor se cierra cuando termine de enviar esta respuesta.
+  clearTimeout(authFlow.timer);
+  authFlow = null;
+
+  const code = params.get("code") ?? "";
+  const providerError = params.get("error_description") || params.get("error");
+  const validCode = /^[\w.~-]{6,1024}$/.test(code);
+  // La ventana canjea el código con su verificador PKCE (supabase.auth
+  // .exchangeCodeForSession), lo que deja la sesión activa y cierra la portada.
+  deliverAuthResult(validCode ? { code } : { error: providerError || "Google no devolvió un código de acceso." });
+  bringToFront();
+
+  return validCode
+    ? { ok: true, message: "Ya puedes cerrar esta pestaña: Andros está abriendo tu lienzo." }
+    : { ok: false, message: `${providerError || "Se canceló el inicio de sesión."} Vuelve a Andros para reintentarlo.` };
+}
+
+function startAuthFlow() {
+  stopAuthFlow();
+  const state = crypto.randomBytes(24).toString("base64url");
+  return new Promise((resolve, reject) => {
+    const server = http.createServer((req, res) => {
+      const url = new URL(req.url ?? "/", "http://127.0.0.1");
+      if (req.method !== "GET" || (url.pathname !== "/auth-callback" && url.pathname !== "/callback")) {
+        res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" }).end("No encontrado");
+        return;
+      }
+      const result = handleAuthCallback(url.searchParams);
+      res.writeHead(200, {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-store",
+        "Referrer-Policy": "no-referrer",
+        Connection: "close",
+      });
+      res.end(authResultPage(result.ok, result.message));
+      if (authFlow?.server !== server) res.once("finish", () => server.close());
+    });
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      authFlow = { server, state, port, timer: setTimeout(stopAuthFlow, AUTH_TIMEOUT_MS) };
+      resolve({ port, state });
+    });
+  });
+}
+
+/** Solo se abre en el navegador la pantalla de autorización OAuth de Supabase. */
+function isOAuthAuthorizeUrl(url) {
+  const u = parseUrl(url);
+  return Boolean(u && u.protocol === "https:" && u.pathname.endsWith("/auth/v1/authorize"));
+}
+
+function setupAuthBridge() {
+  ipcMain.handle("andros:auth:begin", async (event) => {
+    assertTrusted(event);
+    return startAuthFlow();
+  });
+
+  ipcMain.handle("andros:auth:open", async (event, url) => {
+    assertTrusted(event);
+    if (!authFlow) throw new Error("Primero hay que preparar el inicio de sesión.");
+    if (!isOAuthAuthorizeUrl(url)) throw new Error("Dirección de inicio de sesión no válida.");
+    await shell.openExternal(url);
+    return true;
+  });
+
+  ipcMain.handle("andros:auth:cancel", async (event) => {
+    assertTrusted(event);
+    stopAuthFlow();
+    return true;
+  });
+
+  // La web recoge el resultado pendiente (una sola vez).
+  ipcMain.handle("andros:auth:take", async (event) => {
+    assertTrusted(event);
+    return takeAuthResult();
   });
 }
 
@@ -512,11 +733,14 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(() => {
     setupSession();
     setupPrinterBridge();
+    setupAuthBridge();
     createWindow();
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
   });
+
+  app.on("before-quit", stopAuthFlow);
 
   app.on("window-all-closed", () => {
     if (process.platform !== "darwin") app.quit();

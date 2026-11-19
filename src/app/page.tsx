@@ -51,9 +51,11 @@ export default function AndrosWorkspacePage() {
         <>
           <SpatialCanvas />
           <FloatingHudDock />
-          <OracleModal />
         </>
       )}
+
+      {/* Oráculo IA: Estudio a pantalla completa (chat + documento) en PC y móvil */}
+      <OracleModal />
 
       {/* Tutorial guiado de 4 pasos (1.ª vez en un lienzo vacío o desde ⋯ → Ver tutorial) */}
       <OnboardingTour isMobile={isMobile} />

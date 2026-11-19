@@ -34,6 +34,7 @@ import {
 import { useCloudStore } from "@/store/useCloudStore";
 import { retryFileUpload } from "@/hooks/useCloudSync";
 import { takePendingFile } from "@/lib/canvas/quickAdd";
+import { requestFileDownload } from "@/lib/downloadWithPermission";
 import {
   Model3DPreview,
   isPreviewable3D,
@@ -616,14 +617,22 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
           {/* Acciones */}
           <div className="flex items-center gap-2">
             {file.status === "ready" ? (
-              <a
-                href={file.downloadUrl}
-                download={file.fileName}
+              <button
+                type="button"
+                onClick={() =>
+                  void requestFileDownload({
+                    filename: file.fileName || `archivo.${file.extension || "bin"}`,
+                    blobOrUrl: file.downloadUrl,
+                    sizeBytes: file.fileSizeBytes,
+                    mimeType: file.mimeType,
+                    description: `Archivo del nodo "${node.title}".`,
+                  })
+                }
                 className={`flex-1 ${touchTarget} px-3 rounded-xl bg-andros-primary text-andros-canvas text-xs font-semibold flex items-center justify-center gap-1.5 hover:opacity-90 active:scale-95 spring-micro`}
               >
                 <Download className="w-3.5 h-3.5" />
                 <span>Descargar</span>
-              </a>
+              </button>
             ) : (
               <span
                 className={`flex-1 ${touchTarget} px-3 rounded-xl bg-andros-border/50 text-andros-muted text-xs font-semibold flex items-center justify-center gap-1.5 cursor-not-allowed`}

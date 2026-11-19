@@ -34,6 +34,8 @@ export interface PrinterStatusData {
 export interface PrinterStatus extends Partial<PrinterStatusData> {
   ok: boolean;
   error?: string;
+  /** true si no se consultó porque se está enviando un archivo (un solo socket). */
+  busy?: boolean;
 }
 
 export interface DiscoveredPrinter {

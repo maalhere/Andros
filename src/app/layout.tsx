@@ -11,6 +11,7 @@ import {
 } from "next/font/google";
 import "./globals.css";
 import { PwaRegister } from "@/components/shared/PwaRegister";
+import { DownloadPermissionModal } from "@/components/modals/DownloadPermissionModal";
 
 // ============================================================================
 // TIPOGRAFÍAS — Todas se descargan en el build y se sirven desde Andros
@@ -119,6 +120,8 @@ export default function RootLayout({
       <body className="bg-andros-canvas text-andros-primary font-sans antialiased selection:bg-andros-accent/20">
         {children}
         <PwaRegister />
+        {/* Ninguna descarga sin permiso explícito (requestFileDownload) */}
+        <DownloadPermissionModal />
       </body>
     </html>
   );

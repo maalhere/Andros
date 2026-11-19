@@ -28,6 +28,8 @@ interface CloudState {
   /** Archivos de `file-node` que se están subiendo al bucket ahora mismo. */
   pendingUploads: number;
   errorMessage: string | null;
+  /** Aviso informativo del login (app de Windows: "termina en tu navegador…"). */
+  authNotice: string | null;
   /** Subidas fallidas por nodo: id del nodo → motivo legible. */
   uploadErrors: Record<string, string>;
 
@@ -38,6 +40,7 @@ interface CloudState {
   setWorkspaceId: (id: string | null) => void;
   changePendingUploads: (delta: number) => void;
   clearError: () => void;
+  setAuthNotice: (notice: string | null) => void;
 }
 
 export const useCloudStore = create<CloudState>((set) => ({
@@ -46,6 +49,7 @@ export const useCloudStore = create<CloudState>((set) => ({
   workspaceId: null,
   pendingUploads: 0,
   errorMessage: null,
+  authNotice: null,
   uploadErrors: {},
 
   setUploadError: (nodeId, message) =>
@@ -66,4 +70,5 @@ export const useCloudStore = create<CloudState>((set) => ({
   changePendingUploads: (delta) =>
     set((state) => ({ pendingUploads: Math.max(0, state.pendingUploads + delta) })),
   clearError: () => set({ errorMessage: null }),
+  setAuthNotice: (authNotice) => set({ authNotice }),
 }));

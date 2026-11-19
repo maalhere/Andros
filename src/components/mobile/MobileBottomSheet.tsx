@@ -19,7 +19,6 @@ import {
 import { QUICK_ADD_OPTIONS, quickAdd, type QuickAddKind } from "@/lib/canvas/quickAdd";
 import { NODE_ARCHETYPE_LABELS, useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { EngineeringNodeData, NodeArchetype } from "@/types/workspace";
-import { OracleModal } from "@/components/shared/OracleModal";
 
 // ============================================================================
 // Piezas compartidas
@@ -377,7 +376,9 @@ export const MobileBottomSheet: React.FC = () => {
   if (
     activeMobileSheet === "none" ||
     activeMobileSheet === "node-detail" ||
-    activeMobileSheet === "library"
+    activeMobileSheet === "library" ||
+    // El Oráculo abre su propio Estudio a pantalla completa (OracleModal).
+    activeMobileSheet === "oracle"
   ) {
     return null;
   }
@@ -395,8 +396,6 @@ export const MobileBottomSheet: React.FC = () => {
       >
         {/* Píldora de arrastre */}
         <div className="w-10 h-1 rounded-full bg-andros-border-active mx-auto" />
-
-        {activeMobileSheet === "oracle" && <OracleModal embeddedInSheet />}
 
         {activeMobileSheet === "connect" && <ConnectSheet onClose={closeSheet} />}
 

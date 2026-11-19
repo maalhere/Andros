@@ -1,13 +1,17 @@
 // ============================================================================
 // ANDROS — MOTOR HÍBRIDO DEL ORÁCULO IA (BLOQUE 1: IA semántica real)
 //
-// Prioridad: GEMINI_API_KEY (gemini-2.5-flash) > OPENAI_API_KEY > intérprete local.
+// Prioridad: GEMINI_API_KEY > OPENAI_API_KEY > intérprete local.
 // El modelo recibe el lienzo COMPLETO (nodos, archivos, dimensiones 3D,
-// extractos de texto y cables) y responde SIEMPRE en JSON estructurado:
-//   { "reply": "...", "actions": [ ... ] }
+// extractos de texto y cables) y responde SIEMPRE en JSON estructurado.
+//
+// Dos modos:
+//   · "canvas"   → { "reply": "...", "actions": [ ... ] } (acciones en vivo)
+//   · "document" → { "reply": "...", "document": { title, markdown } }
+//                  para el Estudio del Oráculo (no toca el lienzo).
 // Cada acción se valida aquí antes de llegar al cliente (ids existentes, textos
-// recortados). Si no hay clave o la llamada falla, cae al intérprete local:
-// el asistente nunca deja de responder.
+// recortados). Si la IA externa falla, la respuesta trae `issue` con un
+// mensaje accionable (falta la clave, clave inválida, cuota, saturación).
 // ============================================================================
 
 import { NextRequest, NextResponse } from "next/server";
@@ -15,35 +19,54 @@ import { runLocalOracle } from "@/lib/oracle/localInterpreter";
 import type {
   OracleAction,
   OracleCanvasContext,
+  OracleDocument,
   OracleEngine,
   OracleHistoryTurn,
+  OracleIssue,
   OracleLayoutZone,
+  OracleMode,
   OracleRequestBody,
   OracleResponseBody,
 } from "@/types/oracle";
 import type { NodeArchetype } from "@/types/workspace";
 
+/** Gemini puede tardar con documentos largos: margen para la función serverless. */
+export const maxDuration = 120;
+
 /**
- * Modelos de Gemini en orden de preferencia. Se pide gemini-2.5-flash, pero
- * Google ya no lo habilita para claves nuevas (responde 404); en ese caso, o si
- * un modelo está saturado (503) o tarda demasiado, se pasa solo al siguiente.
- * `GEMINI_MODEL` en .env.local tiene prioridad sobre todos.
+ * Modelos de Gemini en orden de preferencia (`GEMINI_MODEL` manda sobre todos).
+ * Se pide gemini-2.5-flash con respaldo a gemini-2.0-flash, pero Google ya los
+ * retiró para claves nuevas (404): en cuanto un modelo responde 404 se marca
+ * como retirado y no se vuelve a intentar durante horas. Si un modelo está
+ * saturado (503), sin cuota (429) o tarda demasiado, se pasa AL INSTANTE al
+ * siguiente y se le da un minuto de descanso.
  */
 const GEMINI_MODELS = [
   ...new Set(
     [
-      process.env.GEMINI_MODEL,
+      process.env.GEMINI_MODEL?.trim(),
       "gemini-2.5-flash",
       "gemini-3.8-flash",
-      // Respaldo rápido cuando los modelos "flash" están saturados.
-      "gemini-3.5-flash-lite",
+      "gemini-3.5-flash",
+      "gemini-3-flash-preview",
+      "gemini-flash-latest",
+      "gemini-3.1-flash-lite",
       "gemini-flash-lite-latest",
-    ].filter((m): m is string => typeof m === "string" && m.trim() !== "")
+      "gemini-2.0-flash",
+    ].filter((m): m is string => typeof m === "string" && m !== "")
   ),
 ];
 /** Tiempo máximo por intento y tiempo total que el Oráculo espera a Gemini. */
-const ATTEMPT_TIMEOUT_MS = 30_000;
-const TOTAL_BUDGET_MS = 100_000;
+const ATTEMPT_TIMEOUT_MS = 25_000;
+const TOTAL_BUDGET_MS = 95_000;
+/** Un modelo con 404 (retirado / no habilitado) no se reintenta en 6 h. */
+const RETIRED_TTL_MS = 6 * 60 * 60 * 1000;
+/** Un modelo saturado o sin cuota va al final de la cola durante 60 s. */
+const COOLDOWN_MS = 60_000;
+
+/** Estado compartido entre peticiones (vive mientras viva la instancia del servidor). */
+const retiredModels = new Map<string, number>();
+const coolingModels = new Map<string, number>();
 
 
 const SYSTEM_INSTRUCTIONS = `Eres el Oráculo IA de Andros: un asistente de investigación e ingeniería que vive dentro de un lienzo espacial de nodos. Tienes permiso para LEER, ANALIZAR, CREAR y ORGANIZAR el lienzo.
@@ -203,10 +226,99 @@ function parseModelOutput(
   return { reply: reply || "Listo: apliqué los cambios en el lienzo.", actions };
 }
 
+// ----------------------------------------------------------------------------
+// Modo documento (Estudio del Oráculo)
+// ----------------------------------------------------------------------------
+
+const DOCUMENT_INSTRUCTIONS = `Eres el Oráculo IA de Andros en modo ESTUDIO DE DOCUMENTOS: redactas y editas un documento técnico junto al usuario, como un lienzo de escritura. El documento NO se pega en el lienzo espacial hasta que el usuario pulse "Añadir al lienzo".
+
+RECIBES: el contexto del lienzo (JSON, para usar datos reales de archivos y nodos), el DOCUMENTO ACTUAL (título + Markdown; puede estar vacío) y la instrucción del usuario.
+
+FORMATO DE RESPUESTA (obligatorio)
+Responde SOLO con JSON: {"reply": string, "document": {"title": string, "markdown": string} | null}
+- "reply": en español, 1 a 3 frases conversacionales: qué escribiste o cambiaste y un siguiente paso sugerido. NO copies el documento en "reply".
+- "document": el documento COMPLETO ya actualizado (nunca un fragmento ni un diff). Usa null SOLO si el usuario hace una pregunta que no requiere cambiar el documento.
+- Si el documento actual tiene contenido y te piden un cambio, edítalo conservando todo lo que no se pidió cambiar.
+- "title": corto (máx. 80 caracteres), sin "#".
+
+MARKDOWN PERMITIDO
+- Títulos "#", "##", "###"; párrafos; listas "-" y "1."; tareas "- [ ]" / "- [x]"; **negritas**, *cursivas*, \`código\` y bloques \`\`\` de código.
+- Tablas GFM con fila de encabezado y separador (| A | B |\\n|---|---|).
+- Matemáticas LaTeX: en línea con $...$ y en bloque con $$...$$ en su propia línea.
+- Dentro del JSON, escapa SIEMPRE las barras invertidas de LaTeX duplicándolas (\\\\frac, \\\\sigma, \\\\times).
+
+CALIDAD
+- Contenido técnico, real y aplicable: usa nombres, extensiones, pesos y dimensiones reales del contexto; da valores numéricos concretos.
+- PROHIBIDO dejar huecos de plantilla ("[completar]", "XX", "TBD"). Si falta un dato, asume un valor razonable y márcalo como "Supuesto: …".`;
+
+const MAX_DOCUMENT_CHARS = 60_000;
+
+function sanitizeDocument(raw: unknown): OracleDocument | null {
+  if (!raw || typeof raw !== "object") return null;
+  const d = raw as Record<string, unknown>;
+  const markdown = repairLatexControlChars(typeof d.markdown === "string" ? d.markdown : "")
+    .replace(/\r\n/g, "\n")
+    .trim()
+    .slice(0, MAX_DOCUMENT_CHARS);
+  if (!markdown) return null;
+  const title = str(d.title, 160).replace(/^#+\s*/, "") || "Documento sin título";
+  return { title, markdown };
+}
+
+/**
+ * Si el modelo escribió "\frac" sin duplicar la barra, JSON lo convierte en un
+ * salto de página + "rac". Se recuperan los casos típicos de LaTeX.
+ */
+function repairLatexControlChars(text: string): string {
+  return text
+    .replace(/\f/g, "\\f")
+    .replace(/\x08/g, "\\b")
+    .replace(/\x0b/g, "\\v")
+    .replace(/\t(?=[a-zA-Z]{2})/g, "\\t")
+    .replace(/\r(?=[a-zA-Z]{2})/g, "\\r");
+}
+
+function parseDocumentOutput(raw: unknown): { reply: string; document: OracleDocument | null } | null {
+  if (!raw || typeof raw !== "object") return null;
+  const obj = raw as Record<string, unknown>;
+  const reply = str(obj.reply, 3000);
+  const document = sanitizeDocument(obj.document);
+  if (!reply && !document) return null;
+  return { reply: reply || "Listo: actualicé el documento.", document };
+}
+
 /** Quita ```json … ``` si el modelo envolvió la respuesta en un bloque de código. */
 function parseJsonText(text: string): unknown {
-  const trimmed = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```$/, "");
-  return JSON.parse(trimmed);
+  const trimmed = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+  try {
+    return JSON.parse(trimmed);
+  } catch (error) {
+    // LaTeX sin escapar ("\alpha") rompe el JSON: se duplican las barras
+    // que no forman un escape válido y se reintenta una vez.
+    const repaired = trimmed.replace(/\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4})|\\/g, (m) =>
+      m.length > 1 ? m : "\\\\"
+    );
+    if (repaired === trimmed) throw error;
+    return JSON.parse(repaired);
+  }
+}
+
+function buildDocumentUserContent(
+  prompt: string,
+  context: OracleCanvasContext,
+  current: OracleDocument | null
+): string {
+  const linked = context.linkedNodeId
+    ? context.nodes.find((n) => n.id === context.linkedNodeId)
+    : undefined;
+  const focus = linked
+    ? `\n\nArchivo/nodo de referencia elegido por el usuario: "${linked.title}" (id ${linked.id}).`
+    : "";
+  const doc =
+    current && current.markdown.trim()
+      ? `DOCUMENTO ACTUAL\nTítulo: ${current.title}\n---\n${current.markdown.slice(0, MAX_DOCUMENT_CHARS)}\n---`
+      : "DOCUMENTO ACTUAL: vacío (crea uno nuevo).";
+  return `Contexto actual del lienzo (JSON):\n${JSON.stringify(context)}${focus}\n\n${doc}\n\nInstrucción del usuario:\n${prompt}`;
 }
 
 function buildUserContent(prompt: string, context: OracleCanvasContext): string {
@@ -236,96 +348,178 @@ function sanitizeHistory(history: unknown): OracleHistoryTurn[] {
 // Proveedores
 // ----------------------------------------------------------------------------
 
+/** Lo que se le pide al modelo en una llamada (independiente del proveedor). */
+interface ModelRequest {
+  system: string;
+  userContent: string;
+  history: OracleHistoryTurn[];
+  maxOutputTokens: number;
+}
+
 /** Error de Gemini con el código HTTP, para decidir si probar otro modelo. */
 class GeminiHttpError extends Error {
   constructor(
     public status: number,
-    detail: string
+    public detail: string
   ) {
     super(`Gemini respondió ${status}: ${detail.slice(0, 300)}`);
   }
 }
 
-async function callGemini(
-  apiKey: string,
-  prompt: string,
-  context: OracleCanvasContext,
-  history: OracleHistoryTurn[]
-): Promise<unknown> {
-  const deadline = Date.now() + TOTAL_BUDGET_MS;
-  let lastError: unknown = null;
+/** Fallo de todos los modelos de un proveedor, ya traducido para el usuario. */
+class ProviderFailure extends Error {
+  constructor(public issue: OracleIssue) {
+    super(issue.message);
+  }
+}
 
-  for (const model of GEMINI_MODELS) {
-    // Un reintento corto si el modelo está saturado; si sigue, se cambia de modelo.
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const remaining = deadline - Date.now();
-      if (remaining < 5_000) throw lastError ?? new Error("Gemini sin tiempo disponible");
-      try {
-        return await callGeminiModel(
-          model,
-          apiKey,
-          prompt,
-          context,
-          history,
-          Math.min(ATTEMPT_TIMEOUT_MS, remaining)
-        );
-      } catch (error) {
-        lastError = error;
-        const retryable =
-          error instanceof GeminiHttpError && [429, 500, 503].includes(error.status);
-        if (retryable && attempt === 0) {
-          await new Promise((resolve) => setTimeout(resolve, 1200));
-          continue;
-        }
-        // 404/403/400 (modelo no habilitado), saturación persistente o
-        // demora excesiva: se prueba el siguiente modelo de la lista.
-        break;
+const isTimeout = (error: unknown) =>
+  error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+
+const isInvalidKeyError = (error: unknown) =>
+  error instanceof GeminiHttpError &&
+  (error.status === 401 ||
+    /API_KEY_INVALID|API key not valid|API key expired|invalid api key/i.test(error.detail));
+
+/** Orden de intento: sin los retirados, y los que descansan al final. */
+function geminiCandidates(): string[] {
+  const now = Date.now();
+  const alive = GEMINI_MODELS.filter((m) => (retiredModels.get(m) ?? 0) < now);
+  const ready = alive.filter((m) => (coolingModels.get(m) ?? 0) < now);
+  const cooling = alive.filter((m) => (coolingModels.get(m) ?? 0) >= now);
+  const list = [...ready, ...cooling];
+  // Si todos quedaron retirados (p. ej. cambió la clave), se vuelve a empezar.
+  return list.length > 0 ? list : GEMINI_MODELS;
+}
+
+/** Traduce los errores acumulados a un mensaje que el usuario pueda resolver. */
+function describeGeminiFailure(errors: { model: string; error: unknown }[]): OracleIssue {
+  const http = errors
+    .map((e) => e.error)
+    .filter((e): e is GeminiHttpError => e instanceof GeminiHttpError);
+
+  if (errors.some((e) => isInvalidKeyError(e.error))) {
+    return {
+      code: "invalid_key",
+      message:
+        "Google rechazó tu GEMINI_API_KEY (no es válida, caducó o fue revocada). Genera una nueva en https://aistudio.google.com/apikey, reemplázala en .env.local (o en Vercel → Settings → Environment Variables) y reinicia el servidor.",
+    };
+  }
+  if (http.length > 0 && http.length === errors.length && http.every((e) => e.status === 429)) {
+    return {
+      code: "rate_limited",
+      message:
+        "Superaste la cuota de Gemini de tu clave (límite por minuto o por día). Espera un minuto y vuelve a intentarlo, o activa la facturación en Google AI Studio para subir el límite.",
+    };
+  }
+  const busy = errors.filter(
+    (e) =>
+      isTimeout(e.error) ||
+      (e.error instanceof GeminiHttpError && [429, 500, 503, 504].includes(e.error.status))
+  );
+  if (busy.length > 0) {
+    return {
+      code: "overloaded",
+      message: `Los modelos de Gemini están saturados ahora mismo (probé ${errors.length}: ${errors
+        .map((e) => e.model)
+        .join(", ")}). Es temporal: vuelve a intentarlo en unos segundos.`,
+    };
+  }
+  if (http.length > 0 && http.every((e) => e.status === 404 || e.status === 403)) {
+    return {
+      code: "unavailable",
+      message:
+        "Tu clave de Gemini no tiene acceso a ninguno de los modelos configurados. Define GEMINI_MODEL en .env.local con un modelo que aparezca en https://aistudio.google.com y reinicia el servidor.",
+    };
+  }
+  const last = errors[errors.length - 1]?.error;
+  return {
+    code: "unavailable",
+    message: `No pude obtener respuesta de Gemini (${
+      last instanceof Error ? last.message.slice(0, 160) : "error desconocido"
+    }). Revisa tu conexión e inténtalo de nuevo.`,
+  };
+}
+
+async function callGemini(apiKey: string, req: ModelRequest): Promise<{ raw: unknown; model: string }> {
+  const deadline = Date.now() + TOTAL_BUDGET_MS;
+  const errors: { model: string; error: unknown }[] = [];
+
+  for (const model of geminiCandidates()) {
+    const remaining = deadline - Date.now();
+    if (remaining < 4_000) break;
+    try {
+      const raw = await callGeminiModel(model, apiKey, req, Math.min(ATTEMPT_TIMEOUT_MS, remaining));
+      coolingModels.delete(model);
+      return { raw, model };
+    } catch (error) {
+      errors.push({ model, error });
+      console.warn(`[oracle] ${model} falló:`, error instanceof Error ? error.message : error);
+      if (isInvalidKeyError(error)) break; // Con una clave inválida ningún modelo servirá.
+      if (error instanceof GeminiHttpError && error.status === 404) {
+        retiredModels.set(model, Date.now() + RETIRED_TTL_MS);
+      } else {
+        coolingModels.set(model, Date.now() + COOLDOWN_MS);
       }
+      // Cualquier otro fallo (404, 429, 503, demora, JSON inválido): siguiente modelo.
     }
   }
-  throw lastError ?? new Error("Sin modelos de Gemini configurados");
+  throw new ProviderFailure(
+    errors.length > 0
+      ? describeGeminiFailure(errors)
+      : { code: "overloaded", message: "Gemini no respondió a tiempo. Vuelve a intentarlo en unos segundos." }
+  );
+}
+
+/** Razonamiento acotado: sin esto los modelos Gemini 3 pueden tardar más de un minuto. */
+function thinkingConfigFor(model: string): Record<string, unknown> | undefined {
+  if (model.startsWith("gemini-2.5")) return { thinkingBudget: 1024 };
+  if (/^gemini-[3-9]/.test(model)) return { thinkingLevel: "low" };
+  // Alias "-latest" y modelos antiguos: se deja el valor por defecto del modelo.
+  return undefined;
 }
 
 async function callGeminiModel(
   model: string,
   apiKey: string,
-  prompt: string,
-  context: OracleCanvasContext,
-  history: OracleHistoryTurn[],
-  timeoutMs: number
+  req: ModelRequest,
+  timeoutMs: number,
+  withThinking = true
 ): Promise<unknown> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+  const thinkingConfig = withThinking ? thinkingConfigFor(model) : undefined;
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
     signal: AbortSignal.timeout(timeoutMs),
     body: JSON.stringify({
-      systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTIONS }] },
+      systemInstruction: { parts: [{ text: req.system }] },
       contents: [
-        ...history.map((turn) => ({
+        ...req.history.map((turn) => ({
           role: turn.role === "oracle" ? "model" : "user",
           parts: [{ text: turn.text }],
         })),
-        { role: "user", parts: [{ text: buildUserContent(prompt, context) }] },
+        { role: "user", parts: [{ text: req.userContent }] },
       ],
       generationConfig: {
         responseMimeType: "application/json",
         temperature: 0.4,
-        maxOutputTokens: 8192,
-        // Razonamiento acotado: sin esto los modelos Gemini 3 pueden tardar
-        // más de un minuto en responder. 2.5 usa presupuesto en tokens.
-        thinkingConfig: model.startsWith("gemini-2.")
-          ? { thinkingBudget: 1024 }
-          : { thinkingLevel: "low" },
+        maxOutputTokens: req.maxOutputTokens,
+        ...(thinkingConfig ? { thinkingConfig } : {}),
       },
     }),
   });
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
+    // Modelo que no acepta la configuración de razonamiento: un reintento sin ella.
+    if (res.status === 400 && thinkingConfig && /thinking/i.test(detail)) {
+      return callGeminiModel(model, apiKey, req, timeoutMs, false);
+    }
     throw new GeminiHttpError(res.status, detail);
   }
   const data = await res.json();
-  const parts: unknown[] = data?.candidates?.[0]?.content?.parts ?? [];
+  const candidate = data?.candidates?.[0];
+  const parts: unknown[] = candidate?.content?.parts ?? [];
   // Se ignoran las partes de "pensamiento" del modelo; solo cuenta la respuesta.
   const text = parts
     .map((p) => {
@@ -334,42 +528,56 @@ async function callGeminiModel(
       return part.thought === true || typeof part.text !== "string" ? "" : part.text;
     })
     .join("");
-  if (!text) throw new Error("Respuesta de Gemini sin texto utilizable");
+  if (!text) {
+    const reason = candidate?.finishReason ?? data?.promptFeedback?.blockReason ?? "sin texto";
+    throw new Error(`Respuesta de ${model} sin texto utilizable (${reason})`);
+  }
   return parseJsonText(text);
 }
 
-async function callOpenAI(
-  apiKey: string,
-  prompt: string,
-  context: OracleCanvasContext,
-  history: OracleHistoryTurn[]
-): Promise<unknown> {
+async function callOpenAI(apiKey: string, req: ModelRequest): Promise<{ raw: unknown; model: string }> {
+  const model = process.env.OPENAI_MODEL?.trim() || "gpt-4o-mini";
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
-    signal: AbortSignal.timeout(ATTEMPT_TIMEOUT_MS),
+    signal: AbortSignal.timeout(ATTEMPT_TIMEOUT_MS * 2),
     body: JSON.stringify({
-      model: "gpt-4o-mini",
+      model,
       response_format: { type: "json_object" },
+      max_tokens: req.maxOutputTokens,
       messages: [
-        { role: "system", content: SYSTEM_INSTRUCTIONS },
-        ...history.map((turn) => ({
+        { role: "system", content: req.system },
+        ...req.history.map((turn) => ({
           role: turn.role === "oracle" ? "assistant" : "user",
           content: turn.text,
         })),
-        { role: "user", content: buildUserContent(prompt, context) },
+        { role: "user", content: req.userContent },
       ],
     }),
   });
-  if (!res.ok) throw new Error(`OpenAI respondió ${res.status}`);
+  if (!res.ok) {
+    const issue: OracleIssue =
+      res.status === 401
+        ? { code: "invalid_key", message: "OpenAI rechazó tu OPENAI_API_KEY. Revísala en .env.local." }
+        : res.status === 429
+          ? { code: "rate_limited", message: "Superaste la cuota de OpenAI. Espera un minuto e inténtalo de nuevo." }
+          : { code: "unavailable", message: `OpenAI respondió ${res.status}. Inténtalo de nuevo.` };
+    throw new ProviderFailure(issue);
+  }
   const data = await res.json();
   const text = data?.choices?.[0]?.message?.content;
   if (typeof text !== "string") throw new Error("Respuesta de OpenAI sin texto utilizable");
-  return parseJsonText(text);
+  return { raw: parseJsonText(text), model };
 }
+
+const MISSING_KEY_ISSUE: OracleIssue = {
+  code: "missing_key",
+  message:
+    "Falta GEMINI_API_KEY. Créala gratis en https://aistudio.google.com/apikey y pégala en .env.local (local) o en Vercel → Settings → Environment Variables (producción); después reinicia el servidor.",
+};
 
 // ----------------------------------------------------------------------------
 // Handler
@@ -384,6 +592,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<OracleRes
   }
 
   const prompt = typeof body?.prompt === "string" ? body.prompt.slice(0, 4000) : "";
+  const mode: OracleMode = body?.mode === "document" ? "document" : "canvas";
   const rawContext = body?.context;
   const context: OracleCanvasContext = {
     nodes: Array.isArray(rawContext?.nodes) ? rawContext.nodes.slice(0, 200) : [],
@@ -392,6 +601,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<OracleRes
     linkedNodeId: rawContext?.linkedNodeId ?? null,
   };
   const history = sanitizeHistory(body?.history);
+  const currentDocument = mode === "document" ? sanitizeDocument(body?.document) : null;
 
   if (!prompt.trim()) {
     return NextResponse.json({
@@ -401,34 +611,80 @@ export async function POST(request: NextRequest): Promise<NextResponse<OracleRes
     });
   }
 
-  const providers: { engine: OracleEngine; key: string | undefined; call: typeof callGemini }[] = [
-    { engine: "gemini", key: process.env.GEMINI_API_KEY, call: callGemini },
-    { engine: "openai", key: process.env.OPENAI_API_KEY, call: callOpenAI },
+  const request_: ModelRequest =
+    mode === "document"
+      ? {
+          system: DOCUMENT_INSTRUCTIONS,
+          userContent: buildDocumentUserContent(prompt, context, currentDocument),
+          history,
+          maxOutputTokens: 16_384,
+        }
+      : {
+          system: SYSTEM_INSTRUCTIONS,
+          userContent: buildUserContent(prompt, context),
+          history,
+          maxOutputTokens: 8192,
+        };
+
+  const providers: {
+    engine: OracleEngine;
+    key: string | undefined;
+    call: (key: string, req: ModelRequest) => Promise<{ raw: unknown; model: string }>;
+  }[] = [
+    { engine: "gemini", key: process.env.GEMINI_API_KEY?.trim(), call: callGemini },
+    { engine: "openai", key: process.env.OPENAI_API_KEY?.trim(), call: callOpenAI },
   ];
 
+  let issue: OracleIssue | null = null;
   for (const provider of providers) {
     if (!provider.key) continue;
     try {
-      const parsed = parseModelOutput(
-        await provider.call(provider.key, prompt, context, history),
-        context
-      );
-      if (parsed) return NextResponse.json({ ...parsed, engine: provider.engine });
+      const { raw, model } = await provider.call(provider.key, request_);
+      if (mode === "document") {
+        const parsed = parseDocumentOutput(raw);
+        if (parsed) {
+          return NextResponse.json({ ...parsed, actions: [], engine: provider.engine, model });
+        }
+      } else {
+        const parsed = parseModelOutput(raw, context);
+        if (parsed) return NextResponse.json({ ...parsed, engine: provider.engine, model });
+      }
+      issue ??= {
+        code: "unavailable",
+        message: "La IA respondió en un formato inesperado. Vuelve a intentarlo.",
+      };
     } catch (error) {
-      // Clave presente pero la llamada falló (red, cuota, formato): se prueba
-      // el siguiente motor y, al final, el intérprete local.
-      console.error(`[oracle] ${provider.engine} falló:`, error);
+      // Clave presente pero la llamada falló: se prueba el siguiente motor.
+      console.error(`[oracle] ${provider.engine} falló:`, error instanceof Error ? error.message : error);
+      issue ??=
+        error instanceof ProviderFailure
+          ? error.issue
+          : {
+              code: "unavailable",
+              message: `No pude obtener respuesta de ${provider.engine === "gemini" ? "Gemini" : "OpenAI"}. Inténtalo de nuevo.`,
+            };
     }
   }
 
-  const local = runLocalOracle(prompt, context);
   const hadExternalKey = providers.some((p) => p.key);
-  return NextResponse.json(
-    hadExternalKey
-      ? {
-          ...local,
-          reply: `Gemini no respondió a tiempo (servicio saturado o sin conexión), así que respondí en modo local. ${local.reply}`,
-        }
-      : local
-  );
+  const finalIssue = hadExternalKey ? issue : MISSING_KEY_ISSUE;
+
+  // Modo documento: sin IA no se puede redactar; se explica qué hacer.
+  if (mode === "document") {
+    return NextResponse.json({
+      reply: finalIssue?.message ?? "No pude redactar el documento. Inténtalo de nuevo.",
+      actions: [],
+      engine: "local",
+      document: null,
+      ...(finalIssue ? { issue: finalIssue } : {}),
+    });
+  }
+
+  // Modo lienzo: el intérprete local sigue ejecutando las órdenes básicas.
+  const local = runLocalOracle(prompt, context);
+  return NextResponse.json({
+    ...local,
+    reply: finalIssue ? `${finalIssue.message}\n\nModo local: ${local.reply}` : local.reply,
+    ...(finalIssue ? { issue: finalIssue } : {}),
+  });
 }

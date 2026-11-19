@@ -5,6 +5,8 @@
 //   · printer.discover() → busca la Adventurer 3 en el Wi-Fi
 //   · printer.status(ip, port) → temperaturas / progreso
 //   · printer.print(ip, port, fileName, bytes) → envía el .gx e imprime
+//   · auth.begin() / auth.openInBrowser(url) / auth.onResult(cb) → login con
+//     Google en el navegador del sistema con vuelta automática a la app
 // Además sincroniza el tema (clase "dark" en <html>) con la barra de título.
 // ============================================================================
 
@@ -14,6 +16,27 @@ const ORIGIN_FLAG = "--andros-origin=";
 const appOrigin = (process.argv.find((arg) => arg.startsWith(ORIGIN_FLAG)) || "").slice(ORIGIN_FLAG.length);
 
 if (appOrigin && window.location.origin === appOrigin) {
+  // Resultado del login con Google: el proceso principal lo guarda hasta que
+  // esta página lo recoge (`andros:auth:take`). Si llega antes de que React
+  // registre su callback (p. ej. durante una recarga), se guarda aquí.
+  const authListeners = new Set();
+  let bufferedAuthResult = null;
+  const pullAuthResult = () => {
+    ipcRenderer
+      .invoke("andros:auth:take")
+      .then((payload) => {
+        if (!payload) return;
+        if (authListeners.size === 0) {
+          bufferedAuthResult = payload;
+          return;
+        }
+        for (const listener of authListeners) listener(payload);
+      })
+      .catch(() => {});
+  };
+  ipcRenderer.on("andros:auth:ready", pullAuthResult);
+  pullAuthResult();
+
   contextBridge.exposeInMainWorld("androsDesktop", {
     isDesktop: true,
     platform: process.platform,
@@ -22,6 +45,20 @@ if (appOrigin && window.location.origin === appOrigin) {
       status: (ip, port) => ipcRenderer.invoke("andros:printer:status", String(ip), Number(port)),
       print: (ip, port, fileName, data) =>
         ipcRenderer.invoke("andros:printer:print", String(ip), Number(port), String(fileName), data),
+    },
+    auth: {
+      begin: () => ipcRenderer.invoke("andros:auth:begin"),
+      openInBrowser: (url) => ipcRenderer.invoke("andros:auth:open", String(url)),
+      cancel: () => ipcRenderer.invoke("andros:auth:cancel"),
+      onResult: (callback) => {
+        authListeners.add(callback);
+        if (bufferedAuthResult) {
+          const payload = bufferedAuthResult;
+          bufferedAuthResult = null;
+          callback(payload);
+        }
+        return () => authListeners.delete(callback);
+      },
     },
   });
 

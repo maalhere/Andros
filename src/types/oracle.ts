@@ -98,17 +98,56 @@ export interface OracleHistoryTurn {
   text: string;
 }
 
+/**
+ * Modo de respuesta:
+ *   · "canvas"   → el Oráculo actúa sobre el lienzo (acciones en vivo).
+ *   · "document" → el Oráculo redacta/edita el documento del Estudio
+ *                  (Markdown con títulos, listas, tablas y LaTeX) SIN tocar
+ *                  el lienzo hasta que el usuario pulse "Añadir al lienzo".
+ */
+export type OracleMode = "canvas" | "document";
+
+/** Documento en edición del Estudio del Oráculo. */
+export interface OracleDocument {
+  title: string;
+  /** Markdown (GFM + LaTeX con $…$ y $$…$$). */
+  markdown: string;
+}
+
 export interface OracleRequestBody {
   prompt: string;
   context: OracleCanvasContext;
   history?: OracleHistoryTurn[];
+  /** Por defecto "canvas" (compatibilidad). */
+  mode?: OracleMode;
+  /** Solo modo "document": borrador actual, para que la IA lo edite. */
+  document?: OracleDocument | null;
 }
 
 /** Qué motor respondió: útil solo para mostrar un estado discreto en la UI. */
 export type OracleEngine = "gemini" | "openai" | "local";
 
+/** Problemas de configuración/servicio con un mensaje accionable para el usuario. */
+export type OracleIssueCode =
+  | "missing_key"
+  | "invalid_key"
+  | "rate_limited"
+  | "overloaded"
+  | "unavailable";
+
+export interface OracleIssue {
+  code: OracleIssueCode;
+  message: string;
+}
+
 export interface OracleResponseBody {
   reply: string;
   actions: OracleAction[];
   engine: OracleEngine;
+  /** Modelo exacto que respondió (p. ej. "gemini-3-flash-preview"). */
+  model?: string;
+  /** Solo modo "document": documento completo actualizado (o null si no cambió). */
+  document?: OracleDocument | null;
+  /** Presente si la IA externa no pudo responder (clave, cuota, saturación…). */
+  issue?: OracleIssue;
 }

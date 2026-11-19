@@ -13,6 +13,7 @@ import {
   type CanvasBackground,
 } from "@/store/useSettingsStore";
 import { collectPreferences } from "@/hooks/useSettingsSync";
+import { requestFileDownload } from "@/lib/downloadWithPermission";
 
 // ----------------------------------------------------------------------------
 // Piezas reutilizables
@@ -249,14 +250,11 @@ export const QualityOfLifeModal: React.FC = () => {
       canvasStrokes: ws.canvasStrokes,
     };
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `andros-respaldo-${new Date().toISOString().slice(0, 10)}.json`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    void requestFileDownload({
+      filename: `andros-respaldo-${new Date().toISOString().slice(0, 10)}.json`,
+      blobOrUrl: blob,
+      description: `Respaldo del lienzo actual (${ws.nodes.length} nodo(s)) y de tus preferencias.`,
+    });
   };
 
   if (typeof document === "undefined") return null;

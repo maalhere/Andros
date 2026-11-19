@@ -109,6 +109,7 @@ export const LandingOverlay: React.FC<LandingOverlayProps> = ({ isMobile }) => {
   const user = useCloudStore((s) => s.user);
   const cloudError = useCloudStore((s) => s.errorMessage);
   const clearCloudError = useCloudStore((s) => s.clearError);
+  const authNotice = useCloudStore((s) => s.authNotice);
   const reduceMotion = useReducedMotion() ?? false;
 
   // Con sesión de Google ya activa (o al volver del login) se entra directo al lienzo.
@@ -342,6 +343,11 @@ export const LandingOverlay: React.FC<LandingOverlayProps> = ({ isMobile }) => {
                 {cloudError && !user && (
                   <p role="alert" className="max-w-sm text-xs leading-relaxed text-andros-accent">
                     {cloudError}
+                  </p>
+                )}
+                {authNotice && !cloudError && !user && (
+                  <p role="status" className="max-w-sm text-xs leading-relaxed text-andros-muted">
+                    {authNotice}
                   </p>
                 )}
               </div>

@@ -201,6 +201,8 @@ export interface AiTextBlockInput {
   connectionLabel?: string;
   /** Etiqueta corta del bloque (por defecto "AI-TEXT"). */
   codeTag?: string;
+  /** Posición exacta en el lienzo (p. ej. el centro de la vista). Si falta, se busca un hueco. */
+  position?: { x: number; y: number };
 }
 
 // ============================================================================
@@ -1529,12 +1531,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       const height = estimateNodeHeight(draft);
       const newNode: EngineeringNodeData = {
         ...draft,
-        position: anchor
-          ? findSlotRightOf(state.nodes, anchor, height)
-          : findFreeCanvasPosition(state.nodes),
+        position: input.position
+          ? { x: Math.round(input.position.x), y: Math.round(input.position.y) }
+          : anchor
+            ? findSlotRightOf(state.nodes, anchor, height)
+            : findFreeCanvasPosition(state.nodes),
       };
 
-      if (!anchor) return { nodes: [newNode, ...state.nodes] };
+      if (!anchor) return { nodes: [newNode, ...state.nodes], selectedNodeId: input.position ? id : state.selectedNodeId };
 
       const auto = resolveAutoPorts(anchor, newNode);
       const label = input.connectionLabel?.trim() || "Referencia de";

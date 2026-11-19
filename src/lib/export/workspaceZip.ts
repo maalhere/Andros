@@ -6,6 +6,7 @@ import {
   type WorkspaceSeed,
 } from "@/hooks/useCloudSync";
 import { sanitizeCanvasStrokes } from "@/lib/canvas/inkGeometry";
+import { requestFileDownload } from "@/lib/downloadWithPermission";
 import { useCloudStore } from "@/store/useCloudStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useWorkspaceManagerStore } from "@/store/useWorkspaceManagerStore";
@@ -46,6 +47,8 @@ interface WorkspaceJson {
 }
 
 export interface ExportResult {
+  /** `false` si el usuario no dio permiso para descargar el paquete. */
+  downloaded: boolean;
   fileName: string;
   fileCount: number;
   noteCount: number;
@@ -85,17 +88,6 @@ function uniquePath(used: Set<string>, folder: string, name: string): string {
   }
   used.add(candidate.toLowerCase());
   return candidate;
-}
-
-function triggerDownload(blob: Blob, fileName: string): void {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
 function activeWorkspaceName(): string {
@@ -200,9 +192,15 @@ export async function downloadWorkspaceZip(): Promise<ExportResult> {
     compressionOptions: { level: 6 },
   });
   const fileName = `${safeName(name, "andros")}${WORKSPACE_ZIP_EXTENSION}`;
-  triggerDownload(blob, fileName);
+  const downloaded = await requestFileDownload({
+    filename: fileName,
+    blobOrUrl: blob,
+    mimeType: "application/zip",
+    description: `Espacio "${name}" completo: ${Object.keys(files).length} archivo(s) y ${Object.keys(notes).length} nota(s).`,
+  });
 
   return {
+    downloaded,
     fileName,
     fileCount: Object.keys(files).length,
     noteCount: Object.keys(notes).length,

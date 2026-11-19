@@ -21,30 +21,45 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   FLASHFORGE_DEFAULT_PORT,
   MAX_UPLOAD_BYTES,
+  describePrinterError,
   discoverFlashForge,
+  isPrinterBusyError,
+  isPrinterTransferring,
   isPrivateIPv4,
   readPrinterStatus,
   safePrinterFileName,
   uploadAndPrint,
 } from "@/lib/printer/flashforgeNet";
-import type { DiscoveryResult } from "@/lib/printer/flashforgeShared";
+import type { DiscoveryResult, PrinterStatus } from "@/lib/printer/flashforgeShared";
 
 /** En Vercel el servidor no está en el Wi-Fi del usuario. */
 const IS_REMOTE_HOST = Boolean(process.env.VERCEL);
+
+/** La subida de un .gx grande por Wi-Fi puede tardar minutos. */
+export const maxDuration = 300;
 
 function badRequest(error: string) {
   return NextResponse.json({ ok: false, error }, { status: 400 });
 }
 
 function connectionError(ip: string, port: number, e: unknown) {
-  const message = e instanceof Error ? e.message : "Error desconocido";
   return NextResponse.json(
     {
       ok: false,
-      error: `No se pudo conectar con ${ip}:${port}. ${message}. Comprueba que la impresora y este equipo están en la misma red Wi-Fi y que Andros corre en local (app de Windows o npm run dev).`,
+      error: `No se pudo conectar con ${ip}:${port}. ${describePrinterError(e)}. Comprueba que la impresora y este equipo están en la misma red Wi-Fi y que Andros corre en local (app de Windows o npm run dev).`,
     },
     { status: 502 }
   );
+}
+
+/** Respuesta del sondeo de estado mientras se envía un archivo (sondeo en pausa). */
+function busyStatus() {
+  const body: PrinterStatus = {
+    ok: false,
+    busy: true,
+    error: "Enviando el archivo a la impresora: el estado se reanuda al terminar.",
+  };
+  return NextResponse.json(body);
 }
 
 function parseTarget(ipRaw: unknown, portRaw: unknown): { ip: string; port: number } | string {
@@ -91,9 +106,12 @@ export async function GET(request: NextRequest) {
   if (typeof target === "string") return badRequest(target);
   const { ip, port } = target;
 
+  // Un solo socket en el 8899: no se abre otro mientras se transfiere.
+  if (isPrinterTransferring(ip)) return busyStatus();
   try {
     return NextResponse.json({ ok: true, ...(await readPrinterStatus(ip, port)) });
   } catch (e) {
+    if (isPrinterBusyError(e)) return busyStatus();
     return connectionError(ip, port, e);
   }
 }
@@ -148,10 +166,18 @@ export async function POST(request: NextRequest) {
   if (data.length === 0) return badRequest("El archivo de impresión está vacío.");
   if (data.length > MAX_UPLOAD_BYTES) return badRequest("El archivo supera 128 MB.");
 
+  if (isPrinterTransferring(target.ip)) {
+    return NextResponse.json(
+      { ok: false, error: "Ya se está enviando un archivo a esta impresora. Espera a que termine." },
+      { status: 409 }
+    );
+  }
+
+  // Nombre remoto corto (≤ 12 caracteres): 0:/user/<nombre>.gx
   const fileName = safePrinterFileName(nameRaw, data);
   try {
-    await uploadAndPrint(target.ip, target.port, fileName, data);
-    return NextResponse.json({ ok: true, fileName, bytes: data.length });
+    const remoteName = await uploadAndPrint(target.ip, target.port, fileName, data);
+    return NextResponse.json({ ok: true, fileName: remoteName, bytes: data.length });
   } catch (e) {
     return connectionError(target.ip, target.port, e);
   }

@@ -8,15 +8,23 @@
 //
 // Protocolo (TCP 8899, M-codes de FlashForge):
 //   estado   → ~M601 S1 · ~M115 · ~M105 · ~M27 · ~M602
-//   imprimir → ~M601 S1 → ~M28 <bytes> 0:/user/<nombre>.gx → datos →
-//              ~M29 → ~M23 0:/user/<nombre>.gx   (empieza a calentar sola)
+//   imprimir → ~M601 S1 → ~M28 <bytes> 0:/user/<nombre>.gx (espera "ok") →
+//              paquete 1 → respuesta → paquete 2 → respuesta → … →
+//              ~M29 (espera "ok") → ~M23 0:/user/<nombre>.gx → ~M602
 //   buscar   → anuncio UDP (225.0.0.9:19000 y broadcast :19000/:48899) +
 //              barrido TCP concurrente de la subred local al puerto 8899,
 //              confirmando cada candidata con ~M601 S1 y ~M115.
 //
-// Los datos se envían en paquetes de 4096 bytes con cabecera de 16 bytes
-// (firma, nº de paquete, longitud y CRC-32), el formato de red de la
-// Adventurer 3.
+// Reglas del firmware real de la Adventurer 3 (causas de ECONNRESET):
+//   1. Solo admite UNA conexión TCP a la vez en el 8899. Todas las sesiones
+//      (estado, impresión, búsqueda) pasan por una cola por IP y entre una y
+//      otra se deja un respiro para que la impresora libere el socket. El
+//      estado no se consulta mientras se transfiere un archivo.
+//   2. Los datos van en paquetes de 4096 bytes con cabecera de 16 bytes
+//      (firma 5A 5A A5 A5, nº de paquete, longitud y CRC-32, big-endian) y se
+//      envían de uno en uno, esperando la respuesta de la impresora antes del
+//      siguiente. Si el firmware no confirma paquetes, se pasa a ritmo fijo.
+//   3. Nombres remotos cortos: máximo 12 caracteres [a-z0-9_] + extensión.
 // ============================================================================
 
 import dgram from "node:dgram";
@@ -34,10 +42,105 @@ import {
 export { FLASHFORGE_DEFAULT_PORT, isPrivateIPv4 };
 
 const COMMAND_TIMEOUT_MS = 4000;
-const UPLOAD_FINISH_TIMEOUT_MS = 60_000;
-const IDLE_TIMEOUT_MS = 30_000;
+const UPLOAD_FINISH_TIMEOUT_MS = 90_000;
+/** Silencio máximo del socket (~M29 puede tardar en archivos grandes). */
+const IDLE_TIMEOUT_MS = 120_000;
 const PACKET_DATA_BYTES = 4096;
+const PACKET_HEADER = [0x5a, 0x5a, 0xa5, 0xa5] as const;
+/** Espera de la respuesta a cada paquete y reintentos suaves si tarda. */
+const PACKET_ACK_TIMEOUT_MS = 1500;
+const PACKET_ACK_RETRIES = 4;
+/** Ritmo fijo entre paquetes si el firmware no responde a cada uno. */
+const PACED_PACKET_GAP_MS = 25;
+/** Respiro entre dos sesiones TCP seguidas a la misma impresora. */
+const SESSION_GAP_MS = 400;
+/** Espera antes de reintentar una conexión reseteada o rechazada. */
+const RECONNECT_DELAY_MS = 400;
+const REMOTE_NAME_MAX = 12;
 export const MAX_UPLOAD_BYTES = 128 * 1024 * 1024;
+
+const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+// ---------------------------------------------------------------------------
+// Un solo socket activo por impresora (cola por IP)
+// ---------------------------------------------------------------------------
+
+interface LockState {
+  queues: Map<string, Promise<void>>;
+  lastClosedAt: Map<string, number>;
+  /** Transferencias de impresión en curso (o esperando turno) por IP. */
+  transfers: Map<string, number>;
+}
+
+// En globalThis: la recarga en caliente de Next.js no debe duplicar las colas.
+const lockState: LockState = ((globalThis as { __androsFlashForgeLocks?: LockState }).__androsFlashForgeLocks ??= {
+  queues: new Map(),
+  lastClosedAt: new Map(),
+  transfers: new Map(),
+});
+
+/** Ejecuta `fn` cuando no haya otra sesión abierta con `ip` (FIFO). */
+function withPrinterLock<T>(ip: string, fn: () => Promise<T>): Promise<T> {
+  const previous = lockState.queues.get(ip) ?? Promise.resolve();
+  const run = previous.then(async () => {
+    const wait = SESSION_GAP_MS - (Date.now() - (lockState.lastClosedAt.get(ip) ?? 0));
+    if (wait > 0) await delay(wait);
+    try {
+      return await fn();
+    } finally {
+      lockState.lastClosedAt.set(ip, Date.now());
+    }
+  });
+  const tail = run.then(
+    () => undefined,
+    () => undefined
+  );
+  lockState.queues.set(ip, tail);
+  void tail.then(() => {
+    if (lockState.queues.get(ip) === tail) lockState.queues.delete(ip);
+  });
+  return run;
+}
+
+/** true mientras se envía (o espera turno para enviar) un archivo a `ip`. */
+export function isPrinterTransferring(ip: string): boolean {
+  return (lockState.transfers.get(ip) ?? 0) > 0;
+}
+
+export class PrinterBusyError extends Error {
+  constructor() {
+    super("Enviando un archivo a la impresora: el estado se reanuda al terminar.");
+    this.name = "PrinterBusyError";
+  }
+}
+
+export function isPrinterBusyError(e: unknown): boolean {
+  return e instanceof Error && e.name === "PrinterBusyError";
+}
+
+function errorCode(e: unknown): string {
+  return (e as NodeJS.ErrnoException | null)?.code ?? "";
+}
+
+/** Mensaje claro en español para un fallo de red con la impresora. */
+export function describePrinterError(e: unknown): string {
+  const code = errorCode(e);
+  const raw = e instanceof Error ? e.message : "Error desconocido";
+  switch (code) {
+    case "ECONNRESET":
+    case "EPIPE":
+      return `La impresora cortó la conexión (${code}). Suele pasar si FlashPrint u otra app la tiene abierta, o si la red bloquea el tráfico entre equipos`;
+    case "ECONNREFUSED":
+      return "La impresora rechazó la conexión en el puerto 8899 (ECONNREFUSED). Comprueba que el Wi-Fi está activo en su pantalla";
+    case "EHOSTUNREACH":
+    case "ENETUNREACH":
+      return `No hay ruta hasta la impresora (${code}). La red puede tener aislamiento de clientes (habitual en redes de empresa o universidad)`;
+    case "ETIMEDOUT":
+      return "La impresora no respondió a tiempo (ETIMEDOUT)";
+    default:
+      return raw;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Conexión con la impresora
@@ -58,8 +161,10 @@ export class PrinterConnection {
     const conn = new PrinterConnection();
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
-        conn.close();
-        reject(new Error("La impresora no respondió a la conexión"));
+        conn.socket.destroy();
+        const err = new Error("La impresora no respondió a la conexión") as NodeJS.ErrnoException;
+        err.code = "ETIMEDOUT";
+        reject(err);
       }, timeoutMs);
       conn.socket.once("error", (e) => {
         clearTimeout(timer);
@@ -75,10 +180,15 @@ export class PrinterConnection {
 
   private constructor() {
     this.socket.setNoDelay(true);
+    this.socket.setKeepAlive(true, 10_000);
     this.socket.setTimeout(IDLE_TIMEOUT_MS);
     this.socket.on("timeout", () => this.fail(new Error("La conexión con la impresora quedó inactiva")));
     this.socket.on("error", (e) => this.fail(e));
-    this.socket.on("close", () => this.fail(new Error("La impresora cerró la conexión")));
+    this.socket.on("close", () => {
+      const err = new Error("La impresora cerró la conexión") as NodeJS.ErrnoException;
+      err.code = "ECONNRESET";
+      this.fail(err);
+    });
     this.socket.on("data", (chunk) => {
       this.buffer += chunk.toString("latin1");
       const w = this.waiter;
@@ -100,42 +210,134 @@ export class PrinterConnection {
     }
   }
 
-  /** Envía `~Mxxx …` y espera "CMD Mxxx Received." seguido de "ok". */
-  command(cmd: string, timeoutMs = COMMAND_TIMEOUT_MS): Promise<string> {
+  /**
+   * Espera a que lo recibido cumpla `done`. Resuelve con el texto, o con null
+   * si vence el plazo; rechaza si la conexión falla.
+   */
+  private wait(done: (text: string) => boolean, timeoutMs: number): Promise<string | null> {
     if (this.failure) return Promise.reject(this.failure);
+    if (done(this.buffer)) return Promise.resolve(this.buffer.trim());
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.waiter = null;
+        resolve(null);
+      }, timeoutMs);
+      this.waiter = { done, resolve, reject, timer };
+    });
+  }
+
+  /** Envía `~Mxxx …` y espera "CMD Mxxx Received." seguido de "ok". */
+  async command(cmd: string, timeoutMs = COMMAND_TIMEOUT_MS): Promise<string> {
+    if (this.failure) throw this.failure;
     const code = /M\d+/.exec(cmd)?.[0] ?? "";
     // Se exige el eco "CMD Mxxx" para no confundir un "ok" tardío de otro comando.
     const marker = new RegExp(`CMD\\s+${code}\\b`, "i");
     const done = (text: string) =>
       marker.test(text) && (/\bok\b\s*$/i.test(text) || /error[^\n]*\n\s*$/i.test(text));
-    return new Promise((resolve, reject) => {
-      this.buffer = "";
-      const timer = setTimeout(() => {
-        this.waiter = null;
-        reject(new Error(`La impresora no respondió a ${cmd}`));
-      }, timeoutMs);
-      this.waiter = { done, resolve, reject, timer };
-      this.socket.write(`${cmd}\r\n`);
-    });
+    this.buffer = "";
+    const pending = this.wait(done, timeoutMs);
+    await this.write(Buffer.from(`${cmd}\r\n`, "latin1"));
+    const reply = await pending;
+    if (reply === null) throw new Error(`La impresora no respondió a ${cmd}`);
+    return reply;
   }
 
-  /** Escribe bytes crudos respetando el control de flujo del socket. */
+  /** Descarta lo recibido hasta ahora (antes de enviar un paquete). */
+  clearInput() {
+    this.buffer = "";
+  }
+
+  /** Devuelve y limpia lo recibido sin esperar. */
+  takeInput(): string {
+    const text = this.buffer;
+    this.buffer = "";
+    return text;
+  }
+
+  /**
+   * Espera cualquier respuesta de la impresora durante `timeoutMs`.
+   * Devuelve el texto recibido, o null si no llegó nada (sin error).
+   */
+  async waitForReply(timeoutMs: number): Promise<string | null> {
+    const text = await this.wait((t) => t.length > 0, timeoutMs);
+    if (text !== null) this.buffer = "";
+    return text;
+  }
+
+  /** Escribe bytes y resuelve cuando el sistema los ha aceptado. */
   write(data: Buffer): Promise<void> {
     if (this.failure) return Promise.reject(this.failure);
     return new Promise((resolve, reject) => {
-      const ok = this.socket.write(data, (err) => {
-        if (err) reject(err);
+      this.socket.write(data, (err) => {
+        if (err) reject(this.failure ?? err);
+        else if (this.failure) reject(this.failure);
+        else resolve();
       });
-      if (ok) resolve();
-      else this.socket.once("drain", () => resolve());
     });
   }
 
   close() {
+    if (this.waiter) clearTimeout(this.waiter.timer);
     this.waiter = null;
     this.socket.removeAllListeners("close");
-    this.socket.destroy();
+    if (this.socket.destroyed) return;
+    // Cierre ordenado (FIN) para que la impresora libere su única conexión;
+    // si no contesta, se fuerza al segundo.
+    this.socket.end();
+    const force = setTimeout(() => this.socket.destroy(), 1000);
+    force.unref?.();
+    this.socket.once("close", () => clearTimeout(force));
   }
+}
+
+// ---------------------------------------------------------------------------
+// Sesión de control (~M601 S1) con reintento
+// ---------------------------------------------------------------------------
+
+const RETRYABLE_CODES = new Set(["ECONNRESET", "ECONNREFUSED", "EPIPE", "ECONNABORTED", "CONTROL_BUSY"]);
+
+/** Libera una sesión de control que se quedó colgada (~M602). */
+async function releaseStaleControl(ip: string, port: number) {
+  let conn: PrinterConnection | null = null;
+  try {
+    conn = await PrinterConnection.open(ip, port, 2000);
+    await conn.command("~M602", 1500);
+  } catch {
+    // Si tampoco acepta esto, el siguiente intento lo dirá.
+  } finally {
+    conn?.close();
+  }
+}
+
+/**
+ * Abre la conexión y toma el control con ~M601 S1. Si la impresora resetea,
+ * rechaza o dice "Control failed", libera con ~M602 y reintenta tras 400 ms.
+ */
+async function openSession(ip: string, port: number, attempts: number, timeoutMs = COMMAND_TIMEOUT_MS) {
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (attempt > 0) {
+      await delay(RECONNECT_DELAY_MS);
+      await releaseStaleControl(ip, port);
+      await delay(RECONNECT_DELAY_MS);
+    }
+    let conn: PrinterConnection | null = null;
+    try {
+      conn = await PrinterConnection.open(ip, port, timeoutMs);
+      const reply = await conn.command("~M601 S1", timeoutMs);
+      if (/control\s+fail/i.test(reply)) {
+        const err = new Error("Otra aplicación tiene el control de la impresora (FlashPrint)") as NodeJS.ErrnoException;
+        err.code = "CONTROL_BUSY";
+        throw err;
+      }
+      return conn;
+    } catch (e) {
+      conn?.close();
+      lastError = e;
+      if (!RETRYABLE_CODES.has(errorCode(e))) break;
+    }
+  }
+  throw lastError;
 }
 
 // ---------------------------------------------------------------------------
@@ -167,27 +369,32 @@ function parseProgress(text: string) {
   };
 }
 
+/** Lee el estado. Lanza PrinterBusyError si hay una transferencia en curso. */
 export async function readPrinterStatus(ip: string, port: number): Promise<PrinterStatusData> {
-  const conn = await PrinterConnection.open(ip, port);
-  try {
-    await conn.command("~M601 S1");
-    const info = await conn.command("~M115");
-    const temps = await conn.command("~M105");
-    const progress = await conn.command("~M27");
-    await conn.command("~M602").catch(() => "");
-    return {
-      machine: {
-        type: field(info, "Machine Type"),
-        name: field(info, "Machine Name"),
-        firmware: field(info, "Firmware"),
-        sn: field(info, "SN"),
-      },
-      temperatures: parseTemps(temps),
-      progress: parseProgress(progress),
-    };
-  } finally {
-    conn.close();
-  }
+  if (isPrinterTransferring(ip)) throw new PrinterBusyError();
+  return withPrinterLock(ip, async () => {
+    // Pudo empezar una impresión mientras esperaba turno.
+    if (isPrinterTransferring(ip)) throw new PrinterBusyError();
+    const conn = await openSession(ip, port, 2);
+    try {
+      const info = await conn.command("~M115");
+      const temps = await conn.command("~M105");
+      const progress = await conn.command("~M27");
+      await conn.command("~M602").catch(() => "");
+      return {
+        machine: {
+          type: field(info, "Machine Type"),
+          name: field(info, "Machine Name"),
+          firmware: field(info, "Firmware"),
+          sn: field(info, "SN"),
+        },
+        temperatures: parseTemps(temps),
+        progress: parseProgress(progress),
+      };
+    } finally {
+      conn.close();
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -210,13 +417,12 @@ function crc32(data: Uint8Array): number {
   return (c ^ 0xffffffff) >>> 0;
 }
 
-/** Paquete de red: firma 5A 5A EF BF · nº (BE) · longitud (BE) · CRC-32 (BE) · 4096 bytes. */
+/** Paquete de red: firma 5A 5A A5 A5 · nº (BE) · longitud (BE) · CRC-32 (BE) · 4096 bytes. */
 function buildPacket(index: number, chunk: Buffer): Buffer {
   const packet = Buffer.alloc(16 + PACKET_DATA_BYTES);
-  packet[0] = 0x5a;
-  packet[1] = 0x5a;
-  packet[2] = 0xef;
-  packet[3] = 0xbf;
+  PACKET_HEADER.forEach((byte, i) => {
+    packet[i] = byte;
+  });
   packet.writeUInt32BE(index, 4);
   packet.writeUInt32BE(chunk.length, 8);
   packet.writeUInt32BE(crc32(chunk), 12);
@@ -224,17 +430,23 @@ function buildPacket(index: number, chunk: Buffer): Buffer {
   return packet;
 }
 
-/** Nombre seguro para la memoria interna: letras, números, - y _. */
+/**
+ * Nombre corto para la memoria interna (0:/user/): como máximo 12 caracteres
+ * [a-z0-9_] + extensión. El firmware falla con nombres largos o especiales.
+ */
 export function safePrinterFileName(raw: string, data: Buffer): string {
   const isGx = data.subarray(0, 6).toString("latin1") === "xgcode";
   const base = raw
+    .replace(/^.*[\\/]/, "")
     .replace(/\.(gx|g|gcode)$/i, "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-zA-Z0-9_-]+/g, "_")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "")
-    .slice(0, 48);
-  return `${base || "andros"}.${isGx ? "gx" : "g"}`;
+    .slice(0, REMOTE_NAME_MAX)
+    .replace(/_+$/g, "");
+  return `${base || "andros_job"}.${isGx ? "gx" : "g"}`;
 }
 
 function assertAccepted(cmd: string, response: string) {
@@ -243,22 +455,86 @@ function assertAccepted(cmd: string, response: string) {
   }
 }
 
-export async function uploadAndPrint(ip: string, port: number, fileName: string, data: Buffer) {
-  const path = `0:/user/${fileName}`;
-  const conn = await PrinterConnection.open(ip, port);
-  try {
-    await conn.command("~M601 S1");
-    assertAccepted("~M28", await conn.command(`~M28 ${data.length} ${path}`, 10_000));
+export interface UploadProgress {
+  sentBytes: number;
+  totalBytes: number;
+}
 
-    for (let offset = 0, index = 0; offset < data.length; offset += PACKET_DATA_BYTES, index += 1) {
-      await conn.write(buildPacket(index, data.subarray(offset, offset + PACKET_DATA_BYTES)));
+/**
+ * Envía los paquetes de uno en uno: tras cada paquete espera la respuesta de
+ * la impresora (con reintentos suaves). Si el firmware no responde ni al
+ * primero, continúa a ritmo fijo para no saturar su búfer.
+ */
+async function sendPackets(conn: PrinterConnection, data: Buffer, onProgress?: (p: UploadProgress) => void) {
+  const total = Math.ceil(data.length / PACKET_DATA_BYTES);
+  let acknowledged = 0;
+  let paced = false;
+
+  for (let index = 0; index < total; index += 1) {
+    const offset = index * PACKET_DATA_BYTES;
+    const chunk = data.subarray(offset, offset + PACKET_DATA_BYTES);
+    conn.clearInput();
+    await conn.write(buildPacket(index, chunk));
+
+    if (paced) {
+      await delay(PACED_PACKET_GAP_MS);
+      const late = conn.takeInput();
+      if (late) assertAccepted(`el paquete ${index + 1}/${total}`, late);
+    } else {
+      let reply = await conn.waitForReply(PACKET_ACK_TIMEOUT_MS);
+      for (let retry = 0; reply === null && retry < PACKET_ACK_RETRIES; retry += 1) {
+        reply = await conn.waitForReply(PACKET_ACK_TIMEOUT_MS);
+      }
+      if (reply !== null) {
+        acknowledged += 1;
+        assertAccepted(`el paquete ${index + 1}/${total}`, reply);
+      } else if (acknowledged === 0) {
+        // Firmware que no confirma paquetes: ritmo fijo a partir de aquí.
+        paced = true;
+      } else {
+        throw new Error(`La impresora dejó de responder en el paquete ${index + 1} de ${total}`);
+      }
     }
-    await conn.write(Buffer.from("\n"));
+    onProgress?.({ sentBytes: Math.min(data.length, offset + chunk.length), totalBytes: data.length });
+  }
+}
 
-    assertAccepted("~M29", await conn.command("~M29", UPLOAD_FINISH_TIMEOUT_MS));
-    assertAccepted("~M23", await conn.command(`~M23 ${path}`, 20_000));
+/**
+ * Sube el archivo a 0:/user/ y empieza a imprimir. `fileName` debe venir de
+ * safePrinterFileName (se vuelve a acortar por seguridad).
+ */
+export async function uploadAndPrint(
+  ip: string,
+  port: number,
+  fileName: string,
+  data: Buffer,
+  onProgress?: (p: UploadProgress) => void
+): Promise<string> {
+  const remoteName = safePrinterFileName(fileName, data);
+  const path = `0:/user/${remoteName}`;
+  // Se marca antes de esperar turno: el sondeo de estado se pausa ya.
+  lockState.transfers.set(ip, (lockState.transfers.get(ip) ?? 0) + 1);
+  try {
+    return await withPrinterLock(ip, async () => {
+      const conn = await openSession(ip, port, 3);
+      try {
+        // 1. Anuncia el archivo y espera su "ok" antes del primer byte binario.
+        assertAccepted("~M28", await conn.command(`~M28 ${data.length} ${path}`, 15_000));
+        // 2. Paquete → respuesta → paquete…
+        await sendPackets(conn, data, onProgress);
+        // 3. Cierra el archivo, espera su "ok" y lanza la impresión.
+        assertAccepted("~M29", await conn.command("~M29", UPLOAD_FINISH_TIMEOUT_MS));
+        assertAccepted("~M23", await conn.command(`~M23 ${path}`, 20_000));
+        await conn.command("~M602", 1500).catch(() => "");
+        return remoteName;
+      } finally {
+        conn.close();
+      }
+    });
   } finally {
-    conn.close();
+    const left = (lockState.transfers.get(ip) ?? 1) - 1;
+    if (left > 0) lockState.transfers.set(ip, left);
+    else lockState.transfers.delete(ip);
   }
 }
 
@@ -403,31 +679,34 @@ function probeTcp(ip: string, port: number, timeoutMs: number): Promise<boolean>
 
 /** Confirma con ~M601 S1 + ~M115 que es una FlashForge y lee su modelo. */
 async function identifyPrinter(ip: string, port: number, via: "udp" | "tcp"): Promise<DiscoveredPrinter | null> {
-  let conn: PrinterConnection | null = null;
-  try {
-    conn = await PrinterConnection.open(ip, port, 1500);
-    await conn.command("~M601 S1", 2500).catch(() => "");
-    const info = await conn.command("~M115", 2500);
-    await conn.command("~M602", 1500).catch(() => "");
-    if (!/machine\s+type|machine\s+name|firmware/i.test(info)) return null;
-    const type = field(info, "Machine Type");
-    const name = field(info, "Machine Name");
-    return {
-      ip,
-      port,
-      name,
-      type,
-      firmware: field(info, "Firmware"),
-      serial: field(info, "SN"),
-      isAdventurer3: isAdventurer3Name(`${type ?? ""} ${name ?? ""}`),
-      verified: true,
-      via,
-    };
-  } catch {
-    return null;
-  } finally {
-    conn?.close();
-  }
+  if (isPrinterTransferring(ip)) return null;
+  return withPrinterLock(ip, async () => {
+    let conn: PrinterConnection | null = null;
+    try {
+      conn = await PrinterConnection.open(ip, port, 1500);
+      await conn.command("~M601 S1", 2500).catch(() => "");
+      const info = await conn.command("~M115", 2500);
+      await conn.command("~M602", 1500).catch(() => "");
+      if (!/machine\s+type|machine\s+name|firmware/i.test(info)) return null;
+      const type = field(info, "Machine Type");
+      const name = field(info, "Machine Name");
+      return {
+        ip,
+        port,
+        name,
+        type,
+        firmware: field(info, "Firmware"),
+        serial: field(info, "SN"),
+        isAdventurer3: isAdventurer3Name(`${type ?? ""} ${name ?? ""}`),
+        verified: true,
+        via,
+      };
+    } catch {
+      return null;
+    } finally {
+      conn?.close();
+    }
+  });
 }
 
 async function runPool<T>(items: T[], limit: number, shouldStop: () => boolean, worker: (item: T) => Promise<void>) {
@@ -500,11 +779,13 @@ export async function discoverFlashForge(options: DiscoverOptions = {}): Promise
 
   const sweep = (timeoutMs: number) =>
     runPool(
-      hosts.filter((ip) => !found.has(ip) && !pending.has(ip)),
+      // Nunca se abre un segundo socket contra una impresora que está recibiendo un archivo.
+      hosts.filter((ip) => !found.has(ip) && !pending.has(ip) && !isPrinterTransferring(ip)),
       SWEEP_CONCURRENCY,
       () => stop,
       async (ip) => {
-        if (await probeTcp(ip, FLASHFORGE_DEFAULT_PORT, timeoutMs)) consider(ip, "tcp");
+        const open = await withPrinterLock(ip, () => probeTcp(ip, FLASHFORGE_DEFAULT_PORT, timeoutMs));
+        if (open) consider(ip, "tcp");
       }
     );
 

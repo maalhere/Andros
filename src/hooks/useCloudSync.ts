@@ -31,6 +31,7 @@ import {
 } from "@/store/useWorkspaceStore";
 import { useLandingStore } from "@/store/useLandingStore";
 import { sanitizeCanvasStrokes } from "@/lib/canvas/inkGeometry";
+import { getDesktopBridge, type AndrosDesktopBridge } from "@/lib/printer/printerClient";
 import {
   useWorkspaceManagerStore,
   type WorkspaceSummary,
@@ -1200,11 +1201,84 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
 // 3. Acciones públicas (las usa GoogleAuthButton)
 // ----------------------------------------------------------------------------
 
+type DesktopAuthBridge = NonNullable<AndrosDesktopBridge["auth"]>;
+
+const DESKTOP_AUTH_NOTICE =
+  "Termina el inicio de sesión en tu navegador. Andros se abrirá sola al terminar.";
+
+/**
+ * App de Windows: Google bloquea el login dentro de ventanas embebidas, así
+ * que se abre en el navegador del sistema. La URL se genera AQUÍ (el
+ * verificador PKCE queda en esta ventana) y el código vuelve por la app
+ * (127.0.0.1) → `completeDesktopSignIn`.
+ */
+async function signInWithGoogleDesktop(supabase: SupabaseClient, auth: DesktopAuthBridge): Promise<void> {
+  const cloud = useCloudStore.getState();
+  cloud.setAuthNotice(null);
+  try {
+    const { port, state } = await auth.begin();
+    const redirect = new URL("/auth/callback", window.location.origin);
+    redirect.searchParams.set("desktop_port", String(port));
+    redirect.searchParams.set("desktop_state", state);
+
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: redirect.toString(),
+        skipBrowserRedirect: true,
+        queryParams: { prompt: "select_account" },
+      },
+    });
+    if (error) throw error;
+    if (!data.url) throw new Error("Supabase no devolvió la dirección de Google.");
+
+    await auth.openInBrowser(data.url);
+    useCloudStore.getState().setAuthNotice(DESKTOP_AUTH_NOTICE);
+  } catch (error) {
+    void auth.cancel().catch(() => undefined);
+    cloud.setStatus("signed-out", `No se pudo abrir Google en tu navegador: ${describeError(error)}`);
+  }
+}
+
+/** Código devuelto por el navegador del sistema → sesión de Supabase en esta ventana. */
+async function completeDesktopSignIn(
+  supabase: SupabaseClient,
+  result: { code?: string; error?: string }
+): Promise<void> {
+  const cloud = useCloudStore.getState();
+  cloud.setAuthNotice(null);
+  if (!result.code) {
+    cloud.setStatus(cloud.user ? cloud.status : "signed-out", `Inicio de sesión cancelado: ${result.error ?? "sin respuesta de Google"}`);
+    return;
+  }
+  cloud.setStatus("connecting", null);
+  const { data, error } = await supabase.auth.exchangeCodeForSession(result.code);
+  if (error || !data.session) {
+    useCloudStore
+      .getState()
+      .setStatus(
+        "signed-out",
+        `No se pudo completar el inicio de sesión con Google: ${error ? describeError(error) : "sin sesión"}`
+      );
+    return;
+  }
+  // Sesión activa en esta ventana: se sale de la portada al instante (aunque se
+  // hubiera abierto a mano desde el logo); onAuthStateChange (SIGNED_IN) carga
+  // el lienzo del usuario.
+  useLandingStore.getState().skipToWorkspace();
+}
+
 /** Abre la ventana de Google. Al volver, /auth/callback crea la sesión. */
 export async function signInWithGoogle(): Promise<void> {
   const supabase = getSupabaseBrowserClient();
   const cloud = useCloudStore.getState();
   if (!supabase) return;
+
+  const desktopAuth = getDesktopBridge()?.auth;
+  if (desktopAuth) {
+    await signInWithGoogleDesktop(supabase, desktopAuth);
+    return;
+  }
 
   cloud.setStatus("connecting", null);
   const { error } = await supabase.auth.signInWithOAuth({
@@ -1293,7 +1367,12 @@ export function useCloudSync(): void {
 
     const engine = startCloudEngine(supabase);
     activeEngine = engine;
+    // App de Windows: vuelta del login hecho en el navegador del sistema.
+    const stopDesktopAuth = getDesktopBridge()?.auth?.onResult((result) => {
+      void completeDesktopSignIn(supabase, result);
+    });
     return () => {
+      stopDesktopAuth?.();
       engine.stop();
       if (activeEngine === engine) activeEngine = null;
     };

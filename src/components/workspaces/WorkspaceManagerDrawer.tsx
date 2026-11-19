@@ -118,6 +118,10 @@ export const WorkspaceManagerDrawer: React.FC = () => {
     setMessage(null);
     try {
       const result = await downloadWorkspaceZip();
+      if (!result.downloaded) {
+        setMessage({ kind: "info", text: `Descarga cancelada: no se guardó ${result.fileName}.` });
+        return;
+      }
       const parts = [
         `Descargado ${result.fileName}`,
         `${result.fileCount} archivo(s)`,
