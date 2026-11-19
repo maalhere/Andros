@@ -20,7 +20,7 @@ export interface Preferences {
   canvasBackground: CanvasBackground;
   animations: AnimationLevel;
   autosave: AutosaveMode;
-  /** `true` cuando el usuario terminó o saltó el tutorial guiado de 4 pasos. */
+  /** `true` cuando el usuario terminó o saltó el tutorial guiado de 5 pasos. */
   onboardingDone: boolean;
 }
 

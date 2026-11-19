@@ -3,6 +3,7 @@
 import React from "react";
 import { Layers } from "lucide-react";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
+import { useTabsBarVisible } from "@/store/useTabsStore";
 import { NodeArchetype } from "@/types/workspace";
 import { EngineeringNode } from "@/components/shared/EngineeringNode";
 
@@ -26,6 +27,7 @@ export const TacticalCardStack: React.FC = () => {
   const toggleMiniMap = useWorkspaceStore((s) => s.toggleMiniMap);
   const selectedNodeId = useWorkspaceStore((s) => s.selectedNodeId);
   const selectNode = useWorkspaceStore((s) => s.selectNode);
+  const hasTabs = useTabsBarVisible();
 
   const filteredNodes =
     mobileCategoryFilter === "all"
@@ -33,7 +35,11 @@ export const TacticalCardStack: React.FC = () => {
       : nodes.filter((n) => n.type === mobileCategoryFilter);
 
   return (
-    <main className="min-h-screen w-full canvas-grid pt-16 pb-28 px-3.5 flex flex-col gap-3.5 overflow-y-auto">
+    <main
+      className={`min-h-screen w-full canvas-grid ${
+        hasTabs ? "pt-[6.75rem]" : "pt-16"
+      } pb-28 px-3.5 flex flex-col gap-3.5 overflow-y-auto`}
+    >
       {/* Barra de Filtros Táctiles + Conmutador de Mapa 2D */}
       <div className="flex items-center justify-between gap-2 pt-1">
         <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1">

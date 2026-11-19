@@ -3,7 +3,10 @@
 import React, { useEffect, useLayoutEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowLeft, ArrowRight, Box, Hand, PenLine, Plus, Printer, Sparkles } from "lucide-react";
+import { ArrowLeft, ArrowRight, Box, Compass, Hand, Network, Plus, Printer, Sparkles } from "lucide-react";
+import { useShortcutsGuideStore } from "@/store/useShortcutsGuideStore";
+import { Kbd } from "@/components/shared/Kbd";
+import { AiConnectionDiagram } from "@/components/onboarding/AiConnectionGuide";
 import {
   hasSeenOnboarding,
   ONBOARDING_STEP_COUNT,
@@ -14,11 +17,13 @@ import { useCloudStore } from "@/store/useCloudStore";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 
 // ============================================================================
-// ANDROS — TUTORIAL INTERACTIVO DE 4 PASOS (Spotlight)
-//   1. + Agregar        → botón "Agregar" de la barra inferior
-//   2. Moverse y dibujar → botón "Dibujar"
-//   3. Imprimir en 1 clic → tarjeta ilustrada (sin destino en pantalla)
-//   4. Oráculo IA        → botón "Oráculo IA"
+// ANDROS — TUTORIAL INTERACTIVO DE 5 PASOS (Spotlight)
+//   1. Lienzo y cámara          → tarjeta centrada con resumen de gestos
+//   2. Herramientas y modos     → botón "Agregar" de la barra inferior
+//   3. Oráculo, comandos, etc.  → botón "Oráculo IA"
+//   4. Conectar modelos de IA   → tarjeta centrada con mini-diagrama
+//   5. Piezas 3D, CodeLab       → tarjeta centrada
+// Siempre se puede saltar (Esc o «Saltar tutorial»).
 // Se lanza solo la primera vez que alguien entra a su lienzo vacío, y en
 // cualquier momento desde "⋯ → Ver tutorial".
 // ============================================================================
@@ -26,6 +31,8 @@ import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 interface TourStep {
   /** Valor de `data-tour` del elemento a iluminar (null = tarjeta centrada). */
   target: "add" | "draw" | "oracle" | null;
+  /** Ilustración bajo el texto (solo en pasos de tarjeta centrada). */
+  visual?: "camera" | "ai" | "print";
   icon: React.ReactNode;
   title: string;
   body: { desktop: string; mobile: string };
@@ -33,47 +40,61 @@ interface TourStep {
 
 const STEPS: TourStep[] = [
   {
+    target: null,
+    visual: "camera",
+    icon: <Compass className="w-4 h-4" />,
+    title: "Lienzo espacial y cámara",
+    body: {
+      desktop:
+        "Mueve el lienzo con el botón central del ratón (o arrastrando el fondo) y usa la rueda para acercarte: el zoom va hacia donde apuntas. Doble clic con el botón central encuadra todo. Las pestañas de arriba te dejan trabajar en varios proyectos a la vez.",
+      mobile:
+        "Desliza para recorrer tus piezas y cambia de espacio con las pestañas de arriba. Con el botón de mapa ves todo de un vistazo.",
+    },
+  },
+  {
     target: "add",
     icon: <Plus className="w-4 h-4" />,
-    title: "+ Agregar",
+    title: "Herramientas y modos de trabajo",
     body: {
       desktop:
-        "Sube una pieza 3D (.stl, .obj o .3mf), escribe una nota, pega un enlace de YouTube o un paper, o crea un cálculo.",
+        "Crea nodos con + Agregar (o N): pieza 3D, nota, enlace, cálculo o Nodo IA. Dibuja a mano alzada con D, borra con E y deshaz el último trazo con Ctrl+Z mientras dibujas. C conecta nodos con cables.",
       mobile:
-        "Sube una pieza 3D (.stl, .obj o .3mf), escribe una nota, pega un enlace de YouTube o un paper, o crea un cálculo.",
-    },
-  },
-  {
-    target: "draw",
-    icon: <PenLine className="w-4 h-4" />,
-    title: "Moverse y dibujar",
-    body: {
-      desktop:
-        "Arrastra el fondo con el ratón para moverte y usa la rueda para acercarte. Con “Dibujar” bocetas tus ideas a mano alzada sobre el lienzo.",
-      mobile:
-        "Desliza para recorrer tus piezas. Con “Dibujar” abres una hoja para bocetar tus ideas a mano alzada.",
-    },
-  },
-  {
-    target: null,
-    icon: <Printer className="w-4 h-4" />,
-    title: "Imprimir en 1 clic",
-    body: {
-      desktop:
-        "Abre cualquier pieza 3D y pulsa “Imprimir ahora”, igual que en Google Docs. Si te falta el programa de tu impresora, Andros te guía paso a paso desde su descarga oficial.",
-      mobile:
-        "Abre cualquier pieza 3D y pulsa “Imprimir ahora”, igual que en Google Docs. Si te falta el programa de tu impresora, Andros te guía paso a paso desde su descarga oficial.",
+        "Con + Agregar subes una pieza 3D, escribes una nota, pegas un enlace, creas un cálculo o añades un Nodo IA. Con “Dibujar” abres una hoja para bocetar a mano alzada.",
     },
   },
   {
     target: "oracle",
     icon: <Sparkles className="w-4 h-4" />,
-    title: "Oráculo IA",
+    title: "Oráculo, comandos y biblioteca",
     body: {
       desktop:
-        "Pídele que organice tu lienzo o que analice tus archivos: “ordena mi lienzo”, “¿qué material uso para esta pieza?”.",
+        "El Oráculo IA (O) organiza tu lienzo y analiza tus archivos. Ctrl+K / ⌘K abre la Paleta de Comandos, B la Biblioteca científica y, desde la barra superior, entras a Andros Arena. Pulsa ? para ver todos los atajos.",
       mobile:
-        "Pídele que organice tu espacio o que analice tus archivos: “ordena mis piezas”, “¿qué material uso para esta pieza?”.",
+        "El Oráculo IA organiza tu espacio y analiza tus archivos. En ⋯ encuentras la Biblioteca científica, Andros Arena y esta ayuda.",
+    },
+  },
+  {
+    target: null,
+    visual: "ai",
+    icon: <Network className="w-4 h-4" />,
+    title: "Conectar modelos de IA con nodos",
+    body: {
+      desktop:
+        "Crea un Nodo IA (Claude, ChatGPT o Gemini) o importa un chat, y cablea hacia él tus notas, piezas, CodeLab o fuentes. Un Nodo IA también puede alimentar a otro: analiza un paper con Claude y pasa el resumen a ChatGPT o Gemini.",
+      mobile:
+        "Crea un Nodo IA (Claude, ChatGPT o Gemini) o importa un chat, y conecta hacia él tus notas, piezas o fuentes. Un Nodo IA también puede alimentar a otro.",
+    },
+  },
+  {
+    target: null,
+    visual: "print",
+    icon: <Box className="w-4 h-4" />,
+    title: "Piezas 3D, CodeLab y exportar",
+    body: {
+      desktop:
+        "Conecta una pieza 3D a un CodeLab y lee model_x, model_y y model_z (mm) sin medir a mano. Imprime desde la pieza con “Imprimir ahora”, y guarda o comparte tu espacio desde ⋯ → Descargar / Importar .zip.",
+      mobile:
+        "Conecta una pieza 3D a un CodeLab y lee model_x, model_y y model_z (mm). Imprime con “Imprimir ahora” y guarda o comparte tu espacio desde ⋯ → Descargar / Importar .zip.",
     },
   },
 ];
@@ -114,6 +135,32 @@ function useTargetRect(target: TourStep["target"], active: boolean): Rect | null
 }
 
 /** Mini ilustración del paso 3: tarjeta de pieza con el botón "Imprimir ahora". */
+const CameraIllustration: React.FC = () => (
+  <ul className="mt-3 space-y-1.5 rounded-2xl border border-andros-border bg-andros-canvas p-3 text-[12px] text-andros-primary">
+    <li className="flex items-center justify-between gap-2">
+      <span className="flex items-center gap-1.5">
+        <Hand className="w-3.5 h-3.5 text-andros-muted" aria-hidden="true" /> Mover el lienzo
+      </span>
+      <span className="font-mono tabular-nums text-[11px] text-andros-muted">Botón central + arrastrar</span>
+    </li>
+    <li className="flex items-center justify-between gap-2">
+      <span>Zoom al cursor</span>
+      <span className="font-mono tabular-nums text-[11px] text-andros-muted">Rueda</span>
+    </li>
+    <li className="flex items-center justify-between gap-2">
+      <span>Encuadrar todo</span>
+      <span className="font-mono tabular-nums text-[11px] text-andros-muted">Botón central ×2</span>
+    </li>
+    <li className="flex items-center justify-between gap-2">
+      <span>Cambiar de pestaña / cerrar</span>
+      <span className="flex gap-1">
+        <Kbd>Alt 1…9</Kbd>
+        <Kbd>Alt W</Kbd>
+      </span>
+    </li>
+  </ul>
+);
+
 const PrintIllustration: React.FC = () => (
   <div className="mt-3 rounded-2xl border border-andros-border bg-andros-canvas p-3">
     <div className="flex items-center gap-2.5">
@@ -193,7 +240,7 @@ export const OnboardingTour: React.FC<{ isMobile: boolean }> = ({ isMobile }) =>
   // ---- Posición del foco y de la tarjeta -----------------------------------
   const vw = window.innerWidth;
   const vh = window.innerHeight;
-  const cardWidth = Math.min(340, vw - 24);
+  const cardWidth = Math.min(current.target === null ? 400 : 340, vw - 24);
 
   const spot = rect
     ? {
@@ -215,8 +262,10 @@ export const OnboardingTour: React.FC<{ isMobile: boolean }> = ({ isMobile }) =>
   } else {
     cardStyle = {
       left: (vw - cardWidth) / 2,
-      top: Math.max(24, vh / 2 - 190),
+      top: Math.max(16, vh / 2 - 250),
       width: cardWidth,
+      maxHeight: vh - 32,
+      overflowY: "auto",
     };
   }
 
@@ -282,11 +331,24 @@ export const OnboardingTour: React.FC<{ isMobile: boolean }> = ({ isMobile }) =>
               {isMobile ? current.body.mobile : current.body.desktop}
             </p>
 
-            {current.target === null && <PrintIllustration />}
-            {step === 1 && !isMobile && (
-              <p className="mt-2 flex items-center gap-1.5 text-[11px] text-andros-muted">
-                <Hand className="w-3.5 h-3.5" /> Arrastra el fondo · Rueda = zoom
-              </p>
+            {current.visual === "camera" && !isMobile && <CameraIllustration />}
+            {current.visual === "ai" && (
+              <div className="mt-3">
+                <AiConnectionDiagram />
+              </div>
+            )}
+            {current.visual === "print" && <PrintIllustration />}
+            {!isMobile && current.target === "oracle" && (
+              <button
+                type="button"
+                onClick={() => {
+                  finish("skipped");
+                  useShortcutsGuideStore.getState().openGuide();
+                }}
+                className="mt-2 text-[12px] font-medium text-andros-accent-ink hover:underline underline-offset-2"
+              >
+                Ver todos los atajos
+              </button>
             )}
 
             <div className="mt-4 flex items-center justify-between gap-2">

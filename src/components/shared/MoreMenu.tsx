@@ -7,6 +7,7 @@ import {
   Crown,
   Eraser,
   FolderArchive,
+  CircleHelp,
   GraduationCap,
   KeyRound,
   Library,
@@ -22,6 +23,7 @@ import { useSettingsStore } from "@/store/useSettingsStore";
 import { useWorkspaceManagerStore } from "@/store/useWorkspaceManagerStore";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { useOnboardingStore } from "@/store/useOnboardingStore";
+import { useShortcutsGuideStore } from "@/store/useShortcutsGuideStore";
 import { useAiProvidersStore } from "@/store/useAiProvidersStore";
 import { clearInkWithUndo, resetWorkspaceWithUndo } from "@/lib/canvas/undoable";
 import { LEGAL_LINKS } from "@/lib/site";
@@ -191,6 +193,12 @@ export const MoreMenu: React.FC = () => {
       label: "Descargar / Importar .zip",
       icon: <FolderArchive className="w-4 h-4" />,
       onSelect: () => useWorkspaceManagerStore.getState().setDrawerOpen(true),
+    },
+    {
+      id: "shortcuts",
+      label: "Atajos y guía de IA",
+      icon: <CircleHelp className="w-4 h-4" />,
+      onSelect: () => useShortcutsGuideStore.getState().openGuide(),
     },
     {
       id: "tutorial",

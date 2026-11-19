@@ -23,6 +23,8 @@ import { OnboardingTour } from "@/components/onboarding/OnboardingTour";
 import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
 import { CommandPalette } from "@/components/shared/CommandPalette";
 import { Toaster } from "@/components/shared/Toaster";
+import { WorkspaceTabsBar } from "@/components/workspaces/WorkspaceTabsBar";
+import { ShortcutsGuideModal } from "@/components/shared/ShortcutsGuideModal";
 import { CloudLoadingSkeleton } from "@/components/shared/CloudLoadingSkeleton";
 import { SITE_DESCRIPTION, SITE_TAGLINE, LEGAL_LINKS } from "@/lib/site";
 
@@ -58,6 +60,7 @@ export default function AndrosWorkspacePage() {
 
   return (
     <div className="relative w-full min-h-screen overflow-hidden">
+      <WorkspaceTabsBar isMobile={isMobile} />
       <TopStatusBar isMobile={isMobile} />
       <QualityOfLifeModal />
       <AiKeysModal />
@@ -90,8 +93,9 @@ export default function AndrosWorkspacePage() {
       {/* Paleta de comandos (⌘K) y avisos con «Deshacer» */}
       <CommandPalette />
       <Toaster />
+      <ShortcutsGuideModal />
 
-      {/* Tutorial guiado de 4 pasos (1.ª vez en un lienzo vacío o desde ⋯ → Ver tutorial) */}
+      {/* Tutorial guiado de 5 pasos (1.ª vez en un lienzo vacío o desde ⋯ → Ver tutorial) */}
       <OnboardingTour isMobile={isMobile} />
 
       {/* Portada: entrada para quien no tiene sesión, o al pulsar el logo de Andros */}

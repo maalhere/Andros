@@ -9,6 +9,7 @@ import {
   Code2,
   Crown,
   FileBox,
+  CircleHelp,
   KeyRound,
   Library,
   Link2,
@@ -32,6 +33,7 @@ import { useLibraryStore } from "@/store/useLibraryStore";
 import { useMarketStore } from "@/store/useMarketStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useAiProvidersStore } from "@/store/useAiProvidersStore";
+import { useShortcutsGuideStore } from "@/store/useShortcutsGuideStore";
 import { SHORTCUT_KEYS } from "@/hooks/useGlobalShortcuts";
 import { Kbd } from "./Kbd";
 import { springOrInstant } from "@/lib/motion";
@@ -243,6 +245,15 @@ const PaletteDialog: React.FC<{ reduced: boolean; onClose: () => void }> = ({ re
         keywords: "gemini claude chatgpt api key",
         icon: <KeyRound className="w-4 h-4" />,
         run: () => useAiProvidersStore.getState().setKeysModalOpen(true),
+      },
+      {
+        id: "shortcuts-guide",
+        group: "Acciones",
+        label: "Atajos y guía de conexión de IA",
+        keywords: "ayuda atajos teclado ayuda guia conectar modelos",
+        icon: <CircleHelp className="w-4 h-4" />,
+        shortcut: "?",
+        run: () => useShortcutsGuideStore.getState().openGuide(),
       },
       {
         id: "plans",

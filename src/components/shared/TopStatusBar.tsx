@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Search, Swords } from "lucide-react";
+import { CircleHelp, Search, Swords } from "lucide-react";
 import { useCommandPaletteStore } from "@/store/useCommandPaletteStore";
 import { Kbd, useModKey } from "./Kbd";
 import { ThemeToggle } from "./ThemeToggle";
@@ -12,6 +12,8 @@ import { GoogleAuthButton } from "@/components/auth/GoogleAuthButton";
 import { WorkspaceQuickSwitcher } from "@/components/workspaces/WorkspaceQuickSwitcher";
 import { AndrosMark } from "@/components/brand/AndrosMark";
 import { InstallAppButton } from "@/components/pwa/InstallAppButton";
+import { useTabsBarVisible } from "@/store/useTabsStore";
+import { useShortcutsGuideStore } from "@/store/useShortcutsGuideStore";
 
 // ============================================================================
 // ANDROS — BARRA SUPERIOR (mínima)
@@ -27,9 +29,15 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({ isMobile }) => {
   const openLanding = useLandingStore((s) => s.openLanding);
   const isLandingDone = useLandingStore((s) => s.phase === "workspace");
   const modKey = useModKey();
+  // Con pestañas visibles (h-11 móvil / h-9 escritorio) la barra baja para no solaparse.
+  const hasTabs = useTabsBarVisible();
 
   return (
-    <header className="fixed top-3 md:top-4 left-3 right-3 md:left-6 md:right-6 z-40 flex items-center justify-between gap-2 pointer-events-none">
+    <header
+      className={`fixed ${
+        hasTabs ? "top-14 md:top-[3.25rem]" : "top-3 md:top-4"
+      } left-3 right-3 md:left-6 md:right-6 z-40 flex items-center justify-between gap-2 pointer-events-none`}
+    >
       {/* Logo + proyecto actual */}
       <div className="pointer-events-auto min-w-0 flex items-center gap-2 px-2 md:px-2.5 h-11 md:h-9 rounded-xl bg-andros-surface backdrop-blur-md border border-andros-border shadow-sm">
         {/* Destino del vuelo de la marca de la portada (LandingOverlay) */}
@@ -83,6 +91,16 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({ isMobile }) => {
         >
           <Swords className="w-4 h-4 text-andros-accent-ink" aria-hidden="true" />
           <span className="hidden md:inline text-xs font-medium text-andros-primary">Arena</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => useShortcutsGuideStore.getState().openGuide()}
+          aria-label="Abrir guía de atajos y ayuda"
+          aria-keyshortcuts="Shift+/"
+          title="Atajos y ayuda (?)"
+          className="hidden md:flex w-9 h-9 rounded-xl bg-andros-surface backdrop-blur-md border border-andros-border text-andros-muted hover:text-andros-primary shadow-sm active:scale-[0.96] spring-micro items-center justify-center"
+        >
+          <CircleHelp className="w-4 h-4" aria-hidden="true" />
         </button>
         <ThemeToggle />
         <InstallAppButton isMobile={isMobile} />

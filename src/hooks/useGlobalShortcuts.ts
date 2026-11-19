@@ -5,12 +5,17 @@ import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { useLibraryStore } from "@/store/useLibraryStore";
 import { useMarketStore } from "@/store/useMarketStore";
 import { useCommandPaletteStore } from "@/store/useCommandPaletteStore";
+import { useShortcutsGuideStore } from "@/store/useShortcutsGuideStore";
+import { useOnboardingStore } from "@/store/useOnboardingStore";
+import { closeActiveWorkspaceTab, focusWorkspaceTab } from "@/components/workspaces/WorkspaceTabsBar";
 
 // ============================================================================
 // ANDROS — ATAJOS DE TECLADO GLOBALES
 //   ⌘K / Ctrl+K → Paleta de comandos (en cualquier tamaño de pantalla).
 //   Solo escritorio: V seleccionar · N nodo · C conectar · D dibujar ·
-//   B biblioteca · L enlace · M CodeLab · O Oráculo IA.
+//   B biblioteca · L enlace · M CodeLab · O Oráculo IA · ? guía de atajos.
+//   Pestañas de espacios: Alt+1…9 saltar · Alt+W cerrar la activa (no se
+//   usan Ctrl+W / Ctrl+T para no pelear con el navegador).
 // La lista visible vive en CommandPalette (SHORTCUTS) para no desincronizarse.
 // ============================================================================
 
@@ -43,6 +48,8 @@ export function useGlobalShortcuts(isDesktop: boolean) {
       }
 
       if (!isDesktop || palette.open) return;
+      // La guía de atajos y el tutorial gestionan su propio teclado.
+      if (useShortcutsGuideStore.getState().open || useOnboardingStore.getState().open) return;
       // La Biblioteca y la Arena se cierran solas con Escape y bloquean los atajos.
       if (useLibraryStore.getState().open || useMarketStore.getState().arenaOpen) return;
 
@@ -50,6 +57,21 @@ export function useGlobalShortcuts(isDesktop: boolean) {
       if (e.key === "Escape" && ws.isOracleModalOpen) {
         ws.setOracleModalOpen(false);
         return;
+      }
+
+      // Pestañas de espacios: Alt + 1…9 / Alt + W (e.code: Option en Mac cambia e.key).
+      if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+        const digit = /^(?:Digit|Numpad)([1-9])$/.exec(e.code);
+        if (digit) {
+          e.preventDefault();
+          focusWorkspaceTab(Number(digit[1]));
+          return;
+        }
+        if (e.code === "KeyW") {
+          e.preventDefault();
+          closeActiveWorkspaceTab();
+          return;
+        }
       }
 
       if (e.metaKey || e.ctrlKey || e.altKey || isTypingTarget(e.target)) return;
@@ -80,6 +102,10 @@ export function useGlobalShortcuts(isDesktop: boolean) {
         case "o":
           e.preventDefault();
           ws.setOracleModalOpen(true);
+          break;
+        case "?":
+          e.preventDefault();
+          useShortcutsGuideStore.getState().openGuide();
           break;
       }
     };

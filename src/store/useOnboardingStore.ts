@@ -2,13 +2,13 @@ import { create } from "zustand";
 import { useSettingsStore } from "@/store/useSettingsStore";
 
 // ============================================================================
-// ANDROS — TUTORIAL GUIADO DE 4 PASOS (OnboardingTour)
+// ANDROS — TUTORIAL GUIADO DE 5 PASOS (OnboardingTour)
 // Se marca como visto en localStorage (este navegador) y en las preferencias
 // del usuario (`profiles.preferences.onboardingDone` vía useSettingsSync).
 // ============================================================================
 
 export const ONBOARDING_STORAGE_KEY = "andros:onboarding:v1";
-export const ONBOARDING_STEP_COUNT = 4;
+export const ONBOARDING_STEP_COUNT = 5;
 
 /** ¿Ya terminó o saltó el tutorial en este navegador o en su cuenta? */
 export function hasSeenOnboarding(): boolean {
