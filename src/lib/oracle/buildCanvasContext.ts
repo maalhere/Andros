@@ -9,6 +9,7 @@
 
 import type { EngineeringNodeData, NodeConnection } from "@/types/workspace";
 import type { OracleCanvasContext, OracleCanvasNodeSummary } from "@/types/oracle";
+import { serializeAiChat } from "@/lib/canvas/contextGraph";
 
 /** Límite de texto por nodo para no saturar el contexto del modelo. */
 const MAX_EXCERPT_CHARS = 1500;
@@ -80,6 +81,8 @@ function excerptOf(node: EngineeringNodeData): string | undefined {
     if (data.result?.errorMessage) lines.push(`Error en la última ejecución: ${data.result.errorMessage}`);
     return clip(lines.join("\n"));
   }
+
+  if (node.type === "ai-chat-node") return clip(serializeAiChat(node));
 
   return undefined;
 }

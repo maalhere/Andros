@@ -4,12 +4,14 @@ import React, { useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
+  Bot,
   Box,
   Cable,
   Calculator,
   Check,
   FileBox,
   Link2,
+  MessagesSquare,
   NotebookPen,
   Sigma,
   StickyNote,
@@ -36,6 +38,8 @@ const renderArchetypeIcon = (type: NodeArchetype, className: string) => {
       return <Link2 className={className} />;
     case "code-lab-node":
       return <Terminal className={className} />;
+    case "ai-chat-node":
+      return <Bot className={className} />;
   }
 };
 
@@ -307,6 +311,8 @@ const QUICK_ADD_ICONS: Record<QuickAddKind, React.ReactNode> = {
   note: <StickyNote className="w-5 h-5" />,
   link: <Link2 className="w-5 h-5" />,
   calc: <Calculator className="w-5 h-5" />,
+  ai: <Bot className="w-5 h-5" />,
+  "ai-import": <MessagesSquare className="w-5 h-5" />,
 };
 
 /** Las 4 opciones de "+ Agregar" (las mismas que el dock de escritorio). */

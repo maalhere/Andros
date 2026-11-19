@@ -13,6 +13,7 @@ const FILTER_TABS: { id: "all" | NodeArchetype; label: string }[] = [
   { id: "calc-latex-node", label: "Cálculos" },
   { id: "resource-link-node", label: "Enlaces" },
   { id: "code-lab-node", label: "Código" },
+  { id: "ai-chat-node", label: "IA" },
 ];
 
 export const TacticalCardStack: React.FC = () => {

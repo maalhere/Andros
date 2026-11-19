@@ -67,13 +67,14 @@ export type MobileSheetType =
 // 2. Los 3 Nodos Definitivos de Andros
 // ----------------------------------------------------------------------------
 
-/** Los 5 arquetipos oficiales de nodo. */
+/** Los 6 arquetipos oficiales de nodo. */
 export type NodeArchetype =
   | "file-node"
   | "sketch-note-node"
   | "calc-latex-node"
   | "resource-link-node"
-  | "code-lab-node";
+  | "code-lab-node"
+  | "ai-chat-node";
 
 /**
  * Alias de compatibilidad: los archivos de la Fase 0 importaban `NodeCategory`.
@@ -366,7 +367,60 @@ export interface CodeLabPayload {
 }
 
 // ----------------------------------------------------------------------------
-// 7. Nodo de ingeniería (unión estricta de los 5 tipos)
+// 6d. NODO TIPO 6 — Conversación IA (`ai-chat-node`)
+//     Chat con Gemini / Claude / ChatGPT que lee el contenido vivo de los nodos
+//     conectados aguas arriba; puede venir importado de un chat externo.
+// ----------------------------------------------------------------------------
+
+export type AiProvider = "gemini" | "openai" | "anthropic";
+
+/** Plataforma de la que se importó una conversación. */
+export type AiChatSourcePlatform = "chatgpt" | "claude" | "gemini" | "other";
+
+export interface AiChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  /** Marca de tiempo (ms). */
+  at: number;
+  /** Mensaje traído de una conversación externa (no generado aquí). */
+  imported?: boolean;
+  /** Turno automático de "Resincronizar" tras un cambio de contexto. */
+  resync?: boolean;
+  /** Modelo que respondió (solo respuestas generadas en Andros). */
+  model?: string;
+}
+
+export interface AiChatSource {
+  platform: AiChatSourcePlatform;
+  /** Enlace público compartido, si se importó desde una URL. */
+  url?: string;
+  title?: string;
+  /** Fecha legible de la última importación / actualización. */
+  importedAt: string;
+  importedCount: number;
+}
+
+export interface AiChatPayload {
+  provider: AiProvider;
+  /** Modelo elegido ("auto" = cadena de respaldo del servidor en Gemini). */
+  model: string;
+  messages: AiChatMessage[];
+  /** Resumen corto de la conversación que se muestra en el lienzo. */
+  summary?: string;
+  status: "idle" | "thinking" | "error";
+  errorMessage?: string;
+  /**
+   * Huella del contexto aguas arriba con el que se respondió por última vez.
+   * Si el contexto actual tiene otra huella, el nodo muestra "Contexto
+   * actualizado · Resincronizar" (nunca se llama a la IA sin permiso).
+   */
+  contextFingerprint?: string;
+  source?: AiChatSource;
+}
+
+// ----------------------------------------------------------------------------
+// 7. Nodo de ingeniería (unión estricta de los 6 tipos)
 // ----------------------------------------------------------------------------
 
 /** Campos comunes a cualquier nodo. */
@@ -391,6 +445,7 @@ export interface FileEngineeringNode extends EngineeringNodeBase {
   calcLatexData?: undefined;
   resourceLinkData?: undefined;
   codeLabData?: undefined;
+  aiChatData?: undefined;
 }
 
 export interface SketchNoteEngineeringNode extends EngineeringNodeBase {
@@ -400,6 +455,7 @@ export interface SketchNoteEngineeringNode extends EngineeringNodeBase {
   calcLatexData?: undefined;
   resourceLinkData?: undefined;
   codeLabData?: undefined;
+  aiChatData?: undefined;
 }
 
 export interface CalcLatexEngineeringNode extends EngineeringNodeBase {
@@ -409,6 +465,7 @@ export interface CalcLatexEngineeringNode extends EngineeringNodeBase {
   sketchNoteData?: undefined;
   resourceLinkData?: undefined;
   codeLabData?: undefined;
+  aiChatData?: undefined;
 }
 
 export interface ResourceLinkEngineeringNode extends EngineeringNodeBase {
@@ -418,6 +475,7 @@ export interface ResourceLinkEngineeringNode extends EngineeringNodeBase {
   sketchNoteData?: undefined;
   calcLatexData?: undefined;
   codeLabData?: undefined;
+  aiChatData?: undefined;
 }
 
 export interface CodeLabEngineeringNode extends EngineeringNodeBase {
@@ -427,6 +485,17 @@ export interface CodeLabEngineeringNode extends EngineeringNodeBase {
   sketchNoteData?: undefined;
   calcLatexData?: undefined;
   resourceLinkData?: undefined;
+  aiChatData?: undefined;
+}
+
+export interface AiChatEngineeringNode extends EngineeringNodeBase {
+  type: "ai-chat-node";
+  aiChatData: AiChatPayload;
+  fileData?: undefined;
+  sketchNoteData?: undefined;
+  calcLatexData?: undefined;
+  resourceLinkData?: undefined;
+  codeLabData?: undefined;
 }
 
 /**
@@ -438,7 +507,8 @@ export type EngineeringNodeData =
   | SketchNoteEngineeringNode
   | CalcLatexEngineeringNode
   | ResourceLinkEngineeringNode
-  | CodeLabEngineeringNode;
+  | CodeLabEngineeringNode
+  | AiChatEngineeringNode;
 
 /** Cambios parciales aceptados por `updateNodePayload`. */
 export type NodePayloadPatch =
@@ -446,7 +516,8 @@ export type NodePayloadPatch =
   | Partial<SketchNotePayload>
   | Partial<CalcLatexPayload>
   | Partial<ResourceLinkPayload>
-  | Partial<CodeLabPayload>;
+  | Partial<CodeLabPayload>
+  | Partial<AiChatPayload>;
 
 /** Campos de cabecera editables con `updateNodeMeta`. */
 export type NodeMetaPatch = Partial<
@@ -470,4 +541,5 @@ export interface SpawnNodeInput {
   calcLatexData?: Partial<CalcLatexPayload>;
   resourceLinkData?: Partial<ResourceLinkPayload>;
   codeLabData?: Partial<CodeLabPayload>;
+  aiChatData?: Partial<AiChatPayload>;
 }

@@ -21,6 +21,7 @@ import { useCloudStore, type CloudUser } from "@/store/useCloudStore";
 import { AUTOSAVE_DELAY_MS, useSettingsStore } from "@/store/useSettingsStore";
 import {
   createEmptyCalcLatexPayload,
+  createEmptyAiChatPayload,
   createEmptyCodeLabPayload,
   createEmptyFilePayload,
   createEmptyResourceLinkPayload,
@@ -37,6 +38,7 @@ import {
   type WorkspaceSummary,
 } from "@/store/useWorkspaceManagerStore";
 import type {
+  AiChatPayload,
   CalcLatexPayload,
   CodeLabPayload,
   EngineeringNodeBase,
@@ -123,6 +125,19 @@ function cloudFilePayload(file: FileNodePayload): FileNodePayload {
   };
 }
 
+/** Conversación IA: no se guarda el estado transitorio "pensando…". */
+function cloudAiChatPayload(data: AiChatPayload): AiChatPayload {
+  return {
+    ...data,
+    messages: data.messages.slice(-200),
+    status: data.status === "thinking" ? "idle" : data.status,
+  };
+}
+
+/** Postgres 23514: la base aún no acepta el tipo de nodo "ai-chat-node". */
+const AI_NODE_SETUP_HINT =
+  "La base de datos todavía no acepta Nodos IA. Ejecuta de nuevo supabase/schema.sql en el SQL Editor de Supabase (añade \"ai-chat-node\" a los tipos permitidos)";
+
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 function nodeToRow(
@@ -140,7 +155,9 @@ function nodeToRow(
           ? node.calcLatexData
           : node.type === "resource-link-node"
             ? node.resourceLinkData
-            : node.codeLabData;
+            : node.type === "ai-chat-node"
+              ? cloudAiChatPayload(node.aiChatData)
+              : node.codeLabData;
 
   return {
     workspace_id: workspaceId,
@@ -209,6 +226,18 @@ function rowToNode(row: NodeRow): EngineeringNodeData | null {
           ...(payload as Partial<ResourceLinkPayload>),
         },
       };
+    case "ai-chat-node": {
+      const data = { ...createEmptyAiChatPayload(), ...(payload as Partial<AiChatPayload>) };
+      return {
+        ...base,
+        type: "ai-chat-node",
+        aiChatData: {
+          ...data,
+          messages: Array.isArray(data.messages) ? data.messages : [],
+          status: data.status === "thinking" ? "idle" : data.status,
+        },
+      };
+    }
     case "code-lab-node":
       return {
         ...base,
@@ -265,6 +294,7 @@ const NODE_DATA_KEY: Record<string, string> = {
   "calc-latex-node": "calcLatexData",
   "resource-link-node": "resourceLinkData",
   "code-lab-node": "codeLabData",
+  "ai-chat-node": "aiChatData",
 };
 
 /** Valida un nodo leído de un archivo externo (.andros.zip) y completa lo que falte. */
@@ -505,7 +535,12 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
         const { error } = await supabase
           .from("workspace_nodes")
           .upsert(changedNodes, { onConflict: "workspace_id,id" });
-        if (error) throw error;
+        if (error) {
+          if (error.code === "23514" && changedNodes.some((r) => r.type === "ai-chat-node")) {
+            throw new Error(AI_NODE_SETUP_HINT);
+          }
+          throw error;
+        }
       }
       if (removedConnectionIds.length > 0) {
         const { error } = await supabase

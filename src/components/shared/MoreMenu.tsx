@@ -8,6 +8,7 @@ import {
   Eraser,
   FolderArchive,
   GraduationCap,
+  KeyRound,
   MoreHorizontal,
   Settings,
   Swords,
@@ -19,6 +20,7 @@ import { useSettingsStore } from "@/store/useSettingsStore";
 import { useWorkspaceManagerStore } from "@/store/useWorkspaceManagerStore";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { useOnboardingStore } from "@/store/useOnboardingStore";
+import { useAiProvidersStore } from "@/store/useAiProvidersStore";
 
 // ============================================================================
 // ANDROS — MENÚ "⋯ MÁS OPCIONES" (barra superior)
@@ -165,6 +167,12 @@ export const MoreMenu: React.FC = () => {
       label: "Ajustes",
       icon: <Settings className="w-4 h-4" />,
       onSelect: () => useSettingsStore.getState().setModalOpen(true),
+    },
+    {
+      id: "ai-keys",
+      label: "Claves IA (Gemini, Claude, ChatGPT)",
+      icon: <KeyRound className="w-4 h-4" />,
+      onSelect: () => useAiProvidersStore.getState().setKeysModalOpen(true),
     },
     {
       id: "zip",

@@ -7,6 +7,7 @@ import { celebrate } from "@/lib/effects/celebrate";
 import {
   ArrowLeft,
   ArrowRight,
+  Bot,
   Cable,
   CheckSquare,
   FileBox,
@@ -28,6 +29,7 @@ import { SKETCH_TEXT_MAX_HEIGHT, useWorkspaceStore } from "@/store/useWorkspaceS
 import { FileNodeView } from "@/components/nodes/FileNodeView";
 import { ResourceLinkNodeView } from "@/components/nodes/ResourceLinkNode";
 import { CodeLabNodeView } from "@/components/nodes/CodeLabNode";
+import { AiChatNodeView } from "@/components/nodes/AiChatNode";
 
 interface EngineeringNodeProps {
   node: EngineeringNodeData;
@@ -392,6 +394,8 @@ export const EngineeringNode: React.FC<EngineeringNodeProps> = ({
         return <Link2 className="w-4 h-4 text-andros-accent shrink-0" />;
       case "code-lab-node":
         return <Terminal className="w-4 h-4 text-andros-accent shrink-0" />;
+      case "ai-chat-node":
+        return <Bot className="w-4 h-4 text-andros-accent shrink-0" />;
     }
   };
 
@@ -407,6 +411,8 @@ export const EngineeringNode: React.FC<EngineeringNodeProps> = ({
         return <ResourceLinkNodeView node={node} variant={variant} />;
       case "code-lab-node":
         return <CodeLabNodeView node={node} variant={variant} />;
+      case "ai-chat-node":
+        return <AiChatNodeView node={node} variant={variant} />;
     }
   };
 

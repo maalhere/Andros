@@ -4,8 +4,10 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useMotionValue, useSpring } from "framer-motion";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import {
+  Bot,
   Box,
   Calculator,
+  MessagesSquare,
   Link2,
   MousePointer2,
   Plus,
@@ -306,6 +308,8 @@ const QUICK_ADD_ICONS: Record<QuickAddKind, React.ReactNode> = {
   note: <StickyNote className="w-4 h-4" />,
   link: <Link2 className="w-4 h-4" />,
   calc: <Calculator className="w-4 h-4" />,
+  ai: <Bot className="w-4 h-4" />,
+  "ai-import": <MessagesSquare className="w-4 h-4" />,
 };
 
 /** Menú emergente de "+ Agregar" con las 4 opciones. */

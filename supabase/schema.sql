@@ -117,7 +117,7 @@ create table if not exists public.workspace_nodes (
   type           text not null check (
                    type in (
                      'file-node', 'sketch-note-node', 'calc-latex-node',
-                     'resource-link-node', 'code-lab-node'
+                     'resource-link-node', 'code-lab-node', 'ai-chat-node'
                    )
                  ),
   title          text not null default '',
@@ -142,6 +142,8 @@ create trigger workspace_nodes_set_updated_at
   before update on public.workspace_nodes
   for each row execute function public.set_updated_at();
 
+-- SPRINT 2: se agregó "ai-chat-node" (Conversación IA). Volver a ejecutar
+-- este archivo actualiza el check sin tocar los datos existentes.
 -- BLOQUE 3: se agregaron los nodos "resource-link-node" (Enlace / Fuente) y
 -- "code-lab-node" (Código / Cálculo). En una base ya creada, `create table if
 -- not exists` no actualiza el check existente, así que se reemplaza aparte.
@@ -150,7 +152,7 @@ alter table public.workspace_nodes add constraint workspace_nodes_type_check
   check (
     type in (
       'file-node', 'sketch-note-node', 'calc-latex-node',
-      'resource-link-node', 'code-lab-node'
+      'resource-link-node', 'code-lab-node', 'ai-chat-node'
     )
   );
 

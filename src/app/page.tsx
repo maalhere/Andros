@@ -5,6 +5,7 @@ import { useDeviceLayout } from "@/hooks/useDeviceLayout";
 import { useCloudSync } from "@/hooks/useCloudSync";
 import { useSettingsSync } from "@/hooks/useSettingsSync";
 import { QualityOfLifeModal } from "@/components/settings/QualityOfLifeModal";
+import { AiKeysModal } from "@/components/settings/AiKeysModal";
 import { WorkspaceManagerDrawer } from "@/components/workspaces/WorkspaceManagerDrawer";
 import { ArenaModal } from "@/components/arena/ArenaModal";
 import { UpgradeModal } from "@/components/shared/UpgradeModal";
@@ -35,6 +36,7 @@ export default function AndrosWorkspacePage() {
     <div className="relative w-full min-h-screen overflow-hidden">
       <TopStatusBar isMobile={isMobile} />
       <QualityOfLifeModal />
+      <AiKeysModal />
       <WorkspaceManagerDrawer />
       <ArenaModal />
       <UpgradeModal />

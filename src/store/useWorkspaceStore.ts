@@ -5,6 +5,7 @@ import {
   CanvasInkMode,
   CanvasInkTip,
   CanvasStroke,
+  AiChatPayload,
   CalcLatexPayload,
   ChecklistItem,
   CodeLabPayload,
@@ -238,7 +239,8 @@ export function resolveNodeArchetype(
     type === "sketch-note-node" ||
     type === "calc-latex-node" ||
     type === "resource-link-node" ||
-    type === "code-lab-node"
+    type === "code-lab-node" ||
+    type === "ai-chat-node"
   ) {
     return type;
   }
@@ -251,6 +253,7 @@ export const NODE_ARCHETYPE_LABELS: Record<NodeArchetype, string> = {
   "calc-latex-node": "Cálculo",
   "resource-link-node": "Enlace / Fuente",
   "code-lab-node": "Código / Cálculo",
+  "ai-chat-node": "Conversación IA",
 };
 
 const DEFAULT_TITLES: Record<NodeArchetype, string> = {
@@ -259,6 +262,7 @@ const DEFAULT_TITLES: Record<NodeArchetype, string> = {
   "calc-latex-node": "Nueva Hoja de Cálculo",
   "resource-link-node": "Nuevo Enlace / Fuente",
   "code-lab-node": "Nuevo Laboratorio de Código",
+  "ai-chat-node": "Nodo IA",
 };
 
 const DEFAULT_TAGS: Record<NodeArchetype, string> = {
@@ -267,6 +271,7 @@ const DEFAULT_TAGS: Record<NodeArchetype, string> = {
   "calc-latex-node": "CALC-v1",
   "resource-link-node": "LINK",
   "code-lab-node": "CODE-v1",
+  "ai-chat-node": "AI-CHAT",
 };
 
 /** Título que recibe un nodo de archivo recién creado (aún sin archivo). */
@@ -320,6 +325,15 @@ export function createEmptyResourceLinkPayload(): ResourceLinkPayload {
 export function createEmptyCodeLabPayload(): CodeLabPayload {
   return {
     code: "",
+  };
+}
+
+export function createEmptyAiChatPayload(): AiChatPayload {
+  return {
+    provider: "gemini",
+    model: "auto",
+    messages: [],
+    status: "idle",
   };
 }
 
@@ -467,6 +481,16 @@ function buildNodeFromInput(
       resourceLinkData: {
         ...createEmptyResourceLinkPayload(),
         ...partial?.resourceLinkData,
+      },
+    };
+  }
+  if (archetype === "ai-chat-node") {
+    return {
+      ...base,
+      type: "ai-chat-node",
+      aiChatData: {
+        ...createEmptyAiChatPayload(),
+        ...partial?.aiChatData,
       },
     };
   }
@@ -655,6 +679,7 @@ function noteFullText(node: EngineeringNodeData): string {
       .join("\n");
   }
   if (node.type === "code-lab-node") return node.codeLabData.code;
+  if (node.type === "ai-chat-node") return node.aiChatData.summary ?? "";
   return node.summary ?? "";
 }
 
@@ -664,6 +689,7 @@ function defaultHumanZone(node: EngineeringNodeData): HumanLayoutZone {
   if (node.type === "calc-latex-node") return 3;
   if (node.type === "resource-link-node") return 3;
   if (node.type === "code-lab-node") return 3;
+  if (node.type === "ai-chat-node") return 2;
   const header = `${node.title} ${node.codeTag}`;
   if (REFERENCE_PATTERN.test(header)) return 3;
   const text = noteFullText(node);
@@ -720,6 +746,8 @@ function estimateNodeHeight(node: EngineeringNodeData): number {
     }
   } else if (node.type === "resource-link-node") {
     height += node.resourceLinkData.platform === "youtube" ? 220 : 150;
+  } else if (node.type === "ai-chat-node") {
+    height += node.aiChatData.messages.length > 0 ? 300 : 200;
   } else {
     // code-lab-node
     const data = node.codeLabData;
@@ -1264,6 +1292,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
               codeLabData: {
                 ...node.codeLabData,
                 ...(patch as Partial<CodeLabPayload>),
+              },
+            };
+          case "ai-chat-node":
+            return {
+              ...node,
+              updatedAt: "Ahora mismo",
+              aiChatData: {
+                ...node.aiChatData,
+                ...(patch as Partial<AiChatPayload>),
               },
             };
         }

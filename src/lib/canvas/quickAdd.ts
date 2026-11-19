@@ -1,18 +1,23 @@
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
+import { useAiProvidersStore } from "@/store/useAiProvidersStore";
+import { markPendingImportPanel } from "@/lib/ai/nodeChatClient";
 
 // ============================================================================
 // ANDROS — MENÚ "+ AGREGAR" (dock de escritorio y cajón del teléfono)
-// Las 4 opciones visibles para cualquier persona: Archivo 3D, Nota,
-// Enlace Web/YouTube y Cálculo. Ambos viewports usan estas mismas funciones.
+// Las opciones visibles para cualquier persona: Archivo 3D, Nota, Enlace
+// Web/YouTube, Cálculo, Nodo IA e Importar chat. Ambos viewports usan estas
+// mismas funciones.
 // ============================================================================
 
-export type QuickAddKind = "file3d" | "note" | "link" | "calc";
+export type QuickAddKind = "file3d" | "note" | "link" | "calc" | "ai" | "ai-import";
 
 export const QUICK_ADD_OPTIONS: { kind: QuickAddKind; label: string; description: string }[] = [
   { kind: "file3d", label: "Archivo 3D", description: "Sube una pieza .stl, .obj o .3mf" },
   { kind: "note", label: "Nota", description: "Texto, listas y bocetos rápidos" },
   { kind: "link", label: "Enlace Web/YouTube", description: "Video, paper o página con vista previa" },
   { kind: "calc", label: "Cálculo", description: "Hoja con fórmulas y ecuaciones" },
+  { kind: "ai", label: "Nuevo Nodo IA", description: "Gemini, Claude o ChatGPT con el contexto de sus cables" },
+  { kind: "ai-import", label: "Importar chat", description: "Trae una conversación de ChatGPT, Claude o Gemini" },
 ];
 
 // ----------------------------------------------------------------------------
@@ -61,6 +66,18 @@ export function quickAdd(kind: QuickAddKind, file?: File): string {
     case "calc":
       id = ws.aiCreateNode({ type: "calc-latex-node", position });
       break;
+    case "ai":
+    case "ai-import": {
+      const { defaultModels } = useAiProvidersStore.getState();
+      id = ws.aiCreateNode({
+        type: "ai-chat-node",
+        title: kind === "ai-import" ? "Chat importado" : "Nodo IA",
+        position,
+        aiChatData: { provider: "gemini", model: defaultModels.gemini },
+      });
+      if (kind === "ai-import") markPendingImportPanel(id);
+      break;
+    }
   }
   ws.setActiveTool("pointer");
   ws.setActiveMobileSheet("none");

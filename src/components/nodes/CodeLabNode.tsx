@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useRef } from "react";
-import { AlertCircle, Play } from "lucide-react";
-import { CodeLabEngineeringNode } from "@/types/workspace";
+import React, { useMemo, useRef } from "react";
+import { AlertCircle, Box, Play } from "lucide-react";
+import { CodeLabEngineeringNode, CodeLabValue } from "@/types/workspace";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { runCodeLab } from "@/lib/codelab/interpreter";
+import { findLinked3DModel } from "@/lib/canvas/contextGraph";
 import { celebrate } from "@/lib/effects/celebrate";
 
 // ============================================================================
@@ -46,8 +47,25 @@ export const CodeLabNodeView: React.FC<CodeLabNodeProps> = ({ node }) => {
   const data = node.codeLabData;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // Pieza 3D conectada por cable: sus medidas entran como variables.
+  // (Se selecciona un texto, no un objeto: así el store no re-renderiza en bucle.)
+  const modelKey = useWorkspaceStore((s) => {
+    const found = findLinked3DModel(s.nodes, s.connections, node.id);
+    return found ? JSON.stringify(found) : "";
+  });
+  const linkedModel = useMemo(
+    () => (modelKey ? (JSON.parse(modelKey) as NonNullable<ReturnType<typeof findLinked3DModel>>) : null),
+    [modelKey]
+  );
+  const presets = useMemo((): Record<string, CodeLabValue> => {
+    const dims = linkedModel?.dimensionsMm;
+    if (!dims) return {};
+    const round = (n: number) => Math.round(n * 1000) / 1000;
+    return { model_x: round(dims.widthMm), model_y: round(dims.depthMm), model_z: round(dims.heightMm) };
+  }, [linkedModel]);
+
   const run = () => {
-    const result = runCodeLab(data.code);
+    const result = runCodeLab(data.code, presets);
     updateNodePayload(node.id, { result, lastRunAt: "Ahora mismo" });
     if (!result.errorMessage) void celebrate();
   };
@@ -77,6 +95,24 @@ export const CodeLabNodeView: React.FC<CodeLabNodeProps> = ({ node }) => {
 
   return (
     <div className="py-3 space-y-2.5" data-no-drag>
+      {linkedModel && (
+        <div
+          className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-andros-accent/10 border border-andros-accent/25 text-[10px] font-mono text-andros-accent"
+          title={
+            linkedModel.dimensionsMm
+              ? "Variables disponibles: model_x (ancho), model_y (profundidad), model_z (alto) en mm"
+              : "Abre el visor 3D de la pieza para medirla y usar model_x, model_y, model_z"
+          }
+        >
+          <Box className="w-3 h-3 shrink-0" />
+          <span className="truncate">Vinculado a {linkedModel.name}</span>
+          {linkedModel.dimensionsMm ? (
+            <span className="ml-auto shrink-0 text-andros-muted">model_x · model_y · model_z</span>
+          ) : (
+            <span className="ml-auto shrink-0 text-andros-muted">sin medir</span>
+          )}
+        </div>
+      )}
       <textarea
         ref={textareaRef}
         value={data.code}

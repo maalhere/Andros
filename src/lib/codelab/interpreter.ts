@@ -15,6 +15,8 @@
 // Funciones: sin cos tan asin acos atan sqrt log ln exp abs pow min max
 //            round floor ceil linspace plot
 // Constantes: pi, e
+// Variables de una pieza 3D conectada (si el visor ya la midió):
+//   model_x, model_y, model_z (ancho, profundidad y alto en mm)
 // ============================================================================
 
 import type { CodeLabPlotData, CodeLabRunResult, CodeLabValue } from "@/types/workspace";
@@ -467,9 +469,17 @@ const MAX_SOURCE_CHARS = 20_000;
  * gráfica. Nunca lanza: los errores quedan en `errorMessage` para mostrarlos
  * en el nodo sin romper el resto de la app.
  */
-export function runCodeLab(source: string): CodeLabRunResult {
+export function runCodeLab(
+  source: string,
+  /**
+   * Variables predefinidas antes de ejecutar (p. ej. model_x, model_y y
+   * model_z de una pieza 3D conectada). El código puede sobrescribirlas.
+   */
+  presets: Record<string, CodeLabValue> = {}
+): CodeLabRunResult {
   const clipped = source.slice(0, MAX_SOURCE_CHARS);
   const evaluator = new Evaluator();
+  evaluator.variables = { ...presets };
   try {
     const tokens = tokenize(clipped);
     const statements = new Parser(tokens).parseProgram();

@@ -2,7 +2,7 @@
 
 import { SNAP_GRID_SIZE, useSettingsStore, type CableStyle } from "@/store/useSettingsStore";
 
-import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Check, Trash2, X } from "lucide-react";
 import {
   clampCanvasScale,
@@ -18,6 +18,7 @@ import {
   PortPosition,
 } from "@/types/workspace";
 import { EngineeringNode } from "@/components/shared/EngineeringNode";
+import { collectUpstreamContext } from "@/lib/canvas/contextGraph";
 import {
   Bounds,
   buildPressureOutline,
@@ -355,6 +356,14 @@ export const SpatialCanvas: React.FC = () => {
 
   const connectingFrom = useWorkspaceStore((s) => s.connectingFrom);
   const selectedConnectionId = useWorkspaceStore((s) => s.selectedConnectionId);
+  const selectedNodeId = useWorkspaceStore((s) => s.selectedNodeId);
+
+  // Nodo IA seleccionado → se resaltan los cables que alimentan su contexto.
+  const feedingEdgeIds = useMemo(() => {
+    const selected = nodes.find((n) => n.id === selectedNodeId);
+    if (!selected || selected.type !== "ai-chat-node") return null;
+    return new Set(collectUpstreamContext(nodes, connections, selected.id).edgeIds);
+  }, [nodes, connections, selectedNodeId]);
   const startConnecting = useWorkspaceStore((s) => s.startConnecting);
   const cancelConnecting = useWorkspaceStore((s) => s.cancelConnecting);
   const completeConnection = useWorkspaceStore((s) => s.completeConnection);
@@ -1235,6 +1244,7 @@ export const SpatialCanvas: React.FC = () => {
             );
             const isSelected = conn.id === selectedConnectionId;
             const isActive = isSelected || conn.id === hoveredConnectionId;
+            const isFeeding = Boolean(feedingEdgeIds?.has(conn.id));
 
             const handleSelect = (e: React.PointerEvent<SVGElement>) => {
               e.stopPropagation();
@@ -1245,15 +1255,27 @@ export const SpatialCanvas: React.FC = () => {
 
             return (
               <g key={conn.id}>
+                {/* Halo suave: este cable alimenta el contexto del Nodo IA seleccionado */}
+                {isFeeding && (
+                  <path
+                    d={cable.d}
+                    fill="none"
+                    stroke="var(--accent-primary)"
+                    strokeWidth={7}
+                    strokeLinecap="round"
+                    opacity={0.16}
+                    pointerEvents="none"
+                  />
+                )}
                 {/* Trazo visible */}
                 <path
                   d={cable.d}
                   fill="none"
-                  stroke={isActive ? "var(--accent-primary)" : "var(--border-active)"}
-                  strokeWidth={isActive ? 2.25 : 1.75}
+                  stroke={isActive || isFeeding ? "var(--accent-primary)" : "var(--border-active)"}
+                  strokeWidth={isActive ? 2.25 : isFeeding ? 2 : 1.75}
                   strokeDasharray={isSelected ? undefined : "5 5"}
                   strokeLinecap="round"
-                  markerEnd={`url(#${isActive ? "andros-arrow-active" : "andros-arrow"})`}
+                  markerEnd={`url(#${isActive || isFeeding ? "andros-arrow-active" : "andros-arrow"})`}
                 />
                 {/* Zona de clic ancha e invisible */}
                 <path
