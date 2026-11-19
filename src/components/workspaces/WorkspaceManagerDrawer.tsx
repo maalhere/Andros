@@ -255,7 +255,7 @@ export const WorkspaceManagerDrawer: React.FC = () => {
               <span className="flex items-center gap-1.5 text-xs font-medium text-andros-primary">
                 <span className="truncate">{w.name}</span>
                 {isActive && (
-                  <span className="shrink-0 text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-andros-accent/15 text-andros-accent">
+                  <span className="shrink-0 text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-andros-accent/15 text-andros-accent-ink">
                     abierto
                   </span>
                 )}
@@ -336,7 +336,7 @@ export const WorkspaceManagerDrawer: React.FC = () => {
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-andros-primary">
-                <FolderOpen className="w-4 h-4 text-andros-accent" />
+                <FolderOpen className="w-4 h-4 text-andros-accent-ink" />
                 <h2 className="text-sm font-semibold">Espacios de trabajo</h2>
               </div>
               <button
@@ -398,7 +398,7 @@ export const WorkspaceManagerDrawer: React.FC = () => {
                 role="status"
                 className={`text-[11px] rounded-lg px-2.5 py-2 border ${
                   message.kind === "error"
-                    ? "border-andros-accent/50 text-andros-accent bg-andros-accent/5"
+                    ? "border-andros-accent/50 text-andros-accent-ink bg-andros-accent/5"
                     : "border-andros-border text-andros-muted"
                 }`}
               >

@@ -23,6 +23,12 @@ const config: Config = {
           primary: "var(--text-primary)",
           muted: "var(--text-muted)",
           accent: "var(--accent-primary)",
+          /** Acento como TEXTO: AA (>= 4.5:1) sobre fondo, tarjeta y tintes /10–/15. */
+          "accent-ink": "var(--accent-ink)",
+          /** Acento como FONDO SÓLIDO con texto blanco encima (AA). */
+          "accent-fill": "var(--accent-fill)",
+          danger: "var(--danger-ink)",
+          warning: "var(--warning-ink)",
           success: "var(--accent-success)",
           grid: "var(--grid-dot)",
         },

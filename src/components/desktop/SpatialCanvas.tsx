@@ -327,7 +327,7 @@ const ConnectionPopover: React.FC<ConnectionPopoverProps> = ({
           type="button"
           onClick={onDelete}
           title="Borrar cable (Supr)"
-          className="px-3 py-2 rounded-xl bg-andros-border/50 hover:bg-andros-border text-xs font-medium text-red-500 flex items-center justify-center gap-1.5 active:scale-95 spring-micro"
+          className="px-3 py-2 rounded-xl bg-andros-border/50 hover:bg-andros-border text-xs font-medium text-andros-danger flex items-center justify-center gap-1.5 active:scale-95 spring-micro"
         >
           <Trash2 className="w-3.5 h-3.5" />
           <span>Borrar</span>
@@ -1128,7 +1128,6 @@ export const SpatialCanvas: React.FC = () => {
   // Pinta el primer punto del trazo en cuanto aparece la ruta en vivo.
   useLayoutEffect(() => {
     if (liveInk) updateLivePath();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveInk]);
 
   const hintText = connectingFrom
@@ -1185,7 +1184,7 @@ export const SpatialCanvas: React.FC = () => {
       {/* Guía contextual de conexión */}
       {hintText && (
         <div className="fixed top-16 left-1/2 -translate-x-1/2 z-40 pointer-events-none px-3.5 py-2 rounded-xl bg-andros-surface backdrop-blur-xl border border-andros-border shadow-hud-light dark:shadow-hud-dark text-[11px] font-mono text-andros-primary whitespace-nowrap">
-          <span className="text-andros-accent">●</span> {hintText}
+          <span className="text-andros-accent-ink">●</span> {hintText}
         </div>
       )}
 

@@ -21,6 +21,10 @@ import { useCloudStore } from "@/store/useCloudStore";
 import { useMarketStore } from "@/store/useMarketStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { ArenaPublishForm } from "./ArenaPublishForm";
+import { SkeletonList } from "@/components/shared/Skeleton";
+import { useSwipeToDismiss } from "@/hooks/useSwipeToDismiss";
+import { useDeviceLayout } from "@/hooks/useDeviceLayout";
+import { SPRING_SNAPPY } from "@/lib/motion";
 import { ArenaPostDetail, TagRow, TypeBadge, isSolutionType } from "./ArenaPostDetail";
 
 // ============================================================================
@@ -47,8 +51,11 @@ export const ArenaModal: React.FC = () => {
     return () => window.removeEventListener("keydown", onKey);
   }, [open, setOpen]);
 
-  if (typeof document === "undefined") return null;
   const reduced = animations === "reduced";
+  const { isMobile } = useDeviceLayout();
+  const { sheetProps, handleProps } = useSwipeToDismiss(() => setOpen(false), isMobile);
+
+  if (typeof document === "undefined") return null;
 
   return createPortal(
     <AnimatePresence>
@@ -69,10 +76,11 @@ export const ArenaModal: React.FC = () => {
             initial={{ opacity: 0, y: 24, scale: 0.97 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 16, scale: 0.98 }}
-            transition={reduced ? { duration: 0 } : { type: "spring", stiffness: 450, damping: 34, mass: 0.8 }}
-            className="relative w-full max-w-4xl h-[92vh] md:h-[88vh] flex flex-col rounded-t-3xl md:rounded-2xl bg-andros-card border border-andros-border shadow-hud-light dark:shadow-hud-dark overflow-hidden"
+            transition={reduced ? { duration: 0 } : SPRING_SNAPPY}
+            {...sheetProps}
+            className="relative w-full max-w-4xl h-[92vh] md:h-[88vh] flex flex-col rounded-t-3xl md:rounded-2xl bg-andros-card border border-andros-border shadow-hud-light dark:shadow-hud-dark overflow-hidden pb-[env(safe-area-inset-bottom)]"
           >
-            <ArenaContent onClose={() => setOpen(false)} />
+            <ArenaContent onClose={() => setOpen(false)} handleProps={handleProps} />
           </motion.div>
         </motion.div>
       )}
@@ -81,9 +89,11 @@ export const ArenaModal: React.FC = () => {
   );
 };
 
-const ArenaContent: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+const ArenaContent: React.FC<{ onClose: () => void; handleProps: React.HTMLAttributes<HTMLDivElement> }> = ({ onClose, handleProps }) => {
   const userId = useCloudStore((s) => s.user?.id);
   const [posts, setPosts] = useState<ArenaPost[]>(EXAMPLE_POSTS);
+  // Esqueleto solo en la primera carga; después, el filtrado mantiene la lista visible.
+  const [loadedOnce, setLoadedOnce] = useState(false);
   const [cloudReady, setCloudReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
@@ -109,6 +119,7 @@ const ArenaContent: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     });
     if (id !== requestRef.current) return; // Respuesta vieja: se descarta.
     setLoading(false);
+    setLoadedOnce(true);
     setPosts(result.posts);
     setCloudReady(result.cloudReady);
     setModeNotice(result.notice ?? null);
@@ -178,24 +189,24 @@ const ArenaContent: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           ? "border-andros-success text-andros-success bg-andros-success/10"
           : tone === "neutral"
             ? "border-andros-primary text-andros-primary bg-andros-border/50"
-            : "border-andros-accent text-andros-accent bg-andros-accent/10"
+            : "border-andros-accent text-andros-accent-ink bg-andros-accent/10"
         : "border-andros-border text-andros-muted hover:text-andros-primary"
     }`;
 
   return (
     <>
       {/* Cabecera */}
-      <div className="flex items-center justify-between gap-3 px-5 h-14 border-b border-andros-border shrink-0">
-        <div className="md:hidden absolute left-1/2 -translate-x-1/2 top-1.5 w-10 h-1 rounded-full bg-andros-border-active" />
+      <div {...handleProps} className="flex items-center justify-between gap-3 px-5 h-14 border-b border-andros-border shrink-0 max-md:cursor-grab">
+        <div aria-hidden="true" className="md:hidden absolute left-1/2 -translate-x-1/2 top-1.5 w-10 h-1 rounded-full bg-andros-border-active" />
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className="p-1.5 rounded-lg bg-andros-accent/15 text-andros-accent">
+          <div className="p-1.5 rounded-lg bg-andros-accent/15 text-andros-accent-ink">
             <Swords className="w-4 h-4" />
           </div>
           <div className="min-w-0">
             <h2 className="text-[13px] font-semibold text-andros-primary leading-tight">Andros Arena</h2>
             <p className="text-[10px] font-mono text-andros-muted truncate flex items-center gap-1">
               {cloudReady ? <Cloud className="w-3 h-3 text-andros-success" /> : <HardDrive className="w-3 h-3" />}
-              {cloudReady ? "Nube conectada" : "Modo local"} · retos, actividades, prácticas y empleos
+              {cloudReady ? "Nube conectada" : "Modo local"}
             </p>
           </div>
         </div>
@@ -207,13 +218,13 @@ const ArenaContent: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                 setNotice(null);
                 setView({ kind: "publish" });
               }}
-              className="h-9 px-3 rounded-xl bg-andros-accent text-white text-xs font-semibold flex items-center gap-1.5"
+              className="h-11 md:h-9 px-3 rounded-xl bg-andros-accent-fill text-white text-xs font-semibold flex items-center gap-1.5 active:scale-[0.96] spring-micro"
             >
-              <Plus className="w-3.5 h-3.5" />
+              <Plus className="w-3.5 h-3.5" aria-hidden="true" />
               Publicar
             </button>
           )}
-          <button type="button" onClick={onClose} aria-label="Cerrar Arena" className="p-1.5 rounded-lg text-andros-muted hover:text-andros-primary hover:bg-andros-border/40">
+          <button type="button" onClick={onClose} aria-label="Cerrar Arena" className="w-11 h-11 md:w-8 md:h-8 -mr-2 md:-mr-1 flex items-center justify-center rounded-lg text-andros-muted hover:text-andros-primary hover:bg-andros-border/40 active:scale-[0.96] spring-micro">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -274,7 +285,7 @@ const ArenaContent: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                 />
                 {loading && <Loader2 className="w-3.5 h-3.5 animate-spin text-andros-muted" />}
                 {hasFilters && (
-                  <button type="button" onClick={clearFilters} className="text-[10px] text-andros-muted hover:text-andros-primary shrink-0">
+                  <button type="button" onClick={clearFilters} className="min-h-[32px] px-1 text-[11px] text-andros-muted hover:text-andros-primary shrink-0">
                     Limpiar
                   </button>
                 )}
@@ -286,21 +297,21 @@ const ArenaContent: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                 </button>
                 {ARENA_TYPES.map((t) => (
                   <button key={t} type="button" onClick={() => setType(type === t ? null : t)} className={pill(type === t, "neutral")}>
-                    {ARENA_TYPE_LABELS[t]} <span className="font-mono opacity-70">{counts.typ.get(t) ?? 0}</span>
+                    {ARENA_TYPE_LABELS[t]} <span className="font-mono tabular-nums">{counts.typ.get(t) ?? 0}</span>
                   </button>
                 ))}
               </FilterRow>
               <FilterRow label="Disciplina" ai>
                 {ARENA_DISCIPLINES.filter((d) => counts.disc.has(d) || discipline === d).map((d) => (
                   <button key={d} type="button" onClick={() => setDiscipline(discipline === d ? null : d)} className={pill(discipline === d)}>
-                    {d} <span className="font-mono opacity-70">{counts.disc.get(d) ?? 0}</span>
+                    {d} <span className="font-mono tabular-nums">{counts.disc.get(d) ?? 0}</span>
                   </button>
                 ))}
               </FilterRow>
               <FilterRow label="Nivel" ai>
                 {ARENA_LEVELS.filter((l) => counts.lvl.has(l) || level === l).map((l) => (
                   <button key={l} type="button" onClick={() => setLevel(level === l ? null : l)} className={pill(level === l, "success")}>
-                    {l} <span className="font-mono opacity-70">{counts.lvl.get(l) ?? 0}</span>
+                    {l} <span className="font-mono tabular-nums">{counts.lvl.get(l) ?? 0}</span>
                   </button>
                 ))}
               </FilterRow>
@@ -319,11 +330,13 @@ const ArenaContent: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             <div className="px-5 py-4 space-y-3">
               {modeNotice && <p className="text-[11px] text-andros-muted rounded-lg bg-andros-border/30 px-3 py-2">{modeNotice}</p>}
 
-              <p className="text-[10px] font-mono text-andros-muted">
+              <p className="text-[10px] font-mono tabular-nums text-andros-muted" aria-live="polite">
                 {visible.length} publicación(es){hasFilters ? " con estos filtros" : ""}
               </p>
 
-              {visible.length === 0 && !loading && (
+              {!loadedOnce && <SkeletonList count={4} label="Cargando publicaciones de la Arena" className="grid gap-3 md:grid-cols-2" />}
+
+              {loadedOnce && visible.length === 0 && !loading && (
                 <div className="text-center py-10 space-y-2">
                   <p className="text-xs text-andros-muted">Nada coincide con estos filtros.</p>
                   <button type="button" onClick={clearFilters} className="h-8 px-3 rounded-lg border border-andros-border text-[11px] text-andros-primary">
@@ -332,24 +345,24 @@ const ArenaContent: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                 </div>
               )}
 
-              <ul className="grid gap-3 md:grid-cols-2">
+              <ul className={`grid gap-3 md:grid-cols-2 ${loadedOnce ? "" : "hidden"}`}>
                 {visible.map((p) => {
                   const sols = solutionCount(p);
                   return (
                     <li key={p.id} className="rounded-xl border border-andros-border bg-andros-canvas p-3.5 flex flex-col gap-2 hover:border-andros-border-active spring-micro">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <TypeBadge post={p} />
-                        {p.isExample && <span className="px-1.5 py-0.5 rounded-md text-[9px] font-mono uppercase tracking-wider bg-andros-border/60 text-andros-muted">Ejemplo</span>}
-                        {p.isLocal && <span className="px-1.5 py-0.5 rounded-md text-[9px] font-mono uppercase tracking-wider bg-andros-border/60 text-andros-muted">Este navegador</span>}
+                        {p.isExample && <span className="px-1.5 py-0.5 rounded-md text-[10px] font-mono uppercase tracking-wider bg-andros-border/60 text-andros-muted">Ejemplo</span>}
+                        {p.isLocal && <span className="px-1.5 py-0.5 rounded-md text-[10px] font-mono uppercase tracking-wider bg-andros-border/60 text-andros-muted">Este navegador</span>}
                         {!p.isExample && p.engine === "gemini" && (
-                          <span className="flex items-center gap-0.5 text-[9px] font-mono text-andros-accent" title="Etiquetas generadas por el escáner IA">
-                            <Sparkles className="w-2.5 h-2.5" /> IA
+                          <span className="flex items-center gap-0.5 text-[10px] font-mono text-andros-accent-ink" title="Etiquetas generadas por el escáner IA">
+                            <Sparkles className="w-2.5 h-2.5" aria-hidden="true" /> IA
                           </span>
                         )}
                         {p.stipend && <span className="ml-auto text-[10px] font-mono text-andros-success truncate max-w-[45%]">{p.stipend}</span>}
                       </div>
                       <button type="button" onClick={() => setView({ kind: "detail", postId: p.id })} className="text-left">
-                        <h3 className="text-[13px] font-semibold text-andros-primary leading-snug hover:text-andros-accent">{p.title}</h3>
+                        <h3 className="text-[13px] font-semibold text-andros-primary leading-snug hover:text-andros-accent-ink">{p.title}</h3>
                       </button>
                       <p className="text-[11px] text-andros-muted flex flex-wrap gap-x-2.5">
                         <span className="flex items-center gap-1">
@@ -369,7 +382,7 @@ const ArenaContent: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                         <button
                           type="button"
                           onClick={() => setView({ kind: "detail", postId: p.id, tab: "apply" })}
-                          className="h-8 px-2.5 rounded-lg bg-andros-accent text-white text-[11px] font-semibold flex items-center gap-1.5"
+                          className="h-10 md:h-8 px-2.5 rounded-lg bg-andros-accent-fill text-white text-[11px] font-semibold flex items-center gap-1.5 active:scale-[0.96] spring-micro"
                         >
                           <Send className="w-3.5 h-3.5" />
                           {isSolutionType(p) ? "Enviar solución" : "Postular"}
@@ -377,7 +390,7 @@ const ArenaContent: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                         <button
                           type="button"
                           onClick={() => setView({ kind: "detail", postId: p.id, tab: "solutions" })}
-                          className="h-8 px-2.5 rounded-lg border border-andros-border text-[11px] text-andros-primary hover:border-andros-border-active flex items-center gap-1"
+                          className="h-10 md:h-8 px-2.5 rounded-lg border border-andros-border text-[11px] text-andros-primary hover:border-andros-border-active flex items-center gap-1 active:scale-[0.96] spring-micro"
                         >
                           {sols > 0 ? `Ver ${sols} solución(es) de ejemplo` : "Ver soluciones"}
                           <ChevronRight className="w-3.5 h-3.5" />
@@ -397,8 +410,10 @@ const ArenaContent: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 
 const FilterRow: React.FC<{ label: string; ai?: boolean; children: React.ReactNode }> = ({ label, ai, children }) => (
   <div className="flex items-center gap-2 min-w-0">
-    <span className="w-[74px] shrink-0 text-[10px] font-mono uppercase tracking-wider text-andros-muted flex items-center gap-1">
-      {ai && <Sparkles className="w-2.5 h-2.5 text-andros-accent" />}
+    <span
+      title={ai ? "Etiquetas generadas por el escáner IA" : undefined}
+      className="w-[74px] shrink-0 text-[10px] font-mono uppercase tracking-wider text-andros-muted"
+    >
       {label}
     </span>
     <div className="flex gap-1.5 overflow-x-auto no-scrollbar min-w-0">{children}</div>

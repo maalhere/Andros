@@ -35,7 +35,7 @@ export const GoogleGlyph: React.FC<{ className?: string }> = ({ className }) => 
 );
 
 const PILL =
-  "flex items-center gap-2 h-8 px-2.5 rounded-xl bg-andros-surface backdrop-blur-md border border-andros-border shadow-sm text-[11px] font-mono";
+  "flex items-center gap-2 h-11 min-w-11 md:h-9 md:min-w-0 px-2.5 rounded-xl bg-andros-surface backdrop-blur-md border border-andros-border shadow-sm text-[11px] font-mono justify-center";
 
 function statusLabel(status: CloudStatus, pendingUploads: number): string {
   if (status === "error") return "Error al guardar";
@@ -64,7 +64,9 @@ export const GoogleAuthButton: React.FC<GoogleAuthButtonProps> = ({ isMobile }) 
   const authNotice = useCloudStore((s) => s.authNotice);
 
   const [menuOpen, setMenuOpen] = useState(false);
-  const [avatarFailed, setAvatarFailed] = useState(false);
+  // Se recuerda QUÉ URL falló: con otro usuario/avatar se vuelve a intentar sola.
+  const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
+  const avatarFailed = Boolean(user?.avatarUrl) && failedAvatarUrl === user?.avatarUrl;
   const [isSigningOut, setIsSigningOut] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -78,8 +80,6 @@ export const GoogleAuthButton: React.FC<GoogleAuthButtonProps> = ({ isMobile }) 
     return () => window.removeEventListener("pointerdown", close);
   }, [menuOpen]);
 
-  // Las URLs de avatar cambian entre usuarios: se vuelve a intentar con cada uno.
-  useEffect(() => setAvatarFailed(false), [user?.avatarUrl]);
 
   // ---- 1. Sin Supabase configurado: modo local silencioso ------------------
   if (status === "disabled") {
@@ -121,7 +121,7 @@ export const GoogleAuthButton: React.FC<GoogleAuthButtonProps> = ({ isMobile }) 
           <span>{isMobile ? "Entrar" : "Continuar con Google"}</span>
         </button>
         {errorMessage ? (
-          <p className="absolute right-0 top-10 w-64 p-2.5 rounded-xl bg-andros-card border border-andros-border text-[11px] text-andros-accent shadow-sm">
+          <p className="absolute right-0 top-10 w-64 p-2.5 rounded-xl bg-andros-card border border-andros-border text-[11px] text-andros-accent-ink shadow-sm">
             {errorMessage}
           </p>
         ) : (
@@ -142,8 +142,8 @@ export const GoogleAuthButton: React.FC<GoogleAuthButtonProps> = ({ isMobile }) 
   const isBusy = status === "loading" || status === "saving" || pendingUploads > 0;
   const isError = status === "error";
   const label = statusLabel(status, pendingUploads);
-  const dotColor = isError ? "bg-andros-accent" : isBusy ? "bg-andros-muted" : "bg-andros-success";
-  const textColor = isError ? "text-andros-accent" : isBusy ? "text-andros-muted" : "text-andros-success";
+  const dotColor = isError ? "bg-andros-accent-fill" : isBusy ? "bg-andros-muted" : "bg-andros-success";
+  const textColor = isError ? "text-andros-accent-ink" : isBusy ? "text-andros-muted" : "text-andros-success";
 
   const handleSignOut = async () => {
     setIsSigningOut(true);
@@ -174,13 +174,13 @@ export const GoogleAuthButton: React.FC<GoogleAuthButtonProps> = ({ isMobile }) 
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={user.avatarUrl}
-            alt={user.name}
+            alt={`Foto de perfil de ${user.name}`}
             referrerPolicy="no-referrer"
-            onError={() => setAvatarFailed(true)}
+            onError={() => setFailedAvatarUrl(user.avatarUrl ?? null)}
             className="w-6 h-6 rounded-full border border-andros-border object-cover"
           />
         ) : (
-          <span className="w-6 h-6 rounded-full bg-andros-accent/15 border border-andros-accent/40 text-andros-accent text-[10px] font-bold flex items-center justify-center">
+          <span className="w-6 h-6 rounded-full bg-andros-accent/15 border border-andros-accent/40 text-andros-accent-ink text-[10px] font-bold flex items-center justify-center">
             {initialsOf(user.name)}
           </span>
         )}
@@ -196,7 +196,7 @@ export const GoogleAuthButton: React.FC<GoogleAuthButtonProps> = ({ isMobile }) 
             <p className="text-[11px] font-mono text-andros-muted truncate">{user.email}</p>
             <p className={`mt-2 text-[11px] font-mono ${textColor}`}>● {label}</p>
             {errorMessage && (
-              <p className="mt-1.5 text-[11px] leading-snug text-andros-accent">{errorMessage}</p>
+              <p className="mt-1.5 text-[11px] leading-snug text-andros-accent-ink">{errorMessage}</p>
             )}
           </div>
           <div className="h-px bg-andros-border my-1" />

@@ -117,7 +117,7 @@ function useTargetRect(target: TourStep["target"], active: boolean): Rect | null
 const PrintIllustration: React.FC = () => (
   <div className="mt-3 rounded-2xl border border-andros-border bg-andros-canvas p-3">
     <div className="flex items-center gap-2.5">
-      <div className="w-10 h-10 rounded-xl bg-andros-accent/10 text-andros-accent flex items-center justify-center">
+      <div className="w-10 h-10 rounded-xl bg-andros-accent/10 text-andros-accent-ink flex items-center justify-center">
         <Box className="w-5 h-5" />
       </div>
       <div className="min-w-0 flex-1">
@@ -128,7 +128,7 @@ const PrintIllustration: React.FC = () => (
     <motion.div
       animate={{ scale: [1, 1.04, 1] }}
       transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
-      className="mt-2.5 h-9 rounded-xl bg-andros-accent text-white text-[12px] font-semibold flex items-center justify-center gap-1.5"
+      className="mt-2.5 h-9 rounded-xl bg-andros-accent-fill text-white text-[12px] font-semibold flex items-center justify-center gap-1.5"
     >
       <Printer className="w-3.5 h-3.5" />
       Imprimir ahora
@@ -263,7 +263,7 @@ export const OnboardingTour: React.FC<{ isMobile: boolean }> = ({ isMobile }) =>
           >
             <div className="flex items-center justify-between gap-2">
               <span className="inline-flex items-center gap-1.5 text-[11px] font-mono text-andros-muted">
-                <span className="w-6 h-6 rounded-lg bg-andros-accent/10 text-andros-accent flex items-center justify-center">
+                <span className="w-6 h-6 rounded-lg bg-andros-accent/10 text-andros-accent-ink flex items-center justify-center">
                   {current.icon}
                 </span>
                 Paso {step + 1} de {ONBOARDING_STEP_COUNT}
@@ -296,7 +296,7 @@ export const OnboardingTour: React.FC<{ isMobile: boolean }> = ({ isMobile }) =>
                   <span
                     key={i}
                     className={`h-1.5 rounded-full spring-micro ${
-                      i === step ? "w-5 bg-andros-accent" : "w-1.5 bg-andros-border-active"
+                      i === step ? "w-5 bg-andros-accent-fill" : "w-1.5 bg-andros-border-active"
                     }`}
                   />
                 ))}

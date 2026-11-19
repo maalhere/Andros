@@ -61,7 +61,8 @@ interface WorkspaceState {
   selectNode: (id: string | null) => void;
   updateNodePosition: (id: string, x: number, y: number) => void;
   spawnNode: (partial?: SpawnNodeInput) => void;
-  removeNode: (id: string) => void;
+  /** `keepFileUrl`: no libera el archivo local (para poder «Deshacer»). */
+  removeNode: (id: string, options?: RemovalOptions) => void;
   runNodeSimulation: (id: string) => void;
   updateNodePayload: (id: string, patch: NodePayloadPatch) => void;
   updateNodeMeta: (id: string, patch: NodeMetaPatch) => void;
@@ -148,15 +149,33 @@ interface WorkspaceState {
   /** Borra todos los trazos de tinta (se puede deshacer con "Deshacer"). Devuelve cuántos borró. */
   clearInkStrokes: () => number;
   /** Elimina los nodos sin ninguna conexión. Devuelve cuántos borró. */
-  removeOrphanNodes: () => number;
+  removeOrphanNodes: (options?: RemovalOptions) => number;
   /** Deja el lienzo completamente vacío: nodos, cables y tinta. */
-  resetWorkspace: () => void;
+  resetWorkspace: (options?: RemovalOptions) => void;
+  /**
+   * Devuelve al lienzo nodos, cables y tinta borrados (botón «Deshacer» de los
+   * avisos). Solo añade lo que ya no está; los cables huérfanos se descartan.
+   */
+  restoreSnapshot: (snapshot: CanvasSnapshot) => void;
   setOracleModalOpen: (isOpen: boolean) => void;
 
   // Acciones Exclusivas de Ergonomía Móvil
   setMobileCategoryFilter: (filter: "all" | NodeArchetype) => void;
   toggleMiniMap: () => void;
   setActiveMobileSheet: (sheet: MobileSheetType) => void;
+}
+
+/** Opciones de borrado: con `keepFileUrl` el archivo local sigue vivo para «Deshacer». */
+export interface RemovalOptions {
+  keepFileUrl?: boolean;
+}
+
+/** Copia de lo borrado para poder restaurarlo. */
+export interface CanvasSnapshot {
+  nodes: EngineeringNodeData[];
+  connections: NodeConnection[];
+  canvasStrokes?: CanvasStroke[];
+  inkHistory?: InkHistoryEntry[];
 }
 
 /** Paso del historial de tinta: un trazo añadido o un grupo de trazos borrados. */
@@ -1200,10 +1219,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       };
     }),
 
-  removeNode: (id) =>
+  removeNode: (id, options) =>
     set((state) => {
       const target = state.nodes.find((node) => node.id === id);
-      if (target?.type === "file-node") {
+      if (target?.type === "file-node" && !options?.keepFileUrl) {
         revokeLocalFileUrl(target.fileData.downloadUrl);
       }
 
@@ -1802,7 +1821,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     return count;
   },
 
-  removeOrphanNodes: () => {
+  removeOrphanNodes: (options) => {
     const { nodes, connections } = get();
     const connected = new Set<string>();
     for (const c of connections) {
@@ -1813,7 +1832,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     if (orphans.length === 0) return 0;
     const orphanIds = new Set(orphans.map((n) => n.id));
     for (const node of orphans) {
-      if (node.type === "file-node") revokeLocalFileUrl(node.fileData.downloadUrl);
+      if (node.type === "file-node" && !options?.keepFileUrl) {
+        revokeLocalFileUrl(node.fileData.downloadUrl);
+      }
     }
     set((state) => ({
       nodes: state.nodes.filter((n) => !orphanIds.has(n.id)),
@@ -1827,9 +1848,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     return orphans.length;
   },
 
-  resetWorkspace: () => {
+  resetWorkspace: (options) => {
     for (const node of get().nodes) {
-      if (node.type === "file-node") revokeLocalFileUrl(node.fileData.downloadUrl);
+      if (node.type === "file-node" && !options?.keepFileUrl) {
+        revokeLocalFileUrl(node.fileData.downloadUrl);
+      }
     }
     set({
       nodes: [],
@@ -1841,6 +1864,31 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       connectingFrom: null,
     });
   },
+
+  restoreSnapshot: (snapshot) =>
+    set((state) => {
+      const nodeIds = new Set(state.nodes.map((n) => n.id));
+      const nodes = [...state.nodes, ...snapshot.nodes.filter((n) => !nodeIds.has(n.id))];
+      const liveIds = new Set(nodes.map((n) => n.id));
+      const connectionIds = new Set(state.connections.map((c) => c.id));
+      const connections = [
+        ...state.connections,
+        ...snapshot.connections.filter(
+          (c) => !connectionIds.has(c.id) && liveIds.has(c.fromNodeId) && liveIds.has(c.toNodeId)
+        ),
+      ];
+      const strokeIds = new Set(state.canvasStrokes.map((s) => s.id));
+      const canvasStrokes = snapshot.canvasStrokes
+        ? [...snapshot.canvasStrokes.filter((s) => !strokeIds.has(s.id)), ...state.canvasStrokes]
+        : state.canvasStrokes;
+      return {
+        nodes,
+        connections,
+        canvasStrokes,
+        inkHistory:
+          snapshot.inkHistory && state.inkHistory.length === 0 ? snapshot.inkHistory : state.inkHistory,
+      };
+    }),
 
   setOracleModalOpen: (isOpen) =>
     set({

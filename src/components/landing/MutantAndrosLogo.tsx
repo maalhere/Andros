@@ -110,7 +110,7 @@ const MutantLetter: React.FC<MutantLetterProps> = ({
       whileTap={clean ? undefined : { scale: 0.92 }}
       transition={SPRING}
       aria-pressed={pinned}
-      aria-label={`Letter ${LETTERS[index]}${pinned ? " (locked)" : ""}`}
+      aria-label={`Letra ${LETTERS[index]}${pinned ? " (fijada)" : ": pulsa para fijar su tipografía"}`}
       title={pinned ? "Locked — click to release" : "Click to lock this letter"}
       className="relative inline-flex items-center justify-center h-[1.1em] cursor-pointer select-none outline-none focus-visible:ring-2 focus-visible:ring-andros-accent/50 rounded-lg"
     >
@@ -140,7 +140,7 @@ const MutantLetter: React.FC<MutantLetterProps> = ({
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0, opacity: 0 }}
             transition={SPRING}
-            className="absolute -bottom-[0.12em] left-1/2 -ml-[4px] w-2 h-2 rounded-full bg-andros-accent"
+            className="absolute -bottom-[0.12em] left-1/2 -ml-[4px] w-2 h-2 rounded-full bg-andros-accent-fill"
           />
         )}
       </AnimatePresence>

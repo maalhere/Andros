@@ -175,7 +175,7 @@ export const AiChatNodeView: React.FC<AiChatNodeProps> = ({ node }) => {
             hasUserKey
               ? "border-andros-success/40 text-andros-success"
               : needsKey
-                ? "border-andros-accent/50 text-andros-accent"
+                ? "border-andros-accent/50 text-andros-accent-ink"
                 : "border-andros-border text-andros-muted hover:text-andros-primary"
           }`}
         >
@@ -187,7 +187,7 @@ export const AiChatNodeView: React.FC<AiChatNodeProps> = ({ node }) => {
       <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-mono">
         <span
           className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md border ${
-            directCount > 0 ? "border-andros-accent/30 text-andros-accent bg-andros-accent/5" : "border-andros-border text-andros-muted"
+            directCount > 0 ? "border-andros-accent/30 text-andros-accent-ink bg-andros-accent/5" : "border-andros-border text-andros-muted"
           }`}
           title="Nodos cuyos cables entran en este nodo: su contenido vivo se envía como contexto"
         >
@@ -203,7 +203,7 @@ export const AiChatNodeView: React.FC<AiChatNodeProps> = ({ node }) => {
             type="button"
             data-no-drag
             onClick={() => send(RESYNC_PROMPT, true)}
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-andros-accent text-white font-semibold hover:opacity-90 spring-micro"
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-andros-accent-fill text-white font-semibold hover:opacity-90 spring-micro"
             title="Un nodo conectado cambió. Pulsa para volver a evaluar con el contexto nuevo (usa una llamada a la IA)."
           >
             <RefreshCw className="w-3 h-3" />
@@ -220,7 +220,7 @@ export const AiChatNodeView: React.FC<AiChatNodeProps> = ({ node }) => {
             {PLATFORM_LABELS[data.source.platform]} · {data.source.importedCount} mensajes · {data.source.importedAt}
           </span>
           {data.source.url && (
-            <a href={data.source.url} target="_blank" rel="noreferrer" className="shrink-0 hover:text-andros-accent" title="Abrir el chat original">
+            <a href={data.source.url} target="_blank" rel="noreferrer" className="shrink-0 hover:text-andros-accent-ink" title="Abrir el chat original">
               <ArrowUpRight className="w-3 h-3" />
             </a>
           )}
@@ -271,7 +271,7 @@ export const AiChatNodeView: React.FC<AiChatNodeProps> = ({ node }) => {
         )}
         {thinking && (
           <p className="flex items-center gap-1.5 px-3 pb-2.5 text-[11px] text-andros-muted">
-            <Loader2 className="w-3.5 h-3.5 animate-spin text-andros-accent" />
+            <Loader2 className="w-3.5 h-3.5 animate-spin text-andros-accent-ink" />
             {AI_PROVIDER_LABELS[data.provider]} está pensando…
           </p>
         )}
@@ -279,13 +279,13 @@ export const AiChatNodeView: React.FC<AiChatNodeProps> = ({ node }) => {
 
       {data.status === "error" && data.errorMessage && (
         <div className="flex items-start gap-2 p-2.5 rounded-xl bg-andros-accent/10 border border-andros-accent/30" data-no-drag>
-          <AlertCircle className="w-3.5 h-3.5 text-andros-accent shrink-0 mt-0.5" />
+          <AlertCircle className="w-3.5 h-3.5 text-andros-accent-ink shrink-0 mt-0.5" />
           <p className="flex-1 text-[11px] leading-relaxed text-andros-primary">{data.errorMessage}</p>
           {needsKey && (
             <button
               type="button"
               onClick={() => useAiProvidersStore.getState().setKeysModalOpen(true)}
-              className="shrink-0 text-[11px] font-semibold text-andros-accent hover:underline"
+              className="shrink-0 text-[11px] font-semibold text-andros-accent-ink hover:underline"
             >
               Añadir clave
             </button>

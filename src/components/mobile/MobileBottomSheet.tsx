@@ -23,6 +23,9 @@ import { QUICK_ADD_OPTIONS, quickAdd, type QuickAddKind } from "@/lib/canvas/qui
 import { NODE_ARCHETYPE_LABELS, useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { EngineeringNodeData, NodeArchetype } from "@/types/workspace";
 import { useLibraryStore } from "@/store/useLibraryStore";
+import { motion, useReducedMotion } from "framer-motion";
+import { useSwipeToDismiss } from "@/hooks/useSwipeToDismiss";
+import { springOrInstant } from "@/lib/motion";
 
 // ============================================================================
 // Piezas compartidas
@@ -74,7 +77,7 @@ const NodeRow: React.FC<{
 }> = ({ node, onPress, trailing, caption, highlighted = false }) => {
   const content = (
     <>
-      {renderArchetypeIcon(node.type, "w-5 h-5 text-andros-accent shrink-0")}
+      {renderArchetypeIcon(node.type, "w-5 h-5 text-andros-accent-ink shrink-0")}
       <div className="min-w-0 flex-1">
         <div className="text-xs font-semibold text-andros-primary truncate">
           {node.title}
@@ -202,7 +205,7 @@ const ConnectSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             <button
               type="button"
               onClick={cancelConnecting}
-              className="shrink-0 min-h-[44px] px-3 -mr-2 rounded-xl text-[11px] font-medium text-andros-accent flex items-center gap-1 active:scale-95 spring-micro"
+              className="shrink-0 min-h-[44px] px-3 -mr-2 rounded-xl text-[11px] font-medium text-andros-accent-ink flex items-center gap-1 active:scale-95 spring-micro"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
               Cambiar
@@ -274,7 +277,7 @@ const ConnectSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                       <button
                         type="button"
                         onClick={() => removeConnection(link.id)}
-                        className="shrink-0 min-h-[44px] px-3 -mr-2 rounded-xl text-[11px] font-medium text-red-500 flex items-center gap-1 active:scale-95 spring-micro"
+                        className="shrink-0 min-h-[44px] px-3 -mr-2 rounded-xl text-[11px] font-medium text-andros-danger flex items-center gap-1 active:scale-95 spring-micro"
                       >
                         <X className="w-3.5 h-3.5" />
                         Desconectar
@@ -290,7 +293,7 @@ const ConnectSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                   node={node}
                   onPress={() => handleConnect(node.id)}
                   trailing={
-                    <span className="shrink-0 w-8 h-8 rounded-full bg-andros-accent/10 text-andros-accent flex items-center justify-center">
+                    <span className="shrink-0 w-8 h-8 rounded-full bg-andros-accent/10 text-andros-accent-ink flex items-center justify-center">
                       <Check className="w-4 h-4" />
                     </span>
                   }
@@ -352,7 +355,7 @@ const AddSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             }
             className="min-h-[96px] p-3.5 rounded-2xl bg-andros-canvas border border-andros-border flex flex-col items-start gap-2 text-left active:scale-98 spring-micro"
           >
-            <span className="w-9 h-9 rounded-xl bg-andros-accent/10 text-andros-accent flex items-center justify-center">
+            <span className="w-9 h-9 rounded-xl bg-andros-accent/10 text-andros-accent-ink flex items-center justify-center">
               {QUICK_ADD_ICONS[option.kind]}
             </span>
             <span className="min-w-0">
@@ -371,7 +374,7 @@ const AddSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         }}
         className="w-full min-h-[56px] px-3.5 rounded-2xl bg-andros-canvas border border-andros-border flex items-center gap-3 text-left active:scale-98 spring-micro"
       >
-        <span className="w-9 h-9 shrink-0 rounded-xl bg-andros-accent/10 text-andros-accent flex items-center justify-center">
+        <span className="w-9 h-9 shrink-0 rounded-xl bg-andros-accent/10 text-andros-accent-ink flex items-center justify-center">
           <Library className="w-4 h-4" />
         </span>
         <span className="min-w-0">
@@ -397,6 +400,8 @@ const AddSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 export const MobileBottomSheet: React.FC = () => {
   const activeMobileSheet = useWorkspaceStore((s) => s.activeMobileSheet);
   const setActiveMobileSheet = useWorkspaceStore((s) => s.setActiveMobileSheet);
+  const reduced = useReducedMotion() ?? false;
+  const { sheetProps, handleProps } = useSwipeToDismiss(() => setActiveMobileSheet("none"));
 
   if (
     activeMobileSheet === "none" ||
@@ -415,17 +420,26 @@ export const MobileBottomSheet: React.FC = () => {
       className="fixed inset-0 z-50 bg-black/45 backdrop-blur-xs flex flex-col justify-end"
       onClick={closeSheet}
     >
-      <div
+      <motion.div
+        role="dialog"
+        aria-modal="true"
+        aria-label={activeMobileSheet === "connect" ? "Conectar piezas" : "Agregar al lienzo"}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-h-[85vh] overflow-y-auto rounded-t-3xl bg-andros-card border-t border-andros-border shadow-sheet-light dark:shadow-sheet-dark p-5 pb-8 space-y-4 spring-micro"
+        initial={reduced ? { opacity: 0 } : { y: 48, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={springOrInstant(reduced)}
+        {...sheetProps}
+        className="w-full max-h-[85vh] overflow-y-auto rounded-t-3xl bg-andros-card border-t border-andros-border shadow-sheet-light dark:shadow-sheet-dark px-5 pt-2 pb-[max(2rem,calc(env(safe-area-inset-bottom)+1rem))] space-y-4"
       >
-        {/* Píldora de arrastre */}
-        <div className="w-10 h-1 rounded-full bg-andros-border-active mx-auto" />
+        {/* Píldora de arrastre: desliza hacia abajo para cerrar */}
+        <div {...handleProps} className="-mx-5 pt-1.5 pb-1 flex justify-center cursor-grab">
+          <div aria-hidden="true" className="w-10 h-1 rounded-full bg-andros-border-active" />
+        </div>
 
         {activeMobileSheet === "connect" && <ConnectSheet onClose={closeSheet} />}
 
         {activeMobileSheet === "new-node" && <AddSheet onClose={closeSheet} />}
-      </div>
+      </motion.div>
     </div>
   );
 };

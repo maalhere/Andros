@@ -82,7 +82,7 @@ export const WorkspaceQuickSwitcher: React.FC = () => {
                     void openCloudWorkspace(w.id);
                   }}
                   className={`w-full text-left px-2 py-1.5 rounded-lg text-xs truncate hover:bg-andros-border/40 spring-micro ${
-                    w.id === activeId ? "text-andros-accent font-semibold" : "text-andros-primary"
+                    w.id === activeId ? "text-andros-accent-ink font-semibold" : "text-andros-primary"
                   }`}
                 >
                   {w.name}

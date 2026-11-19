@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSubmitGuard } from "@/hooks/useSubmitGuard";
+import { ConsentCheckbox } from "@/components/legal/ConsentCheckbox";
 import { ArrowLeft, Building2, Eye, Loader2, MapPin, Send, Sparkles, Trash2, Trophy, Users } from "lucide-react";
 import { ARENA_TYPE_LABELS, type ArenaPost, type ArenaSubmission, type PortfolioSnapshot } from "@/types/arena";
 import { loadSubmissions, submitToArena, deleteLocalPost } from "@/lib/arena/repository";
@@ -89,7 +91,7 @@ export const ArenaPostDetail: React.FC<{
         <button type="button" className={tabBtn(tab === "solutions")} onClick={() => setTab("solutions")}>
           <Users className="w-3.5 h-3.5" />
           {post.isExample ? `${solutionWord} de ejemplo` : solutionWord}
-          {submissions && <span className="font-mono text-andros-accent">{submissions.length}</span>}
+          {submissions && <span className="font-mono text-andros-accent-ink">{submissions.length}</span>}
         </button>
         <button type="button" className={tabBtn(tab === "apply")} onClick={() => setTab("apply")}>
           <Send className="w-3.5 h-3.5" />
@@ -102,14 +104,14 @@ export const ArenaPostDetail: React.FC<{
           <p className="text-[13px] leading-relaxed text-andros-primary whitespace-pre-line">{post.description}</p>
           <TagRow post={post} />
           <p className="text-[10px] font-mono text-andros-muted flex items-center gap-1">
-            <Sparkles className="w-3 h-3 text-andros-accent" />
+            <Sparkles className="w-3 h-3 text-andros-accent-ink" />
             {post.isExample
               ? "Publicación de ejemplo incluida con Andros"
               : `Etiquetas: ${post.engine === "gemini" ? "escáner IA (Gemini)" : "analizador local"} · calidad ${post.moderation.qualityScore}/100`}
             {post.authorName ? ` · publicado por ${post.authorName}` : ""}
           </p>
           <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => setTab("apply")} className="h-9 px-3.5 rounded-xl bg-andros-accent text-white text-xs font-semibold flex items-center gap-1.5">
+            <button type="button" onClick={() => setTab("apply")} className="h-9 px-3.5 rounded-xl bg-andros-accent-fill text-white text-xs font-semibold flex items-center gap-1.5">
               <Send className="w-3.5 h-3.5" />
               {applyLabel} con mi espacio
             </button>
@@ -124,7 +126,7 @@ export const ArenaPostDetail: React.FC<{
                   deleteLocalPost(post.id);
                   onDeleted(post.id);
                 }}
-                className="h-9 px-3 rounded-xl text-xs text-andros-muted hover:text-red-500 flex items-center gap-1.5"
+                className="h-9 px-3 rounded-xl text-xs text-andros-muted hover:text-andros-danger flex items-center gap-1.5"
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 Eliminar
@@ -139,9 +141,9 @@ export const ArenaPostDetail: React.FC<{
           {submissions === null && <Loader2 className="w-4 h-4 animate-spin text-andros-muted" />}
           {submissions?.length === 0 && (
             <div className="text-center py-8 space-y-2">
-              <Trophy className="w-6 h-6 mx-auto text-andros-muted/60" />
+              <Trophy className="w-6 h-6 mx-auto text-andros-muted" />
               <p className="text-xs text-andros-muted">Aún no hay {solutionWord.toLowerCase()} públicas. ¡Sé la primera persona!</p>
-              <button type="button" onClick={() => setTab("apply")} className="h-8 px-3 rounded-lg bg-andros-accent text-white text-[11px] font-semibold">
+              <button type="button" onClick={() => setTab("apply")} className="h-8 px-3 rounded-lg bg-andros-accent-fill text-white text-[11px] font-semibold">
                 {applyLabel}
               </button>
             </div>
@@ -226,7 +228,11 @@ const ApplyPanel: React.FC<{
   const [snapError, setSnapError] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [isPublic, setIsPublic] = useState(true);
-  const [busy, setBusy] = useState(false);
+  const [consent, setConsent] = useState(false);
+  const [consentError, setConsentError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const submitGuard = useSubmitGuard();
+  const busy = submitGuard.pending;
 
   const currentSnap = useMemo(() => snapshotFromCanvas(currentName, nodes, connections), [currentName, nodes, connections]);
 
@@ -257,24 +263,34 @@ const ApplyPanel: React.FC<{
   const snapshot = choice === CURRENT ? currentSnap : cloudSnap;
   const empty = !snapshot || snapshot.nodeCount === 0;
 
-  const submit = async () => {
-    if (!snapshot || empty) return;
-    setBusy(true);
-    const { notice } = await submitToArena(
-      {
-        post,
-        workspaceId: choice === CURRENT ? currentId : choice,
-        note: note.trim().slice(0, 1500),
-        snapshot,
-        isPublic,
-      },
-      user ? { id: user.id, name: user.name } : null,
-      cloudReady
-    );
-    setBusy(false);
-    void celebrate();
-    onSubmitted(notice);
-  };
+  // Idempotente: un doble clic nunca envía dos postulaciones.
+  const submit = () =>
+    submitGuard.run(async () => {
+      if (!snapshot || empty) return;
+      if (!consent) {
+        setConsentError("Marca la casilla para poder enviar.");
+        document.getElementById("arena-apply-consent")?.focus();
+        return;
+      }
+      setSubmitError(null);
+      try {
+        const { notice } = await submitToArena(
+          {
+            post,
+            workspaceId: choice === CURRENT ? currentId : choice,
+            note: note.trim().slice(0, 1500),
+            snapshot,
+            isPublic,
+          },
+          user ? { id: user.id, name: user.name } : null,
+          cloudReady
+        );
+        void celebrate();
+        onSubmitted(notice);
+      } catch {
+        setSubmitError("No se pudo enviar. Revisa tu conexión e inténtalo de nuevo; no se ha enviado nada.");
+      }
+    });
 
   const option = (active: boolean) =>
     `w-full text-left rounded-xl border px-3 py-2.5 flex items-center gap-3 spring-micro ${
@@ -289,17 +305,17 @@ const ApplyPanel: React.FC<{
 
       <div className="space-y-1.5" role="radiogroup" aria-label="Espacio de trabajo">
         <button type="button" role="radio" aria-checked={choice === CURRENT} onClick={() => choose(CURRENT)} className={option(choice === CURRENT)}>
-          <span className={`w-3.5 h-3.5 rounded-full border-2 shrink-0 ${choice === CURRENT ? "border-andros-accent bg-andros-accent" : "border-andros-border-active"}`} />
+          <span className={`w-3.5 h-3.5 rounded-full border-2 shrink-0 ${choice === CURRENT ? "border-andros-accent bg-andros-accent-fill" : "border-andros-border-active"}`} />
           <span className="min-w-0 flex-1">
             <span className="block text-xs font-semibold text-andros-primary truncate">Lienzo actual · {currentName}</span>
             <span className="block text-[10px] font-mono text-andros-muted">
-              {currentSnap.nodeCount} nodos · {currentSnap.connectionCount} cables
+              <span className="tabular-nums">{currentSnap.nodeCount}</span> nodos · <span className="tabular-nums">{currentSnap.connectionCount}</span> cables
             </span>
           </span>
         </button>
         {others.map((w) => (
           <button key={w.id} type="button" role="radio" aria-checked={choice === w.id} onClick={() => choose(w.id)} className={option(choice === w.id)}>
-            <span className={`w-3.5 h-3.5 rounded-full border-2 shrink-0 ${choice === w.id ? "border-andros-accent bg-andros-accent" : "border-andros-border-active"}`} />
+            <span className={`w-3.5 h-3.5 rounded-full border-2 shrink-0 ${choice === w.id ? "border-andros-accent bg-andros-accent-fill" : "border-andros-border-active"}`} />
             <span className="min-w-0 flex-1">
               <span className="block text-xs font-semibold text-andros-primary truncate">{w.name}</span>
               <span className="block text-[10px] font-mono text-andros-muted">{w.folder ? `${w.folder} · ` : ""}en la nube</span>
@@ -317,7 +333,7 @@ const ApplyPanel: React.FC<{
             <Loader2 className="w-3.5 h-3.5 animate-spin" /> Leyendo el espacio…
           </p>
         )}
-        {snapError && <p className="text-[11px] text-red-500">{snapError}</p>}
+        {snapError && <p role="alert" className="text-[11px] text-andros-danger">{snapError}</p>}
         {snapshot && (
           <>
             <PortfolioMiniMap snapshot={snapshot} height={110} />
@@ -327,7 +343,7 @@ const ApplyPanel: React.FC<{
                 <Eye className="w-3.5 h-3.5" /> Vista previa
               </button>
             </div>
-            {empty && <p className="text-[11px] text-amber-500">Este espacio está vacío: agrega nodos (un modelo 3D, un cálculo, una fuente…) antes de enviarlo.</p>}
+            {empty && <p role="status" className="text-[11px] text-andros-warning">Este espacio está vacío: agrega nodos (un modelo 3D, un cálculo, una fuente…) antes de enviarlo.</p>}
           </>
         )}
       </div>
@@ -341,16 +357,33 @@ const ApplyPanel: React.FC<{
         aria-label="Nota"
       />
 
-      <label className="flex items-center gap-2 text-[11px] text-andros-primary cursor-pointer select-none">
-        <input type="checkbox" checked={isPublic} onChange={(e) => setIsPublic(e.target.checked)} className="accent-[var(--accent-primary)]" />
+      <label className="flex items-center gap-2.5 min-h-[44px] md:min-h-0 text-[11px] text-andros-primary cursor-pointer select-none">
+        <input type="checkbox" checked={isPublic} onChange={(e) => setIsPublic(e.target.checked)} className="w-4 h-4 shrink-0 accent-[var(--accent-fill)]" />
         Mostrar mi {isSolutionType(post) ? "solución" : "portafolio"} en la galería pública de esta publicación
       </label>
+
+      <ConsentCheckbox
+        id="arena-apply-consent"
+        checked={consent}
+        onChange={(v) => {
+          setConsent(v);
+          if (v) setConsentError(null);
+        }}
+        error={consentError}
+      />
+
+      {submitError && (
+        <p role="alert" className="text-[11px] text-andros-danger">
+          {submitError}
+        </p>
+      )}
 
       <button
         type="button"
         onClick={() => void submit()}
         disabled={busy || empty || loadingSnap}
-        className="w-full min-h-[42px] rounded-xl bg-andros-accent text-white text-xs font-semibold flex items-center justify-center gap-1.5 disabled:opacity-40"
+        aria-busy={busy}
+        className="w-full min-h-[44px] rounded-xl bg-andros-accent-fill text-white text-xs font-semibold flex items-center justify-center gap-1.5 disabled:opacity-40 active:scale-[0.96] spring-micro"
       >
         {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
         {busy ? "Enviando…" : isSolutionType(post) ? "Enviar solución con este espacio" : "Postular con este espacio"}
@@ -364,7 +397,7 @@ const ApplyPanel: React.FC<{
 // ----------------------------------------------------------------------------
 
 const TYPE_STYLES: Record<ArenaPost["type"], string> = {
-  challenge: "bg-andros-accent/12 text-andros-accent",
+  challenge: "bg-andros-accent/12 text-andros-accent-ink",
   activity: "bg-sky-500/12 text-sky-600 dark:text-sky-400",
   internship: "bg-andros-success/12 text-andros-success",
   job: "bg-violet-500/12 text-violet-600 dark:text-violet-400",
@@ -379,7 +412,7 @@ export const TagRow: React.FC<{ post: ArenaPost; max?: number }> = ({ post, max 
   return (
     <div className="flex flex-wrap gap-1">
       {post.tags.discipline.map((d) => (
-        <span key={d} className="px-1.5 py-0.5 rounded-full text-[10px] border border-andros-accent/40 text-andros-accent">
+        <span key={d} className="px-1.5 py-0.5 rounded-full text-[10px] border border-andros-accent/40 text-andros-accent-ink">
           {d}
         </span>
       ))}

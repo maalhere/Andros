@@ -28,6 +28,7 @@ import {
 } from "@/store/useWorkspaceStore";
 import type { CanvasInkColor, CanvasInkTip } from "@/types/workspace";
 import { useLibraryStore } from "@/store/useLibraryStore";
+import { SPRING_SNAPPY } from "@/lib/motion";
 
 // ============================================================================
 // 1. INDICADOR DE ZOOM DISCRETO (esquina inferior izquierda)  − 100% +
@@ -38,7 +39,7 @@ import { useLibraryStore } from "@/store/useLibraryStore";
 const ZOOM_STEP = 1.2;
 
 const hudButtonClass =
-  "flex items-center justify-center h-7 min-w-7 px-1.5 rounded-lg text-andros-muted hover:text-andros-primary hover:bg-andros-border/40 active:scale-95 disabled:opacity-35 disabled:pointer-events-none spring-micro";
+  "hit-slop flex items-center justify-center h-7 min-w-7 px-1.5 rounded-lg text-andros-muted hover:text-andros-primary hover:bg-andros-border/40 active:scale-[0.96] disabled:opacity-35 disabled:pointer-events-none spring-micro";
 
 const CanvasZoomIndicator: React.FC = () => {
   const scale = useWorkspaceStore((s) => s.canvasTransform.scale);
@@ -50,7 +51,7 @@ const CanvasZoomIndicator: React.FC = () => {
     <div
       role="toolbar"
       aria-label="Zoom del lienzo"
-      className="fixed left-6 bottom-6 max-[1000px]:bottom-[5.75rem] z-40 flex items-center gap-0.5 px-1 py-1 rounded-xl bg-andros-surface/80 backdrop-blur-xl border border-andros-border font-mono text-[11px] opacity-80 hover:opacity-100 spring-micro"
+      className="fixed left-6 bottom-6 max-[1000px]:bottom-[5.75rem] z-40 flex items-center gap-0.5 p-1 rounded-xl bg-andros-surface/80 backdrop-blur-xl border border-andros-border font-mono text-[11px] opacity-80 hover:opacity-100 spring-micro"
     >
       <button
         type="button"
@@ -68,7 +69,8 @@ const CanvasZoomIndicator: React.FC = () => {
         onClick={() => zoomCanvasAt(1)}
         aria-live="polite"
         title="Volver al 100 %"
-        className="w-11 h-7 text-center tabular-nums text-andros-primary rounded-lg hover:bg-andros-border/40 spring-micro"
+        aria-label={`Zoom ${percent} %. Volver al 100 %`}
+        className="w-11 h-7 text-center font-mono tabular-nums text-andros-primary rounded-lg hover:bg-andros-border/40 active:scale-[0.96] spring-micro"
       >
         {percent}%
       </button>
@@ -190,7 +192,7 @@ const InkToolbar: React.FC = () => {
         aria-pressed={isEraser}
         className={`flex items-center justify-center w-8 h-8 rounded-xl active:scale-95 spring-micro ${
           isEraser
-            ? "text-andros-accent bg-andros-border/70"
+            ? "text-andros-accent-ink bg-andros-border/70"
             : "text-andros-muted hover:text-andros-primary hover:bg-andros-border/40"
         }`}
       >
@@ -284,7 +286,7 @@ const DockButton: React.FC<DockButtonProps> = ({
       className={`relative flex items-center gap-2 h-10 px-3.5 rounded-xl ${
         active
           ? accent
-            ? "text-andros-accent"
+            ? "text-andros-accent-ink"
             : "text-andros-primary"
           : "text-andros-muted hover:text-andros-primary hover:bg-andros-border/30"
       }`}
@@ -346,7 +348,7 @@ const AddMenu: React.FC<{ onClose: () => void; onPickFile: () => void }> = ({
       initial={{ opacity: 0, y: 8, scale: 0.97 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: 6, scale: 0.97 }}
-      transition={{ duration: 0.16 }}
+      transition={SPRING_SNAPPY}
       className="absolute bottom-[calc(100%+12px)] left-1/2 -ml-36 w-72 p-1.5 rounded-2xl bg-andros-card border border-andros-border shadow-hud-light dark:shadow-hud-dark"
     >
       {QUICK_ADD_OPTIONS.map((option) => (
@@ -362,9 +364,10 @@ const AddMenu: React.FC<{ onClose: () => void; onPickFile: () => void }> = ({
             }
             onClose();
           }}
-          className="w-full flex items-center gap-3 px-2.5 py-2 rounded-xl text-left hover:bg-andros-border/40 spring-micro"
+          className="w-full flex items-center gap-3 px-2.5 py-2 rounded-xl text-left hover:bg-andros-border/40 active:scale-[0.98] spring-micro"
         >
-          <span className="w-8 h-8 shrink-0 rounded-lg bg-andros-accent/10 text-andros-accent flex items-center justify-center">
+          {/* Radio interior = 12px (rounded-xl) − 4px de margen → 8px (rounded-lg) */}
+          <span className="w-8 h-8 shrink-0 rounded-lg bg-andros-accent/10 text-andros-accent-ink flex items-center justify-center">
             {QUICK_ADD_ICONS[option.kind]}
           </span>
           <span className="min-w-0">
@@ -463,14 +466,15 @@ export const FloatingHudDock: React.FC = () => {
         <motion.button
           type="button"
           onClick={() => setOracleModalOpen(true)}
-          title="Oráculo IA (Ctrl/⌘ + K)"
+          title="Oráculo IA (O)"
+          aria-keyshortcuts="O"
           data-tour="oracle"
           whileHover={full ? { scale: 1.04 } : undefined}
           whileTap={{ scale: full ? 0.94 : 0.97 }}
           transition={full ? DOCK_SPRING : { duration: 0 }}
           className="flex items-center gap-2 h-10 px-3.5 ml-0.5 rounded-xl bg-andros-primary text-andros-canvas hover:opacity-90 shadow-sm"
         >
-          <Sparkles className="w-4 h-4 text-andros-accent" />
+          <Sparkles className="w-4 h-4 text-andros-accent-ink" />
           <span className="text-[13px] font-semibold">Oráculo IA</span>
         </motion.button>
       </nav>

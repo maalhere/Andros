@@ -316,7 +316,7 @@ export const Model3DPreview: React.FC<Model3DPreviewProps> = ({
           onClick={() => setManualKey(key)}
           className="w-full min-h-[44px] px-3 py-3 rounded-xl border border-dashed border-andros-border-active bg-andros-canvas text-xs font-medium text-andros-primary flex items-center justify-center gap-2 hover:border-andros-accent active:scale-98 spring-micro"
         >
-          <Rotate3d className="w-4 h-4 text-andros-accent" />
+          <Rotate3d className="w-4 h-4 text-andros-accent-ink" />
           <span>Ver pieza en 3D · {formatMegabytes(fileSizeBytes)}</span>
         </button>
       </div>
@@ -333,14 +333,14 @@ export const Model3DPreview: React.FC<Model3DPreviewProps> = ({
 
         {!current && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-andros-muted pointer-events-none">
-            <LoaderCircle className="w-5 h-5 animate-spin text-andros-accent" />
+            <LoaderCircle className="w-5 h-5 animate-spin text-andros-accent-ink" />
             <span className="text-[11px]">Preparando vista 3D…</span>
           </div>
         )}
 
         {current?.phase === "error" && (
           <div className="absolute inset-0 flex items-center justify-center gap-2 px-4 text-center text-[11px] leading-relaxed text-andros-muted">
-            <CircleAlert className="w-4 h-4 shrink-0 text-andros-accent" />
+            <CircleAlert className="w-4 h-4 shrink-0 text-andros-accent-ink" />
             <span>{current.message}</span>
           </div>
         )}
@@ -357,7 +357,7 @@ export const Model3DPreview: React.FC<Model3DPreviewProps> = ({
               aria-label="Centrar la pieza"
               className="absolute right-2 top-2 min-h-[32px] px-2.5 rounded-lg bg-andros-card/90 border border-andros-border text-[11px] font-medium text-andros-primary flex items-center gap-1.5 hover:border-andros-accent active:scale-95 spring-micro"
             >
-              <Crosshair className="w-3.5 h-3.5 text-andros-accent" />
+              <Crosshair className="w-3.5 h-3.5 text-andros-accent-ink" />
               <span>Centrar</span>
             </button>
           </>

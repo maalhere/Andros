@@ -97,7 +97,7 @@ export const CodeLabNodeView: React.FC<CodeLabNodeProps> = ({ node }) => {
     <div className="py-3 space-y-2.5" data-no-drag>
       {linkedModel && (
         <div
-          className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-andros-accent/10 border border-andros-accent/25 text-[10px] font-mono text-andros-accent"
+          className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-andros-accent/10 border border-andros-accent/25 text-[10px] font-mono text-andros-accent-ink"
           title={
             linkedModel.dimensionsMm
               ? "Variables disponibles: model_x (ancho), model_y (profundidad), model_z (alto) en mm"
@@ -122,7 +122,7 @@ export const CodeLabNodeView: React.FC<CodeLabNodeProps> = ({ node }) => {
         rows={5}
         spellCheck={false}
         data-no-drag
-        className="w-full resize-none rounded-xl bg-andros-canvas border border-andros-border focus:border-andros-accent outline-none px-3 py-2 text-[12px] leading-relaxed font-mono text-andros-primary placeholder:text-andros-muted/70 spring-micro"
+        className="w-full resize-none rounded-xl bg-andros-canvas border border-andros-border focus:border-andros-accent outline-none px-3 py-2 text-[12px] leading-relaxed font-mono text-andros-primary placeholder:text-andros-muted spring-micro"
       />
 
       <button
@@ -131,15 +131,15 @@ export const CodeLabNodeView: React.FC<CodeLabNodeProps> = ({ node }) => {
         data-no-drag
         className="w-full min-h-[36px] rounded-xl bg-andros-primary text-andros-canvas text-xs font-semibold flex items-center justify-center gap-1.5 spring-micro active:scale-95"
       >
-        <Play className="w-3.5 h-3.5 text-andros-accent" />
+        <Play className="w-3.5 h-3.5 text-andros-accent-ink" />
         Ejecutar
         <kbd className="text-[10px] font-mono opacity-70">Shift+Enter</kbd>
       </button>
 
       {data.result?.errorMessage && (
         <div className="flex items-start gap-2 p-2.5 rounded-xl bg-red-500/10 border border-red-500/30">
-          <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
-          <p className="text-[11px] font-mono text-red-500 leading-relaxed">{data.result.errorMessage}</p>
+          <AlertCircle className="w-4 h-4 text-andros-danger shrink-0 mt-0.5" />
+          <p className="text-[11px] font-mono text-andros-danger leading-relaxed">{data.result.errorMessage}</p>
         </div>
       )}
 

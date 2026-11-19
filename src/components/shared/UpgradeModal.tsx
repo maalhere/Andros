@@ -86,10 +86,15 @@ export const UpgradeModal: React.FC = () => {
   const animations = useSettingsStore((s) => s.animations);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState<PlanId | null>(null);
+  // Al reabrir se limpia el aviso anterior (ajuste durante el render, sin efecto).
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (open !== prevOpen) {
+    setPrevOpen(open);
+    if (open) setMessage(null);
+  }
 
   useEffect(() => {
     if (!open) return;
-    setMessage(null);
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
     };
@@ -134,7 +139,7 @@ export const UpgradeModal: React.FC = () => {
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-andros-primary">
-                <Crown className="w-4 h-4 text-andros-accent" />
+                <Crown className="w-4 h-4 text-andros-accent-ink" />
                 <h2 className="text-sm font-semibold">Elige tu plan de Andros</h2>
               </div>
               <button type="button" onClick={() => setOpen(false)} aria-label="Cerrar planes" className="p-1.5 rounded-lg text-andros-muted hover:text-andros-primary hover:bg-andros-border/40">
@@ -153,7 +158,7 @@ export const UpgradeModal: React.FC = () => {
                   <div>
                     <div className="flex items-center gap-1.5">
                       <h3 className="text-sm font-semibold text-andros-primary">{plan.name}</h3>
-                      {plan.highlight && <Sparkles className="w-3.5 h-3.5 text-andros-accent" />}
+                      {plan.highlight && <Sparkles className="w-3.5 h-3.5 text-andros-accent-ink" />}
                     </div>
                     <p className="text-[11px] text-andros-muted mt-0.5">{plan.tagline}</p>
                   </div>
@@ -174,7 +179,7 @@ export const UpgradeModal: React.FC = () => {
                     disabled={busy === plan.id}
                     onClick={() => choose(plan.id)}
                     className={`min-h-[40px] rounded-xl text-xs font-semibold active:scale-[0.98] spring-micro ${
-                      plan.highlight ? "bg-andros-accent text-white hover:opacity-90" : "border border-andros-border-active text-andros-primary hover:border-andros-accent"
+                      plan.highlight ? "bg-andros-accent-fill text-white hover:opacity-90" : "border border-andros-border-active text-andros-primary hover:border-andros-accent"
                     }`}
                   >
                     {busy === plan.id ? "Procesando…" : plan.cta}

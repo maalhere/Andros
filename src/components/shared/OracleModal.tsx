@@ -41,6 +41,7 @@ import { countWords, markdownToNoteText } from "@/lib/oracle/markdownDocument";
 import { MarkdownPreview } from "@/components/oracle/MarkdownPreview";
 import { useLibraryStore } from "@/store/useLibraryStore";
 import { referencesMarkdown, toOracleReference } from "@/lib/library/actions";
+import { Kbd } from "./Kbd";
 import type {
   OracleAction,
   OracleEngine,
@@ -424,11 +425,11 @@ const OracleStudio: React.FC = () => {
   };
 
   const segBtn = (active: boolean) =>
-    `flex items-center gap-1.5 h-7 px-2.5 rounded-lg text-[11px] font-medium spring-micro ${
+    `flex items-center gap-1.5 h-9 md:h-7 px-2.5 rounded-lg text-[11px] font-medium active:scale-[0.96] spring-micro ${
       active ? "bg-andros-card text-andros-primary shadow-sm border border-andros-border" : "text-andros-muted hover:text-andros-primary border border-transparent"
     }`;
   const chipClass =
-    "px-2.5 py-1.5 rounded-lg bg-andros-canvas border border-andros-border hover:border-andros-accent/50 text-[11px] font-medium text-andros-primary flex items-center gap-1.5 spring-micro active:scale-95 disabled:opacity-50 disabled:pointer-events-none";
+    "px-2.5 py-1.5 rounded-lg bg-andros-canvas border border-andros-border hover:border-andros-accent/50 text-[11px] font-medium text-andros-primary flex items-center gap-1.5 max-md:min-h-[40px] spring-micro active:scale-[0.96] disabled:opacity-50 disabled:pointer-events-none";
 
   // ==========================================================================
   // Panel izquierdo — Chat
@@ -441,12 +442,12 @@ const OracleStudio: React.FC = () => {
       {/* Cabecera del chat */}
       <div className="hidden md:flex items-center justify-between gap-3 px-5 h-14 border-b border-andros-border shrink-0">
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className="p-1.5 rounded-lg bg-andros-accent/15 text-andros-accent">
+          <div className="p-1.5 rounded-lg bg-andros-accent/15 text-andros-accent-ink">
             <Sparkles className="w-4 h-4" />
           </div>
           <div className="min-w-0">
-            <h2 className="text-[13px] font-semibold text-andros-primary leading-tight">Oráculo IA · Estudio</h2>
-            <p className="text-[10px] font-mono text-andros-muted truncate">
+            <h2 className="text-[13px] font-semibold text-andros-primary leading-tight">Oráculo IA</h2>
+            <p className="text-[10px] font-mono tabular-nums text-andros-muted truncate">
               {`${nodes.length} nodos · ${connections.length} cables en contexto`}
             </p>
           </div>
@@ -460,7 +461,7 @@ const OracleStudio: React.FC = () => {
           <ModeToggle mode={chatMode} onChange={studio.setChatMode} segBtn={segBtn} compact />
         </div>
         <label className="flex items-center gap-2 min-w-0 flex-1 text-[11px] text-andros-muted">
-          <Link2 className="w-3.5 h-3.5 text-andros-accent shrink-0" />
+          <Link2 className="w-3.5 h-3.5 text-andros-accent-ink shrink-0" />
           <span className="hidden sm:inline shrink-0">Referencia</span>
           <select
             value={linkChoice}
@@ -486,7 +487,7 @@ const OracleStudio: React.FC = () => {
       {/* Fuentes citables adjuntas desde la Biblioteca */}
       <div className="px-4 md:px-5 py-2 border-b border-andros-border flex items-center gap-1.5 shrink-0 overflow-x-auto no-scrollbar">
         <span className="flex items-center gap-1 text-[11px] text-andros-muted shrink-0">
-          <Quote className="w-3.5 h-3.5 text-andros-accent" />
+          <Quote className="w-3.5 h-3.5 text-andros-accent-ink" />
           Fuentes
         </span>
         {references.length === 0 && (
@@ -498,7 +499,7 @@ const OracleStudio: React.FC = () => {
             title={r.title}
             className="shrink-0 max-w-[180px] flex items-center gap-1 pl-2 pr-1 h-6 rounded-md bg-andros-canvas border border-andros-border text-[10px] text-andros-primary"
           >
-            <span className="font-mono text-andros-accent">[{i + 1}]</span>
+            <span className="font-mono text-andros-accent-ink">[{i + 1}]</span>
             <span className="truncate">{r.title}</span>
             <button
               type="button"
@@ -515,7 +516,7 @@ const OracleStudio: React.FC = () => {
           onClick={() => useLibraryStore.getState().openLibrary({ origin: "oracle" })}
           className="shrink-0 h-6 px-2 rounded-md border border-dashed border-andros-border-active text-[10px] font-medium text-andros-primary hover:border-andros-accent flex items-center gap-1 spring-micro"
         >
-          <Library className="w-3 h-3 text-andros-accent" />
+          <Library className="w-3 h-3 text-andros-accent-ink" />
           Biblioteca
         </button>
         {references.length > 0 && (
@@ -550,7 +551,7 @@ const OracleStudio: React.FC = () => {
         ))}
         {isThinking && (
           <div className="flex items-center gap-2 text-xs text-andros-muted">
-            <Loader2 className="w-3.5 h-3.5 animate-spin text-andros-accent" />
+            <Loader2 className="w-3.5 h-3.5 animate-spin text-andros-accent-ink" />
             <span>{chatMode === "document" ? "Redactando el documento…" : "Analizando el lienzo…"}</span>
           </div>
         )}
@@ -569,7 +570,7 @@ const OracleStudio: React.FC = () => {
             }
             className={chipClass}
           >
-            <Quote className="w-3.5 h-3.5 text-andros-accent" />
+            <Quote className="w-3.5 h-3.5 text-andros-accent-ink" />
             Estado del arte con mis fuentes
           </button>
         )}
@@ -578,7 +579,7 @@ const OracleStudio: React.FC = () => {
             const Icon = p.icon;
             return (
               <button key={p.id} type="button" disabled={isThinking} onClick={() => void runPrompt(p.prompt)} className={chipClass}>
-                <Icon className="w-3.5 h-3.5 text-andros-accent" />
+                <Icon className="w-3.5 h-3.5 text-andros-accent-ink" />
                 {p.label}
               </button>
             );
@@ -586,15 +587,15 @@ const OracleStudio: React.FC = () => {
         ) : (
           <>
             <button type="button" onClick={quickLayout} disabled={isThinking} className={chipClass}>
-              <LayoutGrid className="w-3.5 h-3.5 text-andros-accent" />
+              <LayoutGrid className="w-3.5 h-3.5 text-andros-accent-ink" />
               Ordenar lienzo
             </button>
             <button type="button" onClick={quickPrintGuide} disabled={isThinking} className={chipClass}>
-              <Boxes className="w-3.5 h-3.5 text-andros-accent" />
+              <Boxes className="w-3.5 h-3.5 text-andros-accent-ink" />
               Guía de impresión
             </button>
             <button type="button" onClick={quickConnectLoose} disabled={isThinking} className={chipClass}>
-              <Network className="w-3.5 h-3.5 text-andros-accent" />
+              <Network className="w-3.5 h-3.5 text-andros-accent-ink" />
               Conectar sueltos
             </button>
             {CANVAS_PROMPTS.map((p) => {
@@ -608,7 +609,7 @@ const OracleStudio: React.FC = () => {
                   onClick={() => void runPrompt(p.prompt)}
                   className={chipClass}
                 >
-                  <Icon className="w-3.5 h-3.5 text-andros-accent" />
+                  <Icon className="w-3.5 h-3.5 text-andros-accent-ink" />
                   {p.label}
                 </button>
               );
@@ -652,10 +653,12 @@ const OracleStudio: React.FC = () => {
             {isThinking ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
           </button>
         </div>
-        <div className="mt-1.5 flex items-center justify-between text-[10px] font-mono text-andros-muted">
-          <span>Enter envía · Shift+Enter salto de línea</span>
+        <div className="mt-1.5 flex items-center justify-between text-[10px] text-andros-muted">
+          <span className="hidden md:flex items-center gap-1">
+            <Kbd>Enter</Kbd> envía · <Kbd>Shift</Kbd>+<Kbd>Enter</Kbd> salto de línea
+          </span>
           {messages.length > 0 && (
-            <button type="button" onClick={studio.clearConversation} className="hover:text-andros-primary">
+            <button type="button" onClick={studio.clearConversation} className="ml-auto min-h-[32px] px-1 hover:text-andros-primary">
               Limpiar chat
             </button>
           )}
@@ -685,7 +688,7 @@ const OracleStudio: React.FC = () => {
           type="button"
           onClick={addToCanvas}
           disabled={!doc.markdown.trim()}
-          className="h-9 px-3.5 rounded-xl bg-andros-accent text-white text-xs font-semibold flex items-center gap-1.5 hover:opacity-90 active:scale-95 spring-micro disabled:opacity-40 shrink-0"
+          className="h-9 px-3.5 rounded-xl bg-andros-accent-fill text-white text-xs font-semibold flex items-center gap-1.5 hover:opacity-90 active:scale-95 spring-micro disabled:opacity-40 shrink-0"
           title="Convertir el documento en un bloque de texto en el centro del lienzo"
         >
           <Plus className="w-4 h-4" />
@@ -755,7 +758,7 @@ const OracleStudio: React.FC = () => {
             onChange={(e) => studio.setMarkdown(e.target.value)}
             spellCheck
             placeholder={"# Título\n\nEscribe en Markdown: **negritas**, listas, tablas | A | B |, y ecuaciones $E = mc^2$.\n\nO pide un borrador al Oráculo en el chat."}
-            className="absolute inset-0 w-full h-full resize-none bg-transparent px-5 md:px-10 py-6 font-mono text-[13px] leading-6 text-andros-primary placeholder:text-andros-muted/70 outline-none"
+            className="absolute inset-0 w-full h-full resize-none bg-transparent px-5 md:px-10 py-6 font-mono text-[13px] leading-6 text-andros-primary placeholder:text-andros-muted outline-none"
           />
         ) : (
           <div className="absolute inset-0 overflow-y-auto">
@@ -764,7 +767,7 @@ const OracleStudio: React.FC = () => {
                 <MarkdownPreview markdown={doc.markdown} />
               ) : (
                 <div className="mt-16 text-center">
-                  <FileText className="w-8 h-8 mx-auto text-andros-muted/60" />
+                  <FileText className="w-8 h-8 mx-auto text-andros-muted" />
                   <p className="mt-3 text-sm font-medium text-andros-primary">El documento aparecerá aquí</p>
                   <p className="mt-1 text-xs text-andros-muted">
                     Pide un borrador al Oráculo o escríbelo tú en «Editar».
@@ -776,17 +779,17 @@ const OracleStudio: React.FC = () => {
         )}
         {isThinking && chatMode === "document" && (
           <div className="absolute inset-x-0 top-0 h-0.5 overflow-hidden bg-andros-accent/15">
-            <div className="h-full w-1/3 bg-andros-accent animate-[andros-progress_1.2s_ease-in-out_infinite]" />
+            <div className="h-full w-1/3 bg-andros-accent-fill animate-[andros-progress_1.2s_ease-in-out_infinite]" />
           </div>
         )}
       </div>
 
       {/* Pie */}
       <div className="flex items-center justify-between gap-3 px-4 md:px-6 h-9 border-t border-andros-border text-[10px] font-mono text-andros-muted shrink-0">
-        <span>
+        <span className="tabular-nums">
           {words} {words === 1 ? "palabra" : "palabras"} · {doc.markdown.length} caracteres
         </span>
-        <span className="truncate">Markdown · tablas · LaTeX · borrador en memoria</span>
+        <span className="truncate">Markdown + LaTeX · borrador sin guardar</span>
       </div>
     </section>
   );
@@ -827,9 +830,8 @@ const OracleStudio: React.FC = () => {
               </button>
             </div>
           </div>
-          <div className="w-9 flex justify-center text-andros-accent">
-            <Sparkles className="w-4 h-4" />
-          </div>
+          {/* Espaciador simétrico al botón de cerrar */}
+          <div className="w-9" aria-hidden="true" />
         </div>
 
         <div className="flex-1 min-h-0 flex">
@@ -846,7 +848,7 @@ const OracleStudio: React.FC = () => {
             {toast.canJump ? (
               <CheckCircle2 className="w-4 h-4 shrink-0 text-andros-success" />
             ) : (
-              <TriangleAlert className="w-4 h-4 shrink-0 text-andros-accent" />
+              <TriangleAlert className="w-4 h-4 shrink-0 text-andros-accent-ink" />
             )}
             <p className="flex-1 min-w-0 text-xs leading-snug text-andros-primary">{toast.message}</p>
             {toast.canJump && (
@@ -927,7 +929,7 @@ const ChatBubble: React.FC<{ message: StudioMessage }> = ({ message: m }) => {
           m.issue ? "bg-andros-accent/10 border-andros-accent/40" : "bg-andros-canvas border-andros-border"
         }`}
       >
-        {m.issue && <TriangleAlert className="inline w-3.5 h-3.5 mr-1.5 -mt-0.5 text-andros-accent" />}
+        {m.issue && <TriangleAlert className="inline w-3.5 h-3.5 mr-1.5 -mt-0.5 text-andros-accent-ink" />}
         {m.text}
         {m.log && (
           <ul className="mt-2 pt-2 border-t border-andros-border space-y-1">

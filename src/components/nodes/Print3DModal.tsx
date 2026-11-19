@@ -586,7 +586,9 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
     }
     setOpenHint("tried");
     void celebrate();
-    window.location.href = `${dest.scheme}${encodeURIComponent(cloudLink)}`;
+    // Protocolo externo del laminador (bambustudio://, prusaslicer://, cura://).
+    const slicerUrl = new URL(`${dest.scheme}${encodeURIComponent(cloudLink)}`);
+    window.location.assign(slicerUrl.href);
   };
 
   const today = new Date().toLocaleDateString("es", { year: "numeric", month: "long", day: "numeric" });
@@ -641,7 +643,7 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
     if (wifi === "searching") {
       return (
         <span role="status" className="inline-flex items-center gap-1.5 text-xs text-andros-muted">
-          <Radar className="w-3.5 h-3.5 shrink-0 animate-pulse text-andros-accent" /> Buscando tu FlashForge Adventurer 3
+          <Radar className="w-3.5 h-3.5 shrink-0 animate-pulse text-andros-accent-ink" /> Buscando tu FlashForge Adventurer 3
           en el Wi-Fi…
         </span>
       );
@@ -663,7 +665,7 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
     if (wifi === "offline") {
       return (
         <span className="inline-flex items-center gap-1.5 text-xs text-andros-muted">
-          <WifiOff className="w-3.5 h-3.5 text-red-500" /> Sin respuesta en {ip} · se usará USB / FlashPrint
+          <WifiOff className="w-3.5 h-3.5 text-andros-danger" /> Sin respuesta en {ip} · se usará USB / FlashPrint
         </span>
       );
     }
@@ -697,7 +699,7 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
           {/* Cabecera */}
           <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-andros-border">
             <div className="flex items-center gap-3 min-w-0">
-              <div className="shrink-0 p-2 rounded-xl bg-andros-accent/10 text-andros-accent">
+              <div className="shrink-0 p-2 rounded-xl bg-andros-accent/10 text-andros-accent-ink">
                 <Printer className="w-5 h-5" />
               </div>
               <div className="min-w-0">
@@ -727,16 +729,16 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
                     <img src={mesh.preview} alt={`Vista previa de ${pieceName || fileName}`} className="w-full h-full object-contain" />
                   ) : mesh.phase === "loading" ? (
                     <span className="flex flex-col items-center gap-2 text-xs text-andros-muted">
-                      <LoaderCircle className="w-6 h-6 animate-spin text-andros-accent" />
+                      <LoaderCircle className="w-6 h-6 animate-spin text-andros-accent-ink" />
                       Analizando la pieza…
                     </span>
                   ) : (
-                    <Printer className="w-10 h-10 text-andros-muted/60" />
+                    <Printer className="w-10 h-10 text-andros-muted" />
                   )}
                 </div>
                 <div className="text-xs text-andros-muted space-y-0.5">
                   <p className="truncate" title={fileName}>{fileName}</p>
-                  <p className="text-andros-primary font-medium">{sizeText ?? "Medidas no disponibles"}</p>
+                  <p className="text-andros-primary font-medium font-mono tabular-nums">{sizeText ?? "Medidas no disponibles"}</p>
                   {job?.stats && phase !== "slicing" && (
                     <p>
                       ≈ {formatDuration(job.stats.printTimeSec)} · {job.stats.filamentGrams.toFixed(0)} g de PLA ·{" "}
@@ -777,7 +779,7 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
                               <button
                                 type="button"
                                 onClick={searchAgain}
-                                className="inline-flex items-center gap-1 text-xs font-semibold text-andros-accent hover:underline"
+                                className="inline-flex items-center gap-1 text-xs font-semibold text-andros-accent-ink hover:underline"
                               >
                                 <RefreshCw className="w-3 h-3" /> Buscar
                               </button>
@@ -785,7 +787,7 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
                             <button
                               type="button"
                               onClick={() => setEditingWifi((v) => !v)}
-                              className="text-xs font-semibold text-andros-accent hover:underline"
+                              className="text-xs font-semibold text-andros-accent-ink hover:underline"
                             >
                               {editingWifi ? "Cerrar" : wifi === "online" ? "Cambiar" : "IP manual"}
                             </button>
@@ -822,12 +824,12 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
                             type="button"
                             disabled={!ip.trim() || wifi === "checking"}
                             onClick={connectWifi}
-                            className="w-full min-h-[40px] rounded-xl bg-andros-accent text-white text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-50 hover:opacity-90 spring-micro"
+                            className="w-full min-h-[40px] rounded-xl bg-andros-accent-fill text-white text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-50 hover:opacity-90 spring-micro"
                           >
                             <Wifi className="w-4 h-4" /> Conectar
                           </button>
                           {wifi === "offline" && status?.error && (
-                            <p role="alert" className="text-[11px] leading-relaxed text-red-500">
+                            <p role="alert" className="text-[11px] leading-relaxed text-andros-danger">
                               {status.error}
                             </p>
                           )}
@@ -858,14 +860,14 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
                           >
                             <span
                               className={`w-9 h-9 rounded-xl flex items-center justify-center ${
-                                selected ? "bg-andros-accent text-white" : "bg-andros-accent/10 text-andros-accent"
+                                selected ? "bg-andros-accent-fill text-white" : "bg-andros-accent/10 text-andros-accent-ink"
                               }`}
                             >
                               {selected ? <Check className="w-5 h-5" /> : option.icon}
                             </span>
                             <span className="text-xs font-semibold leading-tight text-andros-primary">{p.title}</span>
                             {option.recommended && (
-                              <span className="text-[10px] font-semibold uppercase tracking-wide text-andros-accent">
+                              <span className="text-[10px] font-semibold uppercase tracking-wide text-andros-accent-ink">
                                 Recomendado
                               </span>
                             )}
@@ -920,7 +922,7 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
                     ) : (
                       <div role="alert" className="rounded-2xl border border-red-500/60 bg-red-500/10 px-3 py-2.5 space-y-2 text-xs text-andros-primary">
                         <p className="flex items-start gap-2">
-                          <AlertTriangle className="w-4 h-4 shrink-0 mt-px text-red-500" />
+                          <AlertTriangle className="w-4 h-4 shrink-0 mt-px text-andros-danger" />
                           <span>
                             <strong>No cabe:</strong> mide {formatMm(biggest)} mm en su lado más largo y la cama es de 150 mm.
                           </span>
@@ -929,7 +931,7 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
                           <button
                             type="button"
                             onClick={() => toggleAutoScale(true)}
-                            className="w-full min-h-[40px] rounded-xl bg-andros-accent text-white font-semibold flex items-center justify-center gap-2 hover:opacity-90 spring-micro"
+                            className="w-full min-h-[40px] rounded-xl bg-andros-accent-fill text-white font-semibold flex items-center justify-center gap-2 hover:opacity-90 spring-micro"
                           >
                             <Minimize2 className="w-4 h-4" /> Ajustar automáticamente ({fitPercent.toFixed(1)} %)
                           </button>
@@ -988,7 +990,7 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
                       <button
                         type="button"
                         onClick={downloadJob}
-                        className="w-full min-h-[48px] px-3 rounded-2xl bg-andros-accent text-white text-sm font-semibold flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] spring-micro"
+                        className="w-full min-h-[48px] px-3 rounded-2xl bg-andros-accent-fill text-white text-sm font-semibold flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] spring-micro"
                       >
                         <Download className="w-4 h-4 shrink-0" />
                         <span>
@@ -1008,7 +1010,7 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
                       <button
                         type="button"
                         onClick={downloadJob}
-                        className="min-h-[48px] px-3 rounded-2xl bg-andros-accent text-white text-sm font-semibold flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] spring-micro"
+                        className="min-h-[48px] px-3 rounded-2xl bg-andros-accent-fill text-white text-sm font-semibold flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] spring-micro"
                       >
                         <Download className="w-4 h-4 shrink-0" />
                         <span>Descargar {job.fileName.endsWith(".gx") ? ".GX" : ".G"} listo (USB / FlashPrint)</span>
@@ -1018,7 +1020,7 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
                         onClick={openInFlashPrint}
                         className="min-h-[48px] px-3 rounded-2xl border border-andros-border-active bg-andros-card text-andros-primary text-sm font-semibold flex items-center justify-center gap-2 hover:border-andros-accent active:scale-[0.98] spring-micro"
                       >
-                        <ExternalLink className="w-4 h-4 shrink-0 text-andros-accent" />
+                        <ExternalLink className="w-4 h-4 shrink-0 text-andros-accent-ink" />
                         <span>Abrir directo en FlashPrint</span>
                       </button>
                     </div>
@@ -1043,7 +1045,7 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
                       href={FLASHPRINT_DOWNLOAD_URL}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-andros-accent hover:underline"
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-andros-accent-ink hover:underline"
                     >
                       <Download className="w-3.5 h-3.5" /> ¿No tienes FlashPrint 5? Descárgalo gratis (oficial)
                     </a>
@@ -1066,7 +1068,7 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
                         {item.name}
                         <span className="text-andros-muted"> · {item.note}</span>
                       </span>
-                      <a href={item.href} target="_blank" rel="sponsored noopener noreferrer" className="shrink-0 text-andros-accent hover:underline">
+                      <a href={item.href} target="_blank" rel="sponsored noopener noreferrer" className="shrink-0 text-andros-accent-ink hover:underline">
                         Ver
                       </a>
                     </li>
@@ -1080,7 +1082,7 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
                     onClick={() => void downloadOriginal()}
                     className="min-h-[40px] px-3 rounded-xl border border-andros-border-active text-andros-primary text-xs font-medium flex items-center justify-center gap-2 hover:border-andros-accent spring-micro"
                   >
-                    <Download className="w-3.5 h-3.5 text-andros-accent" /> Descargar archivo original ({ext.toUpperCase()})
+                    <Download className="w-3.5 h-3.5 text-andros-accent-ink" /> Descargar archivo original ({ext.toUpperCase()})
                   </button>
                 )}
                 <button
@@ -1088,7 +1090,7 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
                   onClick={() => window.print()}
                   className="min-h-[40px] px-3 rounded-xl border border-andros-border-active text-andros-primary text-xs font-medium flex items-center justify-center gap-2 hover:border-andros-accent spring-micro"
                 >
-                  <Printer className="w-3.5 h-3.5 text-andros-accent" /> Hoja de control (papel / PDF)
+                  <Printer className="w-3.5 h-3.5 text-andros-accent-ink" /> Hoja de control (papel / PDF)
                 </button>
               </div>
             </div>
@@ -1103,7 +1105,7 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
                     type="button"
                     onClick={() => void printNow()}
                     disabled={busy || phase === "printing"}
-                    className="relative w-full min-h-[60px] px-5 rounded-2xl bg-andros-accent text-white text-base font-semibold flex items-center justify-center gap-2.5 overflow-hidden hover:opacity-95 active:scale-[0.99] spring-micro disabled:cursor-default"
+                    className="relative w-full min-h-[60px] px-5 rounded-2xl bg-andros-accent-fill text-white text-base font-semibold flex items-center justify-center gap-2.5 overflow-hidden hover:opacity-95 active:scale-[0.99] spring-micro disabled:cursor-default"
                   >
                     {phase === "slicing" && (
                       <span
@@ -1132,7 +1134,7 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
                     type="button"
                     onClick={() => void downloadOriginal()}
                     disabled={mesh.phase === "loading"}
-                    className="w-full min-h-[60px] px-5 rounded-2xl bg-andros-accent text-white text-base font-semibold flex items-center justify-center gap-2.5 disabled:opacity-50 hover:opacity-95 active:scale-[0.99] spring-micro"
+                    className="w-full min-h-[60px] px-5 rounded-2xl bg-andros-accent-fill text-white text-base font-semibold flex items-center justify-center gap-2.5 disabled:opacity-50 hover:opacity-95 active:scale-[0.99] spring-micro"
                   >
                     {mesh.phase === "loading" ? <LoaderCircle className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
                     {mesh.phase === "loading" ? "Analizando la pieza…" : "Descargar para FlashPrint"}
@@ -1144,7 +1146,7 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
                     onClick={downloadDesktopApp}
                     className="w-full min-h-[48px] px-4 rounded-2xl border border-andros-border-active bg-andros-canvas text-andros-primary text-sm font-semibold flex items-center justify-center gap-2 hover:border-andros-accent active:scale-[0.99] spring-micro"
                   >
-                    <MonitorDown className="w-4 h-4 shrink-0 text-andros-accent" />
+                    <MonitorDown className="w-4 h-4 shrink-0 text-andros-accent-ink" />
                     Descargar App para Windows (Impresión Wi-Fi en 1 clic)
                   </button>
                 )}
@@ -1156,7 +1158,7 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
                   <button
                     type="button"
                     onClick={openInSlicer}
-                    className="min-h-[60px] px-5 rounded-2xl bg-andros-accent text-white text-base font-semibold flex items-center justify-center gap-2.5 hover:opacity-95 active:scale-[0.99] spring-micro"
+                    className="min-h-[60px] px-5 rounded-2xl bg-andros-accent-fill text-white text-base font-semibold flex items-center justify-center gap-2.5 hover:opacity-95 active:scale-[0.99] spring-micro"
                   >
                     <ExternalLink className="w-5 h-5" /> Abrir en {dest.program}
                   </button>
@@ -1165,7 +1167,7 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
                     onClick={() => void downloadOriginal()}
                     className="min-h-[60px] px-4 rounded-2xl border border-andros-border-active text-andros-primary text-sm font-semibold flex items-center justify-center gap-2 hover:border-andros-accent spring-micro"
                   >
-                    <Download className="w-4 h-4 text-andros-accent" /> Descargar
+                    <Download className="w-4 h-4 text-andros-accent-ink" /> Descargar
                   </button>
                 </div>
                 {openHint === "tried" && (

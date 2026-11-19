@@ -138,7 +138,7 @@ export const DownloadPermissionModal: React.FC = () => {
           >
             {/* Cabecera */}
             <div className="flex items-start gap-3">
-              <span className="w-10 h-10 shrink-0 rounded-xl bg-andros-accent/12 text-andros-accent flex items-center justify-center">
+              <span className="w-10 h-10 shrink-0 rounded-xl bg-andros-accent/12 text-andros-accent-ink flex items-center justify-center">
                 <Download className="w-5 h-5" />
               </span>
               <div className="flex-1 min-w-0">
@@ -221,7 +221,7 @@ export const DownloadPermissionModal: React.FC = () => {
                 type="button"
                 onClick={() => approveDownload(current.id)}
                 disabled={starting}
-                className="sm:flex-[1.4] min-h-[44px] px-4 rounded-xl bg-andros-accent text-white text-sm font-semibold flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] spring-micro disabled:opacity-70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-andros-accent"
+                className="sm:flex-[1.4] min-h-[44px] px-4 rounded-xl bg-andros-accent-fill text-white text-sm font-semibold flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] spring-micro disabled:opacity-70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-andros-accent"
               >
                 {starting ? <LoaderCircle className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
                 <span>{starting ? "Preparando descarga…" : "Permitir y descargar"}</span>

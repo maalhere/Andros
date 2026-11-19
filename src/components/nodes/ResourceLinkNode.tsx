@@ -51,11 +51,11 @@ function detectPlatformClientSide(url: string): ResourceLinkPlatform {
 }
 
 const PLATFORM_ICON: Record<ResourceLinkPlatform, React.ReactNode> = {
-  youtube: <Play className="w-4 h-4 text-red-500" />,
-  github: <GitFork className="w-4 h-4 text-andros-accent" />,
-  paper: <BookOpen className="w-4 h-4 text-andros-accent" />,
-  linkedin: <User className="w-4 h-4 text-andros-accent" />,
-  generic: <Link2 className="w-4 h-4 text-andros-accent" />,
+  youtube: <Play className="w-4 h-4 text-andros-danger" />,
+  github: <GitFork className="w-4 h-4 text-andros-accent-ink" />,
+  paper: <BookOpen className="w-4 h-4 text-andros-accent-ink" />,
+  linkedin: <User className="w-4 h-4 text-andros-accent-ink" />,
+  generic: <Link2 className="w-4 h-4 text-andros-accent-ink" />,
 };
 
 /** Datos de cita (solo nodos creados desde la Biblioteca): DOI, PDF y copiar APA/IEEE. */
@@ -74,7 +74,7 @@ const CitationStrip: React.FC<{ citation: ResourceCitationData }> = ({ citation 
     <div className="rounded-xl border border-andros-border bg-andros-canvas/60 px-2.5 py-2 space-y-1.5" data-no-drag>
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[10px] font-mono text-andros-muted">
         <span className="flex items-center gap-1 text-andros-primary">
-          <Quote className="w-3 h-3 text-andros-accent" />
+          <Quote className="w-3 h-3 text-andros-accent-ink" />
           Citable
         </span>
         {citation.designation && <span className="text-andros-primary font-semibold">{citation.designation}</span>}
@@ -104,7 +104,7 @@ const CitationStrip: React.FC<{ citation: ResourceCitationData }> = ({ citation 
   );
 };
 
-export const ResourceLinkNodeView: React.FC<ResourceLinkNodeProps> = ({ node, variant }) => {
+export const ResourceLinkNodeView: React.FC<ResourceLinkNodeProps> = ({ node }) => {
   const updateNodePayload = useWorkspaceStore((s) => s.updateNodePayload);
   const data = node.resourceLinkData;
   const [draftUrl, setDraftUrl] = useState(data.url);
@@ -211,8 +211,8 @@ export const ResourceLinkNodeView: React.FC<ResourceLinkNodeProps> = ({ node, va
     return (
       <div className="py-3 space-y-2.5">
         <div className="flex items-start gap-2 p-2.5 rounded-xl bg-red-500/10 border border-red-500/30">
-          <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
-          <p className="text-xs text-red-500 leading-relaxed">{data.errorMessage || "No se pudo leer este enlace."}</p>
+          <AlertCircle className="w-4 h-4 text-andros-danger shrink-0 mt-0.5" />
+          <p className="text-xs text-andros-danger leading-relaxed">{data.errorMessage || "No se pudo leer este enlace."}</p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -249,7 +249,7 @@ export const ResourceLinkNodeView: React.FC<ResourceLinkNodeProps> = ({ node, va
           type="button"
           onClick={handleClear}
           title="Cambiar enlace"
-          className="text-[10px] text-andros-muted hover:text-andros-accent spring-micro"
+          className="text-[10px] text-andros-muted hover:text-andros-accent-ink spring-micro"
         >
           Cambiar
         </button>
@@ -303,7 +303,7 @@ export const ResourceLinkNodeView: React.FC<ResourceLinkNodeProps> = ({ node, va
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={data.imageUrl}
-              alt=""
+              alt={`Imagen de vista previa de ${data.title || data.url}`}
               className="w-14 h-14 rounded-lg object-cover shrink-0 border border-andros-border"
             />
           )}
@@ -325,7 +325,7 @@ export const ResourceLinkNodeView: React.FC<ResourceLinkNodeProps> = ({ node, va
         target="_blank"
         rel="noopener noreferrer"
         data-no-drag
-        className="flex items-center gap-1.5 text-[11px] font-mono text-andros-accent hover:underline truncate"
+        className="flex items-center gap-1.5 text-[11px] font-mono text-andros-accent-ink hover:underline truncate"
       >
         <ExternalLink className="w-3 h-3 shrink-0" />
         {data.url}

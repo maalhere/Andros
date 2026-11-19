@@ -37,7 +37,7 @@ const components: Components = {
     <ul
       className={`my-3 space-y-1.5 ${
         className?.includes("contains-task-list") ? "list-none pl-1" : "list-disc pl-6"
-      } marker:text-andros-accent`}
+      } marker:text-andros-accent-ink`}
     >
       {children}
     </ul>
@@ -62,7 +62,7 @@ const components: Components = {
       href={href}
       target="_blank"
       rel="noreferrer noopener"
-      className="text-andros-accent underline underline-offset-2 hover:opacity-80"
+      className="text-andros-accent-ink underline underline-offset-2 hover:opacity-80"
     >
       {children}
     </a>

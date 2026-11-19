@@ -12,10 +12,15 @@
     --border-subtle: rgba(45, 45, 42, 0.08);
     --border-active: rgba(45, 45, 42, 0.22);
     --text-primary: #1A1A18;
-    --text-muted: #7C7A75;
+    --text-muted: #6B6964; /* 5.0:1 sobre #F6F5F2 (WCAG AA) */
     --grid-dot: #D5D2CB;
     --accent-primary: #C95A3B; /* Terracota técnico */
     --accent-success: #4F6B58; /* Verde salvia precisión */
+    /* Variantes AA del acento: la marca #C95A3B no llega a 4.5:1 como texto pequeño */
+    --accent-ink: #A9452A; /* texto en acento (5.4:1 sobre fondo) */
+    --accent-fill: #B04A2D; /* fondo sólido con texto blanco (5.4:1) */
+    --danger-ink: #B91C1C;
+    --warning-ink: #B45309;
 
     /* Curvas físicas de transición */
     --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
@@ -37,11 +42,34 @@
     --grid-dot: #1F222A;
     --accent-primary: #3B82F6; /* Cobalto precisión */
     --accent-success: #10B981; /* Esmeralda telemetría */
+    --accent-ink: #5B9BF8; /* texto cobalto (6.3:1 sobre tarjeta) */
+    --accent-fill: #2563EB; /* fondo sólido con texto blanco (5.2:1) */
+    --danger-ink: #F87171;
+    --warning-ink: #FBBF24;
   }
 
   * {
     border-color: var(--border-subtle);
     -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Titulares equilibrados (sin viudas) en todo Andros */
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+
+  /* Foco visible y consistente en ambos motores */
+  :focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 2px;
+  }
+
+  /* Teclas de atajo: siempre monoespaciadas y tabulares */
+  kbd {
+    font-family: var(--font-mono), ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
   }
 
   html,
@@ -170,6 +198,19 @@
   }
 }
 
+/* Capa components: `absolute`/`fixed` (utilities) siguen mandando sobre position. */
+@layer components {
+  /* Área táctil ampliada sin cambiar el tamaño visual (Fitts): puertos y asas pequeñas */
+  .hit-slop {
+    position: relative;
+  }
+  .hit-slop::after {
+    content: "";
+    position: absolute;
+    inset: -10px;
+  }
+}
+
 @layer utilities {
   /* Retícula radial del Lienzo Infinito (28px x 28px) */
   .canvas-grid {
@@ -240,8 +281,84 @@
 
   /* Números tabulares estrictos para telemetría e ingeniería */
   .tabular-telemetry {
+    font-family: var(--font-mono), ui-monospace, monospace;
     font-variant-numeric: tabular-nums;
   }
+
+  /* Texto largo de las páginas legales (columna de lectura ~68ch) */
+  .legal-prose {
+    max-width: 68ch;
+    font-size: 0.9375rem;
+    line-height: 1.7;
+  }
+  .legal-prose h2 {
+    margin-top: 2.5rem;
+    margin-bottom: 0.75rem;
+    font-size: 1.125rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  .legal-prose h3 {
+    margin-top: 1.5rem;
+    margin-bottom: 0.5rem;
+    font-size: 0.9375rem;
+    font-weight: 600;
+  }
+  .legal-prose p,
+  .legal-prose ul {
+    margin-bottom: 1rem;
+  }
+  .legal-prose ul {
+    padding-left: 1.25rem;
+    list-style: disc;
+  }
+  .legal-prose li {
+    margin-bottom: 0.4rem;
+  }
+  .legal-prose li::marker {
+    color: var(--text-muted);
+  }
+  .legal-prose p a,
+  .legal-prose li a {
+    color: var(--accent-ink);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .legal-prose code {
+    font-family: var(--font-mono), ui-monospace, monospace;
+    font-size: 0.8125rem;
+  }
+  .legal-prose .legal-table-wrap {
+    overflow-x: auto;
+    margin-bottom: 1rem;
+    border: 1px solid var(--border-subtle);
+    border-radius: 0.75rem;
+  }
+  .legal-prose table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8125rem;
+  }
+  .legal-prose th,
+  .legal-prose td {
+    padding: 0.625rem 0.75rem;
+    text-align: left;
+    vertical-align: top;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .legal-prose th {
+    font-weight: 600;
+    color: var(--text-muted);
+  }
+  .legal-prose tr:last-child td {
+    border-bottom: 0;
+  }
+
+  /* Margen inferior seguro (iPhone con barra de gestos) */
+  .pb-safe {
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+
 
   /* Ocultar scrollbars en carruseles de filtros móviles */
   .no-scrollbar::-webkit-scrollbar {

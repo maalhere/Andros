@@ -151,7 +151,7 @@ const ProviderRow: React.FC<{ provider: AiProvider }> = ({ provider }) => {
             setTest({ status: "idle" });
           }}
           disabled={!savedKey}
-          className="h-8 px-3 rounded-lg text-[11px] font-medium text-andros-muted hover:text-andros-accent flex items-center gap-1.5 disabled:opacity-40"
+          className="h-8 px-3 rounded-lg text-[11px] font-medium text-andros-muted hover:text-andros-accent-ink flex items-center gap-1.5 disabled:opacity-40"
         >
           <Trash2 className="w-3.5 h-3.5" />
           Borrar clave
@@ -160,7 +160,7 @@ const ProviderRow: React.FC<{ provider: AiProvider }> = ({ provider }) => {
           href={AI_PROVIDER_KEY_URLS[provider]}
           target="_blank"
           rel="noreferrer"
-          className="ml-auto text-[11px] text-andros-accent hover:underline"
+          className="ml-auto text-[11px] text-andros-accent-ink hover:underline"
         >
           Conseguir clave
         </a>
@@ -173,7 +173,7 @@ const ProviderRow: React.FC<{ provider: AiProvider }> = ({ provider }) => {
         </p>
       )}
       {test.status === "error" && (
-        <p className="flex items-start gap-1.5 text-[11px] leading-snug text-andros-accent">
+        <p className="flex items-start gap-1.5 text-[11px] leading-snug text-andros-accent-ink">
           <TriangleAlert className="w-3.5 h-3.5 mt-px shrink-0" />
           {test.message}
         </p>
@@ -211,7 +211,7 @@ export const AiKeysModal: React.FC = () => {
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-andros-primary">
-            <KeyRound className="w-4 h-4 text-andros-accent" />
+            <KeyRound className="w-4 h-4 text-andros-accent-ink" />
             <h2 className="text-sm font-semibold">Claves IA</h2>
           </div>
           <button

@@ -20,6 +20,11 @@ import { MobileBottomSheet } from "@/components/mobile/MobileBottomSheet";
 import { LandingOverlay } from "@/components/landing/LandingOverlay";
 import { useLandingStore } from "@/store/useLandingStore";
 import { OnboardingTour } from "@/components/onboarding/OnboardingTour";
+import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
+import { CommandPalette } from "@/components/shared/CommandPalette";
+import { Toaster } from "@/components/shared/Toaster";
+import { CloudLoadingSkeleton } from "@/components/shared/CloudLoadingSkeleton";
+import { SITE_DESCRIPTION, SITE_TAGLINE, LEGAL_LINKS } from "@/lib/site";
 
 export default function AndrosWorkspacePage() {
   const { isMobile, isMounted } = useDeviceLayout();
@@ -28,9 +33,27 @@ export default function AndrosWorkspacePage() {
   // Ajustes de comodidad: localStorage + perfil de Supabase.
   useSettingsSync();
   const showLanding = useLandingStore((s) => s.phase !== "workspace");
+  // ⌘K / Ctrl+K (paleta) en todas partes; atajos de letra solo en escritorio.
+  useGlobalShortcuts(!isMobile);
 
   if (!isMounted) {
-    return <div className="w-screen h-screen canvas-grid" />;
+    // HTML del servidor: retícula vacía + texto legible para buscadores y
+    // lectores de pantalla (el mismo mensaje que muestra la portada).
+    return (
+      <div className="w-screen h-screen canvas-grid">
+        <main className="sr-only">
+          <h1>Andros: {SITE_TAGLINE}</h1>
+          <p>{SITE_DESCRIPTION}</p>
+          <nav aria-label="Información legal">
+            {LEGAL_LINKS.map((l) => (
+              <a key={l.href} href={l.href}>
+                {l.label}
+              </a>
+            ))}
+          </nav>
+        </main>
+      </div>
+    );
   }
 
   return (
@@ -60,6 +83,13 @@ export default function AndrosWorkspacePage() {
 
       {/* Oráculo IA: Estudio a pantalla completa (chat + documento) en PC y móvil */}
       <OracleModal />
+
+      {/* Esqueleto mientras se descarga el lienzo guardado en la nube */}
+      <CloudLoadingSkeleton isMobile={isMobile} />
+
+      {/* Paleta de comandos (⌘K) y avisos con «Deshacer» */}
+      <CommandPalette />
+      <Toaster />
 
       {/* Tutorial guiado de 4 pasos (1.ª vez en un lienzo vacío o desde ⋯ → Ver tutorial) */}
       <OnboardingTour isMobile={isMobile} />

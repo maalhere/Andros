@@ -4,6 +4,7 @@ import React from "react";
 import { motion } from "framer-motion";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { celebrate } from "@/lib/effects/celebrate";
+import { deleteNodeWithUndo } from "@/lib/canvas/undoable";
 import {
   ArrowLeft,
   ArrowRight,
@@ -259,7 +260,7 @@ const CalcLatexPreview: React.FC<{ node: CalcLatexEngineeringNode }> = ({
                           row === 1
                             ? "bg-andros-canvas text-andros-muted"
                             : isFormula
-                              ? "text-andros-accent font-semibold"
+                              ? "text-andros-accent-ink font-semibold"
                               : columnIndex === 0
                                 ? "text-andros-muted"
                                 : "text-andros-primary"
@@ -322,7 +323,7 @@ const NodeConnectionList: React.FC<{ nodeId: string }> = ({ nodeId }) => {
             className="flex items-center gap-2 pl-2.5 rounded-xl bg-andros-canvas border border-andros-border"
           >
             {isOutgoing ? (
-              <ArrowRight className="w-3.5 h-3.5 text-andros-accent shrink-0" />
+              <ArrowRight className="w-3.5 h-3.5 text-andros-accent-ink shrink-0" />
             ) : (
               <ArrowLeft className="w-3.5 h-3.5 text-andros-muted shrink-0" />
             )}
@@ -341,7 +342,7 @@ const NodeConnectionList: React.FC<{ nodeId: string }> = ({ nodeId }) => {
                 removeConnection(connection.id);
               }}
               aria-label={`Quitar enlace con ${other.title}`}
-              className="min-w-[44px] min-h-[44px] flex items-center justify-center text-andros-muted active:text-red-500 active:scale-95 spring-micro"
+              className="min-w-[44px] min-h-[44px] flex items-center justify-center text-andros-muted active:text-andros-danger active:scale-95 spring-micro"
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -368,7 +369,6 @@ export const EngineeringNode: React.FC<EngineeringNodeProps> = ({
 }) => {
   const selectedNodeId = useWorkspaceStore((s) => s.selectedNodeId);
   const selectNode = useWorkspaceStore((s) => s.selectNode);
-  const removeNode = useWorkspaceStore((s) => s.removeNode);
   const startConnecting = useWorkspaceStore((s) => s.startConnecting);
   const setActiveMobileSheet = useWorkspaceStore((s) => s.setActiveMobileSheet);
   const connectionCount = useWorkspaceStore(
@@ -385,17 +385,17 @@ export const EngineeringNode: React.FC<EngineeringNodeProps> = ({
   const renderTypeIcon = () => {
     switch (node.type) {
       case "file-node":
-        return <FileBox className="w-4 h-4 text-andros-accent shrink-0" />;
+        return <FileBox className="w-4 h-4 text-andros-accent-ink shrink-0" />;
       case "sketch-note-node":
-        return <NotebookPen className="w-4 h-4 text-andros-accent shrink-0" />;
+        return <NotebookPen className="w-4 h-4 text-andros-accent-ink shrink-0" />;
       case "calc-latex-node":
-        return <Sigma className="w-4 h-4 text-andros-accent shrink-0" />;
+        return <Sigma className="w-4 h-4 text-andros-accent-ink shrink-0" />;
       case "resource-link-node":
-        return <Link2 className="w-4 h-4 text-andros-accent shrink-0" />;
+        return <Link2 className="w-4 h-4 text-andros-accent-ink shrink-0" />;
       case "code-lab-node":
-        return <Terminal className="w-4 h-4 text-andros-accent shrink-0" />;
+        return <Terminal className="w-4 h-4 text-andros-accent-ink shrink-0" />;
       case "ai-chat-node":
-        return <Bot className="w-4 h-4 text-andros-accent shrink-0" />;
+        return <Bot className="w-4 h-4 text-andros-accent-ink shrink-0" />;
     }
   };
 
@@ -488,16 +488,16 @@ export const EngineeringNode: React.FC<EngineeringNodeProps> = ({
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
-          <span className="text-[10px] font-mono bg-andros-accent/10 text-andros-accent px-1.5 py-0.5 rounded">
+          <span className="text-[10px] font-mono bg-andros-accent/10 text-andros-accent-ink px-1.5 py-0.5 rounded">
             {node.codeTag}
           </span>
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation();
-              removeNode(node.id);
+              deleteNodeWithUndo(node.id);
             }}
-            className="p-1 rounded-lg text-andros-muted hover:text-red-500 hover:bg-andros-border/40 spring-micro"
+            className="hit-slop p-1 max-md:p-2.5 rounded-lg text-andros-muted hover:text-andros-danger hover:bg-andros-border/40 active:scale-[0.96] spring-micro"
             title="Eliminar nodo"
             aria-label="Eliminar nodo"
           >
@@ -551,7 +551,7 @@ export const EngineeringNode: React.FC<EngineeringNodeProps> = ({
             onClick={handleMobileConnect}
             className="min-h-[44px] px-3.5 rounded-xl bg-andros-border/50 text-xs font-medium text-andros-primary flex items-center gap-1.5 spring-micro active:scale-95"
           >
-            <Cable className="w-3.5 h-3.5 text-andros-accent" />
+            <Cable className="w-3.5 h-3.5 text-andros-accent-ink" />
             <span>Conectar</span>
           </button>
         ) : (
@@ -583,7 +583,7 @@ export const EngineeringNode: React.FC<EngineeringNodeProps> = ({
                 e.stopPropagation();
                 onPortPointerDown(e, node, port);
               }}
-              className={`absolute ${PORT_ANCHOR_CLASSES[port]} -translate-x-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center rounded-full cursor-crosshair touch-none spring-micro ${
+              className={`absolute ${PORT_ANCHOR_CLASSES[port]} hit-slop -translate-x-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center rounded-full cursor-crosshair touch-none spring-micro ${
                 alwaysVisible
                   ? "opacity-100"
                   : "opacity-0 group-hover/node:opacity-100"
@@ -592,10 +592,10 @@ export const EngineeringNode: React.FC<EngineeringNodeProps> = ({
               <span
                 className={`block rounded-full border-2 border-andros-accent spring-micro ${
                   isHighlighted
-                    ? "w-4 h-4 bg-andros-accent ring-4 ring-andros-accent/30"
+                    ? "w-4 h-4 bg-andros-accent-fill ring-4 ring-andros-accent/30"
                     : isOrigin
-                      ? "w-3.5 h-3.5 bg-andros-accent"
-                      : "w-3 h-3 bg-andros-card hover:bg-andros-accent"
+                      ? "w-3.5 h-3.5 bg-andros-accent-fill"
+                      : "w-3 h-3 bg-andros-card hover:bg-andros-accent-fill"
                 }`}
               />
             </button>

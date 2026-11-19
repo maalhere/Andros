@@ -14,6 +14,9 @@ import {
 } from "@/store/useSettingsStore";
 import { collectPreferences } from "@/hooks/useSettingsSync";
 import { requestFileDownload } from "@/lib/downloadWithPermission";
+import { clearInkWithUndo, removeOrphansWithUndo, resetWorkspaceWithUndo } from "@/lib/canvas/undoable";
+import { LEGAL_LINKS } from "@/lib/site";
+import { openCookiePreferences } from "@/lib/consent";
 
 // ----------------------------------------------------------------------------
 // Piezas reutilizables
@@ -87,7 +90,7 @@ const Switch: React.FC<{ checked: boolean; onChange: (v: boolean) => void; label
     aria-label={label}
     onClick={() => onChange(!checked)}
     className={`relative w-11 h-6 rounded-full shrink-0 spring-micro ${
-      checked ? "bg-andros-accent" : "bg-andros-border-active"
+      checked ? "bg-andros-accent-fill" : "bg-andros-border-active"
     }`}
   >
     <span
@@ -114,12 +117,12 @@ const CLEAN_COPY: Record<CleanAction, { label: string; confirm: string; danger: 
   },
   orphans: {
     label: "Eliminar nodos desconectados",
-    confirm: "Se borrarán los nodos que no tienen ningún cable.",
+    confirm: "Se borrarán los nodos que no tienen ningún cable (podrás deshacerlo unos segundos).",
     danger: true,
   },
   reset: {
     label: "Resetear todo el lienzo",
-    confirm: "Se borrarán TODOS los nodos, cables y trazos de este espacio. No se puede deshacer.",
+    confirm: "Se borrarán TODOS los nodos, cables y trazos de este espacio. Podrás deshacerlo durante unos segundos.",
     danger: true,
   },
 };
@@ -131,15 +134,15 @@ const ClearWorkspaceSection: React.FC = () => {
   const nodeCount = useWorkspaceStore((s) => s.nodes.length);
 
   const run = (action: CleanAction) => {
-    const ws = useWorkspaceStore.getState();
+    // Cada borrado muestra un aviso con «Deshacer» (Toaster).
     if (action === "ink") {
-      const n = ws.clearInkStrokes();
+      const n = clearInkWithUndo();
       setResult(n ? `Se borraron ${n} trazo(s) de tinta.` : "No había trazos de tinta.");
     } else if (action === "orphans") {
-      const n = ws.removeOrphanNodes();
+      const n = removeOrphansWithUndo();
       setResult(n ? `Se eliminaron ${n} nodo(s) desconectado(s).` : "No hay nodos desconectados.");
     } else {
-      ws.resetWorkspace();
+      resetWorkspaceWithUndo();
       setResult("Lienzo reseteado. Los cambios se guardan en la nube automáticamente.");
     }
     setPending(null);
@@ -164,7 +167,7 @@ const ClearWorkspaceSection: React.FC = () => {
                 }}
                 className={`w-full min-h-[40px] px-3 rounded-xl border text-xs font-medium flex items-center justify-center gap-2 active:scale-[0.98] spring-micro ${
                   copy.danger
-                    ? "border-red-500/40 text-red-500 hover:bg-red-500/10"
+                    ? "border-red-500/40 text-andros-danger hover:bg-red-500/10"
                     : "border-andros-border text-andros-primary hover:bg-andros-border/40"
                 }`}
               >
@@ -194,7 +197,7 @@ const ClearWorkspaceSection: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => run(action)}
-                      className="min-h-[36px] rounded-lg bg-red-500 text-white text-xs font-semibold hover:opacity-90"
+                      className="min-h-[36px] rounded-lg bg-red-600 text-white text-xs font-semibold hover:opacity-90"
                     >
                       Sí, continuar
                     </button>
@@ -287,7 +290,7 @@ export const QualityOfLifeModal: React.FC = () => {
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-andros-primary">
-                <Settings className="w-4 h-4 text-andros-accent" />
+                <Settings className="w-4 h-4 text-andros-accent-ink" />
                 <h2 className="text-sm font-semibold">Ajustes de comodidad</h2>
               </div>
               <button
@@ -386,6 +389,20 @@ export const QualityOfLifeModal: React.FC = () => {
             <p className="text-[10px] text-andros-muted text-center">
               Tus ajustes se guardan en este navegador y, con sesión, en tu perfil.
             </p>
+            <nav aria-label="Información legal" className="flex flex-wrap justify-center gap-x-3 gap-y-1 text-[11px] text-andros-muted">
+              {LEGAL_LINKS.map((link) => (
+                <a key={link.href} href={link.href} className="min-h-[32px] inline-flex items-center hover:text-andros-primary hover:underline underline-offset-2">
+                  {link.label}
+                </a>
+              ))}
+              <button
+                type="button"
+                onClick={openCookiePreferences}
+                className="min-h-[32px] inline-flex items-center hover:text-andros-primary hover:underline underline-offset-2"
+              >
+                Preferencias de cookies
+              </button>
+            </nav>
           </motion.div>
         </motion.div>
       )}

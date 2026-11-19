@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { motion, useAnimate, useReducedMotion, useSpring, useTransform } from "framer-motion";
-import { ArrowRight, Loader2 } from "lucide-react";
+import { ArrowRight, Loader2, Shuffle } from "lucide-react";
 import { MutantAndrosLogo } from "./MutantAndrosLogo";
 import { BlackHoleCanvas } from "./BlackHoleCanvas";
 import { AndrosMark } from "@/components/brand/AndrosMark";
@@ -11,6 +12,7 @@ import { GoogleGlyph } from "@/components/auth/GoogleAuthButton";
 import { signInWithGoogle } from "@/hooks/useCloudSync";
 import { useCloudStore } from "@/store/useCloudStore";
 import { useLandingStore } from "@/store/useLandingStore";
+import { SiteFooter } from "@/components/legal/SiteFooter";
 
 // ============================================================================
 // ANDROS — LANDING EDITORIAL (Swiss / aeroespacial)
@@ -33,10 +35,11 @@ const EASE = [0.16, 1, 0.3, 1] as const;
 const HOLE_DESKTOP = { x: 0.73, y: 0.47, r: 0.058 };
 const HOLE_MOBILE = { x: 0.5, y: 0.25, r: 0.075 };
 
-const INDEX_ITEMS = [
-  { id: "01", label: "STL/3MF Viewer & Guided Print" },
-  { id: "02", label: "Freehand Ink & CAD Camera" },
-  { id: "03", label: "Semantic Oracle + CodeLab" },
+/** Lo que hace Andros hoy (funciones reales, sin promesas). */
+const FEATURES = [
+  { id: "01", label: "Visor STL/3MF e impresión guiada" },
+  { id: "02", label: "Tinta a mano alzada y cámara CAD" },
+  { id: "03", label: "Oráculo IA, CodeLab y fuentes citables" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -51,7 +54,7 @@ interface SpringButtonProps {
 
 const SpringButton: React.FC<SpringButtonProps> = ({ onClick, disabled, children }) => {
   const ref = useRef<HTMLButtonElement>(null);
-  const springCfg = { stiffness: 260, damping: 16, mass: 0.4 };
+  const springCfg = { stiffness: 450, damping: 32, mass: 0.8 };
   const x = useSpring(0, springCfg);
   const y = useSpring(0, springCfg);
   const innerX = useTransform(x, (v) => v * 0.4);
@@ -80,11 +83,11 @@ const SpringButton: React.FC<SpringButtonProps> = ({ onClick, disabled, children
       onPointerLeave={reset}
       style={{ x, y }}
       whileHover={{ scale: 1.02 }}
-      whileTap={{ scale: 0.95 }}
-      transition={{ type: "spring", stiffness: 420, damping: 18 }}
-      className="group h-12 pl-3.5 pr-5 rounded-lg bg-andros-primary text-andros-canvas text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-andros-accent/60 disabled:cursor-default"
+      whileTap={{ scale: 0.96 }}
+      transition={{ type: "spring", stiffness: 450, damping: 32, mass: 0.8 }}
+      className="group w-full md:w-auto h-12 pl-3.5 pr-5 rounded-xl bg-andros-primary text-andros-canvas text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-andros-accent/60 disabled:cursor-default"
     >
-      <motion.span style={{ x: innerX, y: innerY }} className="flex items-center gap-3">
+      <motion.span style={{ x: innerX, y: innerY }} className="flex items-center justify-center md:justify-start gap-3">
         {children}
       </motion.span>
     </motion.button>
@@ -123,15 +126,9 @@ export const LandingOverlay: React.FC<LandingOverlayProps> = ({ isMobile }) => {
   const [shuffleSignal, setShuffleSignal] = useState(0);
   const [logoScope, animateLogo] = useAnimate<HTMLDivElement>();
   const markRef = useRef<HTMLSpanElement>(null);
-  const fpsRef = useRef<HTMLSpanElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const igniting = phase === "igniting";
   const hole = isMobile ? HOLE_MOBILE : HOLE_DESKTOP;
-
-  // Telemetría real: FPS medidos por el shader (sin re-renderizar React).
-  const handleFps = useCallback((fps: number) => {
-    if (fpsRef.current) fpsRef.current.textContent = String(Math.min(fps, 999));
-  }, []);
 
   // Mientras la portada está abierta, los atajos del lienzo (L, M, B…) no se disparan.
   useEffect(() => {
@@ -209,7 +206,7 @@ export const LandingOverlay: React.FC<LandingOverlayProps> = ({ isMobile }) => {
       ref={rootRef}
       role="dialog"
       aria-modal="true"
-      aria-label="Welcome to Andros"
+      aria-labelledby="andros-landing-title"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.5 }}
@@ -225,22 +222,7 @@ export const LandingOverlay: React.FC<LandingOverlayProps> = ({ isMobile }) => {
         animate={{ opacity: igniting ? 0 : 1 }}
         transition={{ duration: 0.8, delay: igniting ? 0.3 : 0, ease: "easeInOut" }}
       >
-        <BlackHoleCanvas centerX={hole.x} centerY={hole.y} radius={hole.r} onFps={handleFps} />
-
-        {/* Pie de figura técnico junto a la singularidad (solo escritorio) */}
-        {!isMobile && (
-          <div
-            className="absolute whitespace-nowrap font-mono text-[10px] leading-relaxed tracking-wider text-andros-muted"
-            style={{
-              left: `min(calc(${hole.x * 100}% + 0.26 * min(100vw, 100vh)), calc(100% - 20rem))`,
-              top: `calc(${hole.y * 100}% + 0.3 * min(100vw, 100vh))`,
-            }}
-          >
-            <p className="text-andros-primary">FIG. 01 — SCHWARZSCHILD SINGULARITY</p>
-            <p>LENSED ACCRETION DISK · i = 82.5°</p>
-            <p>PHOTON SPHERE r = 1.5 r_s</p>
-          </div>
-        )}
+        <BlackHoleCanvas centerX={hole.x} centerY={hole.y} radius={hole.r} />
       </motion.div>
 
       <div className="relative min-h-full flex flex-col px-4 md:px-10">
@@ -251,31 +233,25 @@ export const LandingOverlay: React.FC<LandingOverlayProps> = ({ isMobile }) => {
             <span ref={markRef} className="block w-7 h-7 shrink-0" style={{ transformOrigin: "0 0" }}>
               <AndrosMark className="w-7 h-7" title="Andros" />
             </span>
-            <motion.span
-              animate={fadeOut}
-              className="font-mono text-[10px] md:text-[11px] tracking-[0.14em] text-andros-muted whitespace-nowrap"
-            >
-              EVENT.HORIZON // <span ref={fpsRef}>60</span>FPS
-            </motion.span>
           </div>
           <motion.div animate={fadeOut} className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShuffleSignal((n) => n + 1)}
+              aria-label="Mezclar las tipografías del logo"
+              title="Mezclar tipografías"
+              className="w-11 h-11 md:w-9 md:h-9 rounded-xl bg-andros-surface backdrop-blur-md border border-andros-border text-andros-muted hover:text-andros-primary shadow-sm active:scale-[0.96] spring-micro flex items-center justify-center"
+            >
+              <Shuffle className="w-4 h-4" aria-hidden="true" />
+            </button>
             <ThemeToggle />
           </motion.div>
         </header>
 
         {/* ---- Punto focal ---- */}
-        <main className="flex-1 flex flex-col justify-end md:justify-center pt-[40vh] md:pt-0 pb-8 md:pb-10">
+        <main className="flex-1 flex flex-col justify-end md:justify-center pt-[34vh] md:pt-0 pb-6 md:pb-10">
           <div className="max-w-[44rem]">
-            <motion.div
-              animate={fadeOut}
-              className="flex items-center gap-3 font-mono text-[10px] md:text-[11px] tracking-[0.18em] text-andros-muted"
-            >
-              <span className="text-andros-accent">§ 00</span>
-              <span className="h-px w-10 bg-andros-border-active" />
-              <span>SPATIAL WORKSPACE · REV 3.0</span>
-            </motion.div>
-
-            <div className="mt-4 md:mt-6 -ml-1">
+            <div className="-ml-1">
               <MutantAndrosLogo
                 ref={logoScope}
                 shuffleSignal={shuffleSignal}
@@ -285,23 +261,19 @@ export const LandingOverlay: React.FC<LandingOverlayProps> = ({ isMobile }) => {
             </div>
 
             <motion.div animate={fadeOut}>
-              <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 font-mono text-[10px] md:text-[11px] tracking-[0.12em] text-andros-muted">
-                <span>{isMobile ? "TAP A LETTER TO LOCK IT" : "HOVER TO MUTATE · CLICK TO LOCK"}</span>
-                <button
-                  type="button"
-                  onClick={() => setShuffleSignal((n) => n + 1)}
-                  className="uppercase text-andros-primary/80 hover:text-andros-accent underline decoration-andros-border-active underline-offset-4 hover:decoration-andros-accent transition-colors"
-                >
-                  Shuffle Typographic DNA
-                </button>
-              </div>
-
-              <p className="mt-8 md:mt-10 max-w-md text-base md:text-lg leading-snug text-andros-primary">
-                Tu lienzo infinito para piezas 3D, cálculos e investigación con IA. Sube una
-                pieza, dibuja tu idea e imprímela en 1 clic.
+              <h1
+                id="andros-landing-title"
+                className="mt-5 md:mt-6 max-w-[22ch] text-2xl md:text-[2rem] font-semibold leading-tight tracking-tight text-andros-primary"
+              >
+                El lienzo de ingeniería donde tus piezas 3D, cálculos y fuentes viven juntos.
+              </h1>
+              <p className="mt-3 max-w-md text-sm md:text-base leading-relaxed text-andros-muted">
+                Sube un STL o 3MF, dibuja encima, enlaza cálculos y papers citables, y redacta el
+                informe con el Oráculo IA. Gratis, sin instalar nada.
               </p>
 
-              <div className="mt-7 flex flex-col items-start gap-3">
+              {/* CTA: en el teléfono se queda pegado abajo mientras se desplaza la portada */}
+              <div className="mt-7 flex flex-col items-stretch md:items-start gap-3 max-md:sticky max-md:bottom-0 max-md:z-10 max-md:-mx-4 max-md:px-4 max-md:pt-3 max-md:pb-[max(0.75rem,env(safe-area-inset-bottom))] max-md:bg-andros-canvas/90 max-md:backdrop-blur-md">
                 {user || cloudDisabled ? (
                   /* Ya hay sesión (portada abierta desde el logo) o modo local sin nube */
                   <SpringButton onClick={() => void handleStart()} disabled={igniting}>
@@ -334,14 +306,28 @@ export const LandingOverlay: React.FC<LandingOverlayProps> = ({ isMobile }) => {
                     type="button"
                     onClick={() => void handleStart()}
                     disabled={igniting}
-                    className="text-xs text-andros-muted hover:text-andros-primary underline decoration-andros-border-active underline-offset-4 hover:decoration-andros-primary transition-colors"
+                    className="min-h-[44px] md:min-h-0 text-xs text-andros-muted hover:text-andros-primary underline decoration-andros-border-active underline-offset-4 hover:decoration-andros-primary transition-colors"
                   >
                     Explorar primero sin cuenta
                   </button>
                 )}
 
+                {!user && !cloudDisabled && (
+                  <p className="max-w-sm text-[11px] leading-relaxed text-andros-muted">
+                    Al continuar aceptas los{" "}
+                    <Link href="/terminos" className="underline underline-offset-2 hover:text-andros-primary">
+                      Términos
+                    </Link>{" "}
+                    y la{" "}
+                    <Link href="/privacidad" className="underline underline-offset-2 hover:text-andros-primary">
+                      Política de Privacidad
+                    </Link>
+                    .
+                  </p>
+                )}
+
                 {cloudError && !user && (
-                  <p role="alert" className="max-w-sm text-xs leading-relaxed text-andros-accent">
+                  <p role="alert" className="max-w-sm text-xs leading-relaxed text-andros-danger">
                     {cloudError}
                   </p>
                 )}
@@ -355,21 +341,23 @@ export const LandingOverlay: React.FC<LandingOverlayProps> = ({ isMobile }) => {
           </div>
         </main>
 
-        {/* ---- Franja de telemetría inferior ---- */}
-        <motion.footer
-          animate={fadeOut}
-          className="pb-4 md:pb-6 grid grid-cols-1 md:grid-cols-3 gap-2 md:gap-3"
-        >
-          {INDEX_ITEMS.map((item) => (
-            <div
-              key={item.id}
-              className="flex items-center gap-3 px-3 py-2.5 border border-andros-border bg-andros-canvas/85 font-mono text-[10px] md:text-[11px] tracking-[0.08em] text-andros-muted"
-            >
-              <span className="text-andros-accent">[{item.id}]</span>
-              <span className="text-andros-primary">{item.label}</span>
-            </div>
-          ))}
-        </motion.footer>
+        {/* ---- Qué incluye + enlaces legales ---- */}
+        <motion.div animate={fadeOut} className="pb-4 md:pb-6 space-y-3">
+          <ul aria-label="Qué incluye Andros" className="grid grid-cols-1 md:grid-cols-3 gap-2 md:gap-3">
+            {FEATURES.map((item) => (
+              <li
+                key={item.id}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-andros-border bg-andros-canvas/85 text-xs text-andros-primary"
+              >
+                <span className="font-mono tabular-nums text-andros-accent-ink" aria-hidden="true">
+                  {item.id}
+                </span>
+                {item.label}
+              </li>
+            ))}
+          </ul>
+          <SiteFooter compact />
+        </motion.div>
       </div>
     </motion.div>
   );

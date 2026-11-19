@@ -28,6 +28,10 @@ import type { LibraryScope, LibrarySearchResponse, LibrarySource } from "@/types
 import { useLibraryStore } from "@/store/useLibraryStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useOracleStudioStore } from "@/store/useOracleStudioStore";
+import { SkeletonList } from "@/components/shared/Skeleton";
+import { useSwipeToDismiss } from "@/hooks/useSwipeToDismiss";
+import { useDeviceLayout } from "@/hooks/useDeviceLayout";
+import { SPRING_SNAPPY } from "@/lib/motion";
 import { PROVIDER_LABELS } from "@/lib/library/citation";
 import { searchOfflineCatalog } from "@/lib/library/offlineCatalog";
 import {
@@ -125,8 +129,11 @@ export const LibraryDrawer: React.FC = () => {
     return () => window.removeEventListener("keydown", onKey);
   }, [open, close]);
 
-  if (typeof document === "undefined") return null;
   const reduced = animations === "reduced";
+  const { isMobile } = useDeviceLayout();
+  const { sheetProps, handleProps } = useSwipeToDismiss(close, isMobile);
+
+  if (typeof document === "undefined") return null;
 
   return createPortal(
     <AnimatePresence>
@@ -144,13 +151,14 @@ export const LibraryDrawer: React.FC = () => {
             aria-modal="true"
             aria-label="Biblioteca de fuentes"
             onPointerDown={(e) => e.stopPropagation()}
-            initial={reduced ? false : { x: 40, opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            exit={reduced ? { opacity: 0 } : { x: 40, opacity: 0 }}
-            transition={reduced ? { duration: 0 } : { type: "spring", stiffness: 420, damping: 36 }}
-            className="w-full md:w-[500px] h-[90vh] md:h-full flex flex-col rounded-t-3xl md:rounded-none md:rounded-l-2xl bg-andros-card border-t md:border-t-0 md:border-l border-andros-border shadow-hud-light dark:shadow-hud-dark"
+            initial={reduced ? false : isMobile ? { y: 40, opacity: 0 } : { x: 40, opacity: 0 }}
+            animate={{ x: 0, y: 0, opacity: 1 }}
+            exit={reduced ? { opacity: 0 } : isMobile ? { y: 40, opacity: 0 } : { x: 40, opacity: 0 }}
+            transition={reduced ? { duration: 0 } : SPRING_SNAPPY}
+            {...sheetProps}
+            className="w-full md:w-[500px] h-[90vh] md:h-full flex flex-col rounded-t-3xl md:rounded-none md:rounded-l-2xl bg-andros-card border-t md:border-t-0 md:border-l border-andros-border shadow-hud-light dark:shadow-hud-dark pb-[env(safe-area-inset-bottom)]"
           >
-            <LibraryContent />
+            <LibraryContent handleProps={handleProps} />
           </motion.aside>
         </motion.div>
       )}
@@ -159,7 +167,7 @@ export const LibraryDrawer: React.FC = () => {
   );
 };
 
-const LibraryContent: React.FC = () => {
+const LibraryContent: React.FC<{ handleProps: React.HTMLAttributes<HTMLDivElement> }> = ({ handleProps }) => {
   const scope = useLibraryStore((s) => s.scope);
   const setScope = useLibraryStore((s) => s.setScope);
   const origin = useLibraryStore((s) => s.origin);
@@ -259,11 +267,11 @@ const LibraryContent: React.FC = () => {
   return (
     <>
       {/* Cabecera */}
-      <div className="px-5 pt-4 pb-3 border-b border-andros-border shrink-0">
-        <div className="md:hidden w-10 h-1 rounded-full bg-andros-border-active mx-auto mb-3" />
+      <div {...handleProps} className="px-5 pt-4 pb-3 border-b border-andros-border shrink-0">
+        <div aria-hidden="true" className="md:hidden w-10 h-1 rounded-full bg-andros-border-active mx-auto mb-3" />
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="p-1.5 rounded-lg bg-andros-accent/15 text-andros-accent">
+            <div className="p-1.5 rounded-lg bg-andros-accent/15 text-andros-accent-ink">
               <Library className="w-4 h-4" />
             </div>
             <div className="min-w-0">
@@ -277,7 +285,7 @@ const LibraryContent: React.FC = () => {
             type="button"
             onClick={close}
             aria-label="Cerrar Biblioteca"
-            className="p-1.5 rounded-lg text-andros-muted hover:text-andros-primary hover:bg-andros-border/40"
+            className="w-11 h-11 md:w-8 md:h-8 -mr-2 md:-mr-1 flex items-center justify-center rounded-lg text-andros-muted hover:text-andros-primary hover:bg-andros-border/40 active:scale-[0.96] spring-micro"
           >
             <X className="w-4 h-4" />
           </button>
@@ -285,9 +293,9 @@ const LibraryContent: React.FC = () => {
 
         {origin === "oracle" && (
           <p className="mt-2.5 text-[11px] text-andros-muted rounded-lg bg-andros-accent/10 border border-andros-accent/25 px-2.5 py-1.5 flex items-center gap-1.5">
-            <Sparkles className="w-3.5 h-3.5 text-andros-accent shrink-0" />
+            <Sparkles className="w-3.5 h-3.5 text-andros-accent-ink shrink-0" />
             Elige fuentes con «Citar en Oráculo»: el documento las citará como [1], [2]…
-            {referenceCount > 0 && <span className="ml-auto font-mono shrink-0">{referenceCount} adjunta(s)</span>}
+            {referenceCount > 0 && <span className="ml-auto font-mono tabular-nums shrink-0">{referenceCount} adjunta(s)</span>}
           </p>
         )}
 
@@ -308,7 +316,7 @@ const LibraryContent: React.FC = () => {
             >
               {t.icon}
               {t.label}
-              {t.id === "saved" && saved.length > 0 && <span className="font-mono text-[10px] text-andros-accent">{saved.length}</span>}
+              {t.id === "saved" && saved.length > 0 && <span className="font-mono text-[10px] text-andros-accent-ink">{saved.length}</span>}
             </button>
           ))}
         </div>
@@ -356,7 +364,7 @@ const LibraryContent: React.FC = () => {
                 }}
                 className={`px-2.5 py-1 rounded-full text-[11px] border spring-micro ${
                   agency === a.id
-                    ? "border-andros-accent text-andros-accent bg-andros-accent/10"
+                    ? "border-andros-accent text-andros-accent-ink bg-andros-accent/10"
                     : "border-andros-border text-andros-muted hover:text-andros-primary"
                 }`}
               >
@@ -399,19 +407,13 @@ const LibraryContent: React.FC = () => {
         )}
 
         {error && (
-          <p role="alert" className="text-xs text-red-500 flex items-center gap-1.5">
+          <p role="alert" className="text-xs text-andros-danger flex items-center gap-1.5">
             <TriangleAlert className="w-3.5 h-3.5" />
             {error}
           </p>
         )}
 
-        {loading && (
-          <div className="space-y-2.5" aria-busy="true">
-            {[0, 1, 2].map((i) => (
-              <div key={i} className="h-28 rounded-xl border border-andros-border bg-andros-canvas animate-pulse" />
-            ))}
-          </div>
-        )}
+        {loading && <SkeletonList count={3} label="Buscando fuentes…" />}
 
         {!loading && response && isSearchTab && (
           <ResponseBanner response={response} />
@@ -464,7 +466,7 @@ const ResponseBanner: React.FC<{ response: LibrarySearchResponse }> = ({ respons
     <div className="space-y-1.5">
       <p className="text-[10px] font-mono text-andros-muted flex flex-wrap items-center gap-x-2 gap-y-1">
         {response.offline ? (
-          <span className="flex items-center gap-1 text-andros-accent">
+          <span className="flex items-center gap-1 text-andros-accent-ink">
             <WifiOff className="w-3 h-3" /> Catálogo sin conexión (fuentes reales verificadas)
           </span>
         ) : live.length > 0 ? (
@@ -520,7 +522,7 @@ const SourceCard: React.FC<{ source: LibrarySource; onToast: (msg: string) => vo
     citeInOracle(s);
   };
 
-  const primary = "h-8 px-2.5 rounded-lg bg-andros-accent text-white text-[11px] font-semibold flex items-center gap-1.5 hover:opacity-90 active:scale-95 spring-micro";
+  const primary = "h-8 px-2.5 rounded-lg bg-andros-accent-fill text-white text-[11px] font-semibold flex items-center gap-1.5 hover:opacity-90 active:scale-95 spring-micro";
   const secondary = "h-8 px-2.5 rounded-lg border border-andros-border text-[11px] font-medium text-andros-primary flex items-center gap-1.5 hover:border-andros-border-active active:scale-95 spring-micro";
 
   return (
@@ -528,11 +530,11 @@ const SourceCard: React.FC<{ source: LibrarySource; onToast: (msg: string) => vo
       <div className="flex items-start gap-3">
         {s.thumbnailUrl && (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={s.thumbnailUrl} alt="" className="w-24 aspect-video rounded-lg object-cover shrink-0 border border-andros-border" />
+          <img src={s.thumbnailUrl} alt={`Miniatura de «${s.title}»`} className="w-24 aspect-video rounded-lg object-cover shrink-0 border border-andros-border" />
         )}
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5 mb-1">
-            <span className="px-1.5 py-0.5 rounded-md bg-andros-accent/10 text-andros-accent text-[9px] font-mono uppercase tracking-wider">
+            <span className="px-1.5 py-0.5 rounded-md bg-andros-accent/10 text-andros-accent-ink text-[9px] font-mono uppercase tracking-wider">
               {KIND_LABELS[s.kind]}
             </span>
             <span className="text-[9px] font-mono uppercase tracking-wider text-andros-muted">
@@ -554,7 +556,7 @@ const SourceCard: React.FC<{ source: LibrarySource; onToast: (msg: string) => vo
           }}
           aria-label={isSaved ? "Quitar de guardadas" : "Guardar fuente"}
           title={isSaved ? "Quitar de guardadas" : "Guardar fuente"}
-          className={`p-1.5 rounded-lg shrink-0 spring-micro ${isSaved ? "text-andros-accent" : "text-andros-muted hover:text-andros-primary"}`}
+          className={`p-1.5 rounded-lg shrink-0 spring-micro ${isSaved ? "text-andros-accent-ink" : "text-andros-muted hover:text-andros-primary"}`}
         >
           {isSaved ? <BookmarkCheck className="w-4 h-4" /> : <BookmarkPlus className="w-4 h-4" />}
         </button>
@@ -568,12 +570,12 @@ const SourceCard: React.FC<{ source: LibrarySource; onToast: (msg: string) => vo
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] font-mono">
         {s.doi && (
-          <a href={`https://doi.org/${s.doi}`} target="_blank" rel="noopener noreferrer" className="text-andros-accent hover:underline flex items-center gap-1">
+          <a href={`https://doi.org/${s.doi}`} target="_blank" rel="noopener noreferrer" className="text-andros-accent-ink hover:underline flex items-center gap-1">
             <ExternalLink className="w-3 h-3" /> DOI {s.doi.length > 32 ? `${s.doi.slice(0, 32)}…` : s.doi}
           </a>
         )}
         {!s.doi && (
-          <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-andros-accent hover:underline flex items-center gap-1">
+          <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-andros-accent-ink hover:underline flex items-center gap-1">
             <ExternalLink className="w-3 h-3" /> Fuente oficial
           </a>
         )}
@@ -654,7 +656,7 @@ const LinkedinComposer: React.FC<{ onToast: (msg: string) => void }> = ({ onToas
         <input className={field} value={author} maxLength={80} onChange={(e) => setAuthor(e.target.value)} placeholder="Autor o empresa (opcional)" aria-label="Autor o empresa" />
         <textarea className={`${field} min-h-[70px] resize-y`} value={summary} maxLength={800} onChange={(e) => setSummary(e.target.value)} placeholder="Resumen en tus palabras (opcional): qué aporta esta referencia" aria-label="Resumen" />
         {error && (
-          <p role="alert" className="text-[11px] text-red-500">
+          <p role="alert" className="text-[11px] text-andros-danger">
             {error}
           </p>
         )}

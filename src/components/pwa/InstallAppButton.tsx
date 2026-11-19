@@ -34,9 +34,9 @@ export const InstallAppButton: React.FC<{ isMobile: boolean }> = ({ isMobile }) 
         onClick={() => void handleClick()}
         title="Instalar Andros como app en este dispositivo"
         aria-label="Instalar App"
-        className="h-9 md:h-8 min-w-[36px] px-2 md:px-2.5 rounded-xl bg-andros-surface backdrop-blur-md border border-andros-border shadow-sm text-andros-primary hover:border-andros-border-active active:scale-95 spring-micro flex items-center justify-center gap-1.5 text-xs font-medium"
+        className="h-11 md:h-9 min-w-11 md:min-w-0 px-2 md:px-2.5 rounded-xl bg-andros-surface backdrop-blur-md border border-andros-border shadow-sm text-andros-primary hover:border-andros-border-active active:scale-[0.96] spring-micro flex items-center justify-center gap-1.5 text-xs font-medium"
       >
-        <MonitorDown className="w-4 h-4 text-andros-accent" />
+        <MonitorDown className="w-4 h-4 text-andros-accent-ink" />
         {!isMobile && <span>Instalar App</span>}
       </button>
       <InstallAppModal open={guideOpen} platform={platform} onClose={closeGuide} />

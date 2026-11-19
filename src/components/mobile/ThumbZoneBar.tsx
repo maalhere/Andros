@@ -11,7 +11,7 @@ import { quickAddSketch } from "@/lib/canvas/quickAdd";
 // ============================================================================
 
 const BASE =
-  "flex-1 min-w-0 min-h-[52px] px-1 rounded-xl flex flex-col items-center justify-center gap-0.5 spring-micro active:scale-95";
+  "flex-1 min-w-0 min-h-[52px] px-1 rounded-xl flex flex-col items-center justify-center gap-0.5 spring-micro active:scale-[0.96]";
 
 export const ThumbZoneBar: React.FC = () => {
   const activeMobileSheet = useWorkspaceStore((s) => s.activeMobileSheet);
@@ -26,8 +26,7 @@ export const ThumbZoneBar: React.FC = () => {
   return (
     <nav
       aria-label="Navegación Táctil Inferior"
-      className="fixed bottom-3 left-3 right-3 z-40 flex items-center gap-1 p-1.5 rounded-2xl bg-andros-surface backdrop-blur-xl border border-andros-border shadow-hud-light dark:shadow-hud-dark"
-      style={{ marginBottom: "env(safe-area-inset-bottom)" }}
+      className="fixed left-3 right-3 bottom-[calc(0.75rem+env(safe-area-inset-bottom))] z-40 flex items-center gap-1 p-1.5 rounded-2xl bg-andros-surface backdrop-blur-xl border border-andros-border shadow-hud-light dark:shadow-hud-dark"
     >
       <button
         type="button"
@@ -70,7 +69,7 @@ export const ThumbZoneBar: React.FC = () => {
         onClick={() => toggle("oracle")}
         className={`${BASE} bg-andros-primary text-andros-canvas shadow-sm`}
       >
-        <Sparkles className="w-[18px] h-[18px] text-andros-accent" />
+        <Sparkles className="w-[18px] h-[18px] text-andros-accent-ink" />
         <span className="text-[11px] font-semibold">Oráculo IA</span>
       </button>
     </nav>

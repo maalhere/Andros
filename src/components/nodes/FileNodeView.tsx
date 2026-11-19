@@ -101,7 +101,7 @@ function detectFileKind(extension: string, mimeType: string): FileKind {
 }
 
 function renderKindIcon(kind: FileKind) {
-  const iconClass = "w-5 h-5 text-andros-accent";
+  const iconClass = "w-5 h-5 text-andros-accent-ink";
   switch (kind) {
     case "cad":
       return <FileBox className={iconClass} />;
@@ -385,9 +385,9 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
           role="alert"
           className="mb-3 rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2.5 flex items-start gap-2"
         >
-          <CircleAlert className="w-4 h-4 shrink-0 mt-0.5 text-red-500" />
+          <CircleAlert className="w-4 h-4 shrink-0 mt-0.5 text-andros-danger" />
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-semibold text-red-500">
+            <p className="text-xs font-semibold text-andros-danger">
               Archivo demasiado pesado (máximo {MAX_FILE_SIZE_LABEL})
             </p>
             <p className="mt-1 text-[11px] leading-relaxed text-andros-primary break-words">
@@ -418,7 +418,7 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
               : "border-andros-border-active bg-andros-canvas hover:border-andros-accent"
           }`}
         >
-          <div className="p-2 rounded-lg bg-andros-accent/10 text-andros-accent">
+          <div className="p-2 rounded-lg bg-andros-accent/10 text-andros-accent-ink">
             <Upload className="w-4 h-4" />
           </div>
           <span className="text-xs font-semibold text-andros-primary">
@@ -448,7 +448,7 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
                 {file.fileName}
               </p>
               <div className="mt-1 flex items-center gap-1.5 min-w-0">
-                <span className="shrink-0 text-[10px] font-mono font-semibold uppercase tabular-nums bg-andros-accent/10 text-andros-accent px-1.5 py-0.5 rounded">
+                <span className="shrink-0 text-[10px] font-mono font-semibold uppercase tabular-nums bg-andros-accent/10 text-andros-accent-ink px-1.5 py-0.5 rounded">
                   {file.extension ? `.${file.extension}` : "sin ext."}
                 </span>
                 <span className="text-[11px] text-andros-muted truncate">
@@ -530,7 +530,7 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
                     ? "bg-red-500"
                     : file.status === "ready"
                       ? "bg-andros-success"
-                      : "bg-andros-accent"
+                      : "bg-andros-accent-fill"
                 }`}
                 style={{
                   width: `${file.status === "error" ? 100 : file.uploadProgress}%`,
@@ -540,7 +540,7 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
             <div className="flex items-center justify-between gap-2 text-[10px] font-mono tabular-telemetry tabular-nums">
               {file.status === "uploading" && (
                 <>
-                  <span className="text-andros-accent">● LEYENDO POR FRAGMENTOS</span>
+                  <span className="text-andros-accent-ink">● LEYENDO POR FRAGMENTOS</span>
                   <span className="text-andros-primary">{file.uploadProgress}%</span>
                 </>
               )}
@@ -551,7 +551,7 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
                 </>
               )}
               {file.status === "error" && (
-                <span className="text-red-500 flex items-start gap-1.5 font-sans text-[11px] leading-relaxed">
+                <span className="text-andros-danger flex items-start gap-1.5 font-sans text-[11px] leading-relaxed">
                   <CircleAlert className="w-3.5 h-3.5 shrink-0 mt-0.5" />
                   <span>{file.errorMessage || "Ocurrió un error con este archivo."}</span>
                 </span>
@@ -562,7 +562,7 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
           {/* Estado del guardado en la nube del usuario */}
           {isReady && !isSignedIn && isLocalOnly && (
             <p className="flex items-start gap-2 rounded-xl bg-andros-accent/5 border border-andros-border px-3 py-2 text-[11px] leading-relaxed text-andros-muted">
-              <LogIn className="w-3.5 h-3.5 shrink-0 mt-0.5 text-andros-accent" />
+              <LogIn className="w-3.5 h-3.5 shrink-0 mt-0.5 text-andros-accent-ink" />
               <span>
                 {isCloudWorthy && file.extension !== "pdf"
                   ? "Inicia sesión con Google arriba para guardar este archivo 3D en tu nube"
@@ -578,13 +578,13 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
           )}
           {isReady && isSignedIn && isLocalOnly && !cloudUploadError && (
             <p className="flex items-center gap-2 text-[11px] text-andros-muted" role="status">
-              <CloudUpload className="w-3.5 h-3.5 shrink-0 text-andros-accent animate-pulse" />
+              <CloudUpload className="w-3.5 h-3.5 shrink-0 text-andros-accent-ink animate-pulse" />
               <span>Guardando en tu nube…</span>
             </p>
           )}
           {isReady && isSignedIn && isLocalOnly && cloudUploadError && (
             <div className="rounded-xl border border-red-500/30 bg-red-500/5 px-3 py-2 space-y-1.5">
-              <p className="flex items-start gap-2 text-[11px] leading-relaxed text-red-500">
+              <p className="flex items-start gap-2 text-[11px] leading-relaxed text-andros-danger">
                 <CircleAlert className="w-3.5 h-3.5 shrink-0 mt-0.5" />
                 <span>
                   No se pudo guardar en tu nube ({cloudUploadError}). El archivo sigue
@@ -596,7 +596,7 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
                 onClick={() => retryFileUpload(node.id)}
                 className={`${touchTarget} px-3 rounded-lg bg-andros-border/50 hover:bg-andros-border text-andros-primary text-[11px] font-medium flex items-center gap-1.5 active:scale-95 spring-micro`}
               >
-                <RefreshCw className="w-3.5 h-3.5 text-andros-accent" />
+                <RefreshCw className="w-3.5 h-3.5 text-andros-accent-ink" />
                 <span>Reintentar</span>
               </button>
             </div>
@@ -607,7 +607,7 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
             <button
               type="button"
               onClick={() => setIsPrintOpen(true)}
-              className="w-full min-h-[44px] px-3 rounded-xl bg-andros-accent text-white text-sm font-semibold flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] spring-micro"
+              className="w-full min-h-[44px] px-3 rounded-xl bg-andros-accent-fill text-white text-sm font-semibold flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] spring-micro"
             >
               <Printer className="w-4 h-4" />
               <span>Imprimir en 3D</span>
@@ -649,7 +649,7 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
               aria-label="Reemplazar por otro archivo"
               className={`${touchTarget} px-3 rounded-xl bg-andros-border/50 hover:bg-andros-border text-andros-primary text-xs font-medium flex items-center justify-center gap-1.5 active:scale-95 spring-micro`}
             >
-              <RefreshCw className="w-3.5 h-3.5 text-andros-accent" />
+              <RefreshCw className="w-3.5 h-3.5 text-andros-accent-ink" />
               <span>Reemplazar</span>
             </button>
 
@@ -658,7 +658,7 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
               onClick={handleRemoveFile}
               title="Quitar archivo del nodo"
               aria-label="Quitar archivo del nodo"
-              className={`${touchTarget} px-2.5 rounded-xl bg-andros-border/50 hover:bg-andros-border text-andros-muted hover:text-red-500 flex items-center justify-center active:scale-95 spring-micro`}
+              className={`${touchTarget} px-2.5 rounded-xl bg-andros-border/50 hover:bg-andros-border text-andros-muted hover:text-andros-danger flex items-center justify-center active:scale-95 spring-micro`}
             >
               <Trash2 className="w-3.5 h-3.5" />
             </button>

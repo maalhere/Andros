@@ -12,6 +12,9 @@ import {
 import "./globals.css";
 import { PwaRegister } from "@/components/shared/PwaRegister";
 import { DownloadPermissionModal } from "@/components/modals/DownloadPermissionModal";
+import { CookieBanner } from "@/components/legal/CookieBanner";
+import { AnalyticsGate } from "@/components/legal/AnalyticsGate";
+import { SITE_DESCRIPTION, SITE_NAME, SITE_TAGLINE, SITE_URL } from "@/lib/site";
 
 // ============================================================================
 // TIPOGRAFÍAS — Todas se descargan en el build y se sirven desde Andros
@@ -86,10 +89,28 @@ const fontVariables = [
 ].join(" ");
 
 export const metadata: Metadata = {
-  title: "Andros — Engineering Canvas & Research Workspace",
-  description:
-    "Plataforma colaborativa de ingeniería e investigación con arquitectura Dual-Engine.",
-  applicationName: "Andros",
+  metadataBase: new URL(SITE_URL),
+  title: {
+    default: `${SITE_NAME} — ${SITE_TAGLINE}`,
+    template: `%s · ${SITE_NAME}`,
+  },
+  description: SITE_DESCRIPTION,
+  applicationName: SITE_NAME,
+  alternates: { canonical: "/" },
+  openGraph: {
+    type: "website",
+    locale: "es_ES",
+    url: "/",
+    siteName: SITE_NAME,
+    title: `${SITE_NAME} — ${SITE_TAGLINE}`,
+    description: SITE_DESCRIPTION,
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: `${SITE_NAME} — ${SITE_TAGLINE}`,
+    description: SITE_DESCRIPTION,
+  },
+  robots: { index: true, follow: true },
   manifest: "/manifest.webmanifest",
   // iOS / Safari: instalar en pantalla de inicio sin barra de navegador.
   appleWebApp: { capable: true, title: "Andros", statusBarStyle: "black-translucent" },
@@ -120,6 +141,9 @@ export default function RootLayout({
       <body className="bg-andros-canvas text-andros-primary font-sans antialiased selection:bg-andros-accent/20">
         {children}
         <PwaRegister />
+        {/* Consentimiento de cookies: la analítica opcional solo carga tras «Aceptar todas» */}
+        <CookieBanner />
+        <AnalyticsGate />
         {/* Ninguna descarga sin permiso explícito (requestFileDownload) */}
         <DownloadPermissionModal />
       </body>

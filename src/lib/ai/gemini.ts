@@ -7,8 +7,18 @@
 // ============================================================================
 
 import { createHash } from "node:crypto";
+import dns from "node:dns";
 import type { OracleHistoryTurn, OracleIssue } from "@/types/oracle";
 import { parseJsonText } from "@/lib/ai/jsonText";
+
+// Muchas redes domésticas y de Windows anuncian IPv6 sin ruta real: Node prueba
+// primero la dirección AAAA y `fetch` se queda colgado hasta el timeout. Con
+// IPv4 primero se evitan esperas de 25 s por intento.
+try {
+  dns.setDefaultResultOrder("ipv4first");
+} catch {
+  // Entorno sin `dns` configurable: se ignora.
+}
 
 /**
  * Modelos de Gemini en orden de preferencia (`GEMINI_MODEL` manda sobre todos).
@@ -90,6 +100,34 @@ export class ProviderFailure extends Error {
 const isTimeout = (error: unknown) =>
   error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
 
+/** Códigos de red de Node/undici: sin conexión, DNS caído o socket cortado. */
+const NETWORK_CODES = new Set([
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "ENETUNREACH",
+  "EHOSTUNREACH",
+  "ETIMEDOUT",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_SOCKET",
+]);
+
+/**
+ * `fetch failed` (TypeError de undici) o un código de red en `cause`: el fallo
+ * es de la conexión del servidor, no del modelo. Probar los demás modelos solo
+ * haría esperar al usuario, así que la cadena se corta al instante.
+ */
+export const isNetworkError = (error: unknown): boolean => {
+  if (!(error instanceof Error)) return false;
+  const cause = (error as { cause?: unknown }).cause;
+  const code =
+    cause && typeof cause === "object" && "code" in cause
+      ? String((cause as { code: unknown }).code)
+      : "";
+  return NETWORK_CODES.has(code) || (error.name === "TypeError" && /fetch failed/i.test(error.message));
+};
+
 const isInvalidKeyError = (error: unknown) =>
   error instanceof GeminiHttpError &&
   (error.status === 401 ||
@@ -116,6 +154,13 @@ function describeGeminiFailure(
     .map((e) => e.error)
     .filter((e): e is GeminiHttpError => e instanceof GeminiHttpError);
 
+  if (errors.some((e) => isNetworkError(e.error))) {
+    return {
+      code: "network",
+      message:
+        "El servidor de Andros no pudo conectar con Google (sin red o DNS caído). Comprueba la conexión a Internet y vuelve a intentarlo.",
+    };
+  }
   if (errors.some((e) => isInvalidKeyError(e.error))) {
     if (userKey) {
       return {
@@ -186,6 +231,7 @@ export async function callGemini(
       errors.push({ model, error });
       console.warn(`[gemini] ${model} falló:`, error instanceof Error ? error.message : error);
       if (isInvalidKeyError(error)) break; // Con una clave inválida ningún modelo servirá.
+      if (isNetworkError(error)) break; // Sin red ningún modelo responderá: fallo inmediato.
       if (error instanceof GeminiHttpError && error.status === 404) {
         retiredModels.set(`${scope}:${model}`, Date.now() + RETIRED_TTL_MS);
       } else {

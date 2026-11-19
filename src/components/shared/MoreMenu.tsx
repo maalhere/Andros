@@ -23,6 +23,9 @@ import { useWorkspaceManagerStore } from "@/store/useWorkspaceManagerStore";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { useOnboardingStore } from "@/store/useOnboardingStore";
 import { useAiProvidersStore } from "@/store/useAiProvidersStore";
+import { clearInkWithUndo, resetWorkspaceWithUndo } from "@/lib/canvas/undoable";
+import { LEGAL_LINKS } from "@/lib/site";
+import { openCookiePreferences } from "@/lib/consent";
 
 // ============================================================================
 // ANDROS — MENÚ "⋯ MÁS OPCIONES" (barra superior)
@@ -53,11 +56,11 @@ const ClearWorkspaceDialog: React.FC<{ onClose: () => void }> = ({ onClose }) =>
   }, [onClose]);
 
   const clearInk = () => {
-    useWorkspaceStore.getState().clearInkStrokes();
+    clearInkWithUndo();
     onClose();
   };
   const clearAll = () => {
-    useWorkspaceStore.getState().resetWorkspace();
+    resetWorkspaceWithUndo();
     onClose();
   };
 
@@ -87,14 +90,15 @@ const ClearWorkspaceDialog: React.FC<{ onClose: () => void }> = ({ onClose }) =>
             type="button"
             onClick={onClose}
             aria-label="Cerrar"
-            className="min-w-[36px] min-h-[36px] -mr-2 -mt-1 rounded-xl flex items-center justify-center text-andros-muted hover:text-andros-primary hover:bg-andros-border/40 spring-micro"
+            className="min-w-[44px] min-h-[44px] -mr-2.5 -mt-2 rounded-xl flex items-center justify-center text-andros-muted hover:text-andros-primary hover:bg-andros-border/40 spring-micro"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
         <p className="mt-1.5 text-xs leading-relaxed text-andros-muted">
-          Este espacio tiene {nodeCount} pieza(s) y {strokeCount} dibujo(s). Borrar no se puede
-          deshacer.
+          Este espacio tiene <span className="tabular-nums">{nodeCount}</span> pieza(s) y{" "}
+          <span className="tabular-nums">{strokeCount}</span> dibujo(s). Podrás deshacerlo durante
+          unos segundos.
         </p>
 
         <div className="mt-4 space-y-2">
@@ -111,7 +115,7 @@ const ClearWorkspaceDialog: React.FC<{ onClose: () => void }> = ({ onClose }) =>
             type="button"
             onClick={clearAll}
             disabled={nodeCount === 0 && strokeCount === 0}
-            className="w-full h-11 rounded-xl bg-red-500 text-white text-sm font-semibold hover:bg-red-600 flex items-center justify-center gap-2 active:scale-[0.98] spring-micro disabled:opacity-40"
+            className="w-full h-11 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 flex items-center justify-center gap-2 active:scale-[0.98] spring-micro disabled:opacity-40"
           >
             <Trash2 className="w-4 h-4" />
             Borrar todo y empezar de cero
@@ -212,7 +216,7 @@ export const MoreMenu: React.FC = () => {
         aria-expanded={open}
         aria-label="Más opciones"
         title="Más opciones"
-        className="w-9 h-9 md:w-8 md:h-8 rounded-xl bg-andros-surface backdrop-blur-md border border-andros-border shadow-sm text-andros-muted hover:text-andros-primary hover:border-andros-border-active active:scale-95 spring-micro flex items-center justify-center"
+        className="w-11 h-11 md:w-9 md:h-9 rounded-xl bg-andros-surface backdrop-blur-md border border-andros-border shadow-sm text-andros-muted hover:text-andros-primary hover:border-andros-border-active active:scale-[0.96] spring-micro flex items-center justify-center"
       >
         <MoreHorizontal className="w-4 h-4" />
       </button>
@@ -225,7 +229,8 @@ export const MoreMenu: React.FC = () => {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -4, scale: 0.98 }}
             transition={{ duration: 0.14 }}
-            className="absolute right-0 top-11 md:top-10 w-60 p-1.5 rounded-2xl bg-andros-card border border-andros-border shadow-hud-light dark:shadow-hud-dark origin-top-right"
+            aria-label="Más opciones"
+            className="absolute right-0 top-[3.25rem] md:top-11 w-60 p-1.5 rounded-2xl bg-andros-card border border-andros-border shadow-hud-light dark:shadow-hud-dark origin-top-right"
           >
             {items.map((item, index) => (
               <React.Fragment key={item.id}>
@@ -237,17 +242,36 @@ export const MoreMenu: React.FC = () => {
                     setOpen(false);
                     item.onSelect();
                   }}
-                  className={`w-full flex items-center gap-2.5 px-2.5 py-2 min-h-[40px] rounded-xl text-[13px] text-left spring-micro ${
+                  className={`w-full flex items-center gap-2.5 px-2.5 py-2 min-h-[44px] md:min-h-[38px] rounded-xl text-[13px] text-left active:scale-[0.98] spring-micro ${
                     item.danger
-                      ? "text-red-500 hover:bg-red-500/10"
+                      ? "text-andros-danger hover:bg-red-500/10"
                       : "text-andros-primary hover:bg-andros-border/40"
                   }`}
                 >
-                  <span className={item.danger ? "text-red-500" : "text-andros-muted"}>{item.icon}</span>
+                  <span className={item.danger ? "text-andros-danger" : "text-andros-muted"}>{item.icon}</span>
                   {item.label}
                 </button>
               </React.Fragment>
             ))}
+            {/* Información legal: enlaces discretos al pie del menú */}
+            <div className="h-px bg-andros-border my-1" />
+            <div className="px-2.5 py-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-andros-muted">
+              {LEGAL_LINKS.map((link) => (
+                <a key={link.href} href={link.href} className="min-h-[28px] inline-flex items-center hover:text-andros-primary hover:underline underline-offset-2">
+                  {link.label}
+                </a>
+              ))}
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  openCookiePreferences();
+                }}
+                className="min-h-[28px] inline-flex items-center hover:text-andros-primary hover:underline underline-offset-2"
+              >
+                Cookies: preferencias
+              </button>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

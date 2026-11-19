@@ -253,7 +253,7 @@ export const InstallAppModal: React.FC<InstallAppModalProps> = ({ open, platform
             </div>
 
             {platform === "firefox" && (
-              <p className="mt-3 text-[11px] leading-relaxed text-andros-accent">
+              <p className="mt-3 text-[11px] leading-relaxed text-andros-accent-ink">
                 Firefox de escritorio no instala apps web. Abre Andros en Chrome o Edge y sigue
                 estos pasos.
               </p>
@@ -266,9 +266,9 @@ export const InstallAppModal: React.FC<InstallAppModalProps> = ({ open, platform
                   key={index}
                   className="flex items-center gap-3.5 p-3 rounded-2xl bg-andros-canvas border border-andros-border"
                 >
-                  <div className="relative w-14 h-14 shrink-0 rounded-xl bg-andros-accent/10 text-andros-accent flex items-center justify-center">
+                  <div className="relative w-14 h-14 shrink-0 rounded-xl bg-andros-accent/10 text-andros-accent-ink flex items-center justify-center">
                     {step.icon}
-                    <span className="absolute -top-1.5 -left-1.5 w-5 h-5 rounded-full bg-andros-accent text-white text-[11px] font-bold flex items-center justify-center">
+                    <span className="absolute -top-1.5 -left-1.5 w-5 h-5 rounded-full bg-andros-accent-fill text-white text-[11px] font-bold flex items-center justify-center">
                       {index + 1}
                     </span>
                   </div>

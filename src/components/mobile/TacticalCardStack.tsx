@@ -61,7 +61,7 @@ export const TacticalCardStack: React.FC = () => {
           onClick={toggleMiniMap}
           className={`shrink-0 px-2.5 py-1.5 rounded-xl border text-xs font-mono flex items-center gap-1.5 spring-micro ${
             isMiniMapVisible
-              ? "bg-andros-accent/15 border-andros-accent text-andros-accent"
+              ? "bg-andros-accent/15 border-andros-accent text-andros-accent-ink"
               : "bg-andros-surface border-andros-border text-andros-muted"
           }`}
         >
@@ -87,7 +87,7 @@ export const TacticalCardStack: React.FC = () => {
                 style={{ left: `${normX}px`, top: `${normY}px` }}
                 className={`absolute px-2 py-0.5 rounded text-[9px] font-mono truncate max-w-[90px] border spring-micro ${
                   isSel
-                    ? "bg-andros-accent text-white border-andros-accent scale-110 z-10"
+                    ? "bg-andros-accent-fill text-white border-andros-accent scale-110 z-10"
                     : "bg-andros-card text-andros-primary border-andros-border"
                 }`}
               >

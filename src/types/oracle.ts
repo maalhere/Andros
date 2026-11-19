@@ -145,6 +145,7 @@ export type OracleIssueCode =
   | "invalid_key"
   | "rate_limited"
   | "overloaded"
+  | "network"
   | "unavailable";
 
 export interface OracleIssue {
