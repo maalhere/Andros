@@ -3,6 +3,8 @@
 // Fuente única de verdad para Nodos, Payloads, Puertos y Conexiones.
 // ============================================================================
 
+import type { ResourceCitationData } from "./library";
+
 // ----------------------------------------------------------------------------
 // 1. Entorno y herramientas
 // ----------------------------------------------------------------------------
@@ -329,6 +331,11 @@ export interface ResourceLinkPayload {
   youtube?: ResourceYouTubeData;
   github?: ResourceGitHubData;
   paper?: ResourcePaperData;
+  /**
+   * Metadatos de cita (DOI, autores, año, APA/IEEE). Solo existe si el nodo se
+   * creó desde la Biblioteca de fuentes; viaja al contexto de los Nodos IA.
+   */
+  citation?: ResourceCitationData;
 }
 
 // ----------------------------------------------------------------------------

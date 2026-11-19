@@ -8,6 +8,7 @@ import { QualityOfLifeModal } from "@/components/settings/QualityOfLifeModal";
 import { AiKeysModal } from "@/components/settings/AiKeysModal";
 import { WorkspaceManagerDrawer } from "@/components/workspaces/WorkspaceManagerDrawer";
 import { ArenaModal } from "@/components/arena/ArenaModal";
+import { LibraryDrawer } from "@/components/library/LibraryDrawer";
 import { UpgradeModal } from "@/components/shared/UpgradeModal";
 import { TopStatusBar } from "@/components/shared/TopStatusBar";
 import { OracleModal } from "@/components/shared/OracleModal";
@@ -39,6 +40,7 @@ export default function AndrosWorkspacePage() {
       <AiKeysModal />
       <WorkspaceManagerDrawer />
       <ArenaModal />
+      <LibraryDrawer />
       <UpgradeModal />
 
       {isMobile ? (

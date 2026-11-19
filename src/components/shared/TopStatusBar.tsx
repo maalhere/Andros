@@ -1,7 +1,9 @@
 "use client";
 
 import React from "react";
+import { Swords } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
+import { useMarketStore } from "@/store/useMarketStore";
 import { MoreMenu } from "./MoreMenu";
 import { useLandingStore } from "@/store/useLandingStore";
 import { GoogleAuthButton } from "@/components/auth/GoogleAuthButton";
@@ -58,6 +60,16 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({ isMobile }) => {
 
       {/* Acciones: solo lo esencial */}
       <div className="pointer-events-auto shrink-0 flex items-center gap-1.5 md:gap-2">
+        <button
+          type="button"
+          onClick={() => useMarketStore.getState().setArenaOpen(true)}
+          title="Andros Arena: retos, actividades, prácticas y empleos"
+          aria-label="Abrir Andros Arena"
+          className="min-w-[40px] min-h-[40px] md:min-w-0 md:min-h-0 p-2 md:px-3 rounded-xl bg-andros-surface backdrop-blur-md border border-andros-border text-andros-muted hover:text-andros-primary shadow-sm active:scale-95 spring-micro flex items-center justify-center gap-1.5"
+        >
+          <Swords className="w-4 h-4 text-andros-accent" />
+          <span className="hidden md:inline text-xs font-medium text-andros-primary">Arena</span>
+        </button>
         <ThemeToggle />
         <InstallAppButton isMobile={isMobile} />
         <GoogleAuthButton isMobile={isMobile} />

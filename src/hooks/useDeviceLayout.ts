@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react";
 import { ViewportMode } from "@/types/workspace";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
+import { useLibraryStore } from "@/store/useLibraryStore";
+import { useMarketStore } from "@/store/useMarketStore";
 
 const DESKTOP_BREAKPOINT = 768;
 
@@ -59,6 +61,9 @@ export function useDeviceLayout(): DeviceLayoutResult {
         return;
       }
 
+      // La Biblioteca y la Arena se cierran solas con Escape y bloquean los atajos.
+      if (useLibraryStore.getState().open || useMarketStore.getState().arenaOpen) return;
+
       if (e.key === "Escape" && isOracleModalOpen) {
         setOracleModalOpen(false);
         return;
@@ -80,7 +85,7 @@ export function useDeviceLayout(): DeviceLayoutResult {
           setActiveTool("draw");
           break;
         case "b":
-          setActiveTool("library");
+          useLibraryStore.getState().openLibrary({ origin: "canvas" });
           break;
         case "l":
           spawnNode({ type: "resource-link-node" });

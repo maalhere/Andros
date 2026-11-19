@@ -140,6 +140,13 @@ export function serializeNodeForContext(node: EngineeringNodeData): string {
         if (data.paper.summary) lines.push(`Abstract: ${data.paper.summary}`);
       }
       if (data.youtube) lines.push(`Video de YouTube: ${data.youtube.videoId}`);
+      if (data.citation) {
+        if (data.citation.doi) lines.push(`DOI: ${data.citation.doi}`);
+        if (data.citation.designation) lines.push(`Designación oficial: ${data.citation.designation}`);
+        if (data.citation.pdfUrl) lines.push(`PDF de acceso abierto: ${data.citation.pdfUrl}`);
+        lines.push(`Cita IEEE: ${data.citation.ieee}`);
+        lines.push(`Cita APA: ${data.citation.apa}`);
+      }
       break;
     }
     case "code-lab-node": {

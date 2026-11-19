@@ -12,6 +12,7 @@ import {
   FilePlus2,
   FileText,
   LayoutGrid,
+  Library,
   Link2,
   ListTodo,
   Loader2,
@@ -19,6 +20,7 @@ import {
   Network,
   PencilLine,
   Plus,
+  Quote,
   RotateCcw,
   Send,
   Sigma,
@@ -37,6 +39,8 @@ import {
 import { buildOracleCanvasContext } from "@/lib/oracle/buildCanvasContext";
 import { countWords, markdownToNoteText } from "@/lib/oracle/markdownDocument";
 import { MarkdownPreview } from "@/components/oracle/MarkdownPreview";
+import { useLibraryStore } from "@/store/useLibraryStore";
+import { referencesMarkdown, toOracleReference } from "@/lib/library/actions";
 import type {
   OracleAction,
   OracleEngine,
@@ -145,7 +149,7 @@ const OracleStudio: React.FC = () => {
   const selectedNodeId = useWorkspaceStore((s) => s.selectedNodeId);
 
   const studio = useOracleStudioStore();
-  const { messages, document: doc, chatMode, editorView, mobilePane, linkChoice, isThinking } = studio;
+  const { messages, document: doc, chatMode, editorView, mobilePane, linkChoice, isThinking, references } = studio;
 
   const [prompt, setPrompt] = useState("");
   const [toast, setToast] = useState<Toast | null>(null);
@@ -273,6 +277,7 @@ const OracleStudio: React.FC = () => {
           mode,
           context: buildOracleCanvasContext(ws.nodes, ws.connections, ws.selectedNodeId, linkedNodeId),
           history,
+          references: useOracleStudioStore.getState().references.map(toOracleReference),
           ...(mode === "document" ? { document: useOracleStudioStore.getState().document } : {}),
         }),
       });
@@ -392,6 +397,17 @@ const OracleStudio: React.FC = () => {
     });
   };
 
+  /** Añade (o actualiza) la sección "## Referencias" al final del documento. */
+  const insertReferences = () => {
+    const refs = useOracleStudioStore.getState().references;
+    if (refs.length === 0) return;
+    const block = referencesMarkdown(refs);
+    const current = doc.markdown.replace(/\n*## Referencias[\s\S]*$/u, "").trimEnd();
+    studio.setMarkdown(current ? `${current}\n\n${block}\n` : `${block}\n`);
+    studio.setMobilePane("document");
+    setToast({ message: `Sección «Referencias» con ${refs.length} fuente(s) en formato IEEE añadida al documento.`, canJump: false });
+  };
+
   const copyDocument = async () => {
     try {
       await navigator.clipboard.writeText(doc.title.trim() ? `# ${doc.title.trim()}\n\n${doc.markdown}` : doc.markdown);
@@ -467,6 +483,54 @@ const OracleStudio: React.FC = () => {
         </label>
       </div>
 
+      {/* Fuentes citables adjuntas desde la Biblioteca */}
+      <div className="px-4 md:px-5 py-2 border-b border-andros-border flex items-center gap-1.5 shrink-0 overflow-x-auto no-scrollbar">
+        <span className="flex items-center gap-1 text-[11px] text-andros-muted shrink-0">
+          <Quote className="w-3.5 h-3.5 text-andros-accent" />
+          Fuentes
+        </span>
+        {references.length === 0 && (
+          <span className="text-[10px] text-andros-muted/80 shrink-0">ninguna adjunta</span>
+        )}
+        {references.map((r, i) => (
+          <span
+            key={r.id}
+            title={r.title}
+            className="shrink-0 max-w-[180px] flex items-center gap-1 pl-2 pr-1 h-6 rounded-md bg-andros-canvas border border-andros-border text-[10px] text-andros-primary"
+          >
+            <span className="font-mono text-andros-accent">[{i + 1}]</span>
+            <span className="truncate">{r.title}</span>
+            <button
+              type="button"
+              onClick={() => studio.removeReference(r.id)}
+              aria-label={`Quitar fuente ${i + 1}`}
+              className="p-0.5 rounded text-andros-muted hover:text-andros-primary"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </span>
+        ))}
+        <button
+          type="button"
+          onClick={() => useLibraryStore.getState().openLibrary({ origin: "oracle" })}
+          className="shrink-0 h-6 px-2 rounded-md border border-dashed border-andros-border-active text-[10px] font-medium text-andros-primary hover:border-andros-accent flex items-center gap-1 spring-micro"
+        >
+          <Library className="w-3 h-3 text-andros-accent" />
+          Biblioteca
+        </button>
+        {references.length > 0 && (
+          <button
+            type="button"
+            onClick={insertReferences}
+            title="Añadir la sección Referencias (IEEE) al final del documento"
+            className="shrink-0 h-6 px-2 rounded-md text-[10px] font-medium text-andros-muted hover:text-andros-primary flex items-center gap-1 spring-micro"
+          >
+            <Plus className="w-3 h-3" />
+            Insertar referencias
+          </button>
+        )}
+      </div>
+
       {/* Conversación */}
       <div ref={threadRef} className="flex-1 min-h-0 overflow-y-auto px-4 md:px-5 py-4 space-y-3">
         {messages.length === 0 && (
@@ -494,6 +558,21 @@ const OracleStudio: React.FC = () => {
 
       {/* Sugerencias */}
       <div className="px-4 md:px-5 pt-2.5 flex flex-wrap gap-1.5 shrink-0">
+        {chatMode === "document" && references.length > 0 && (
+          <button
+            type="button"
+            disabled={isThinking}
+            onClick={() =>
+              void runPrompt(
+                "Redacta un resumen técnico del estado del arte usando las fuentes adjuntas: explica qué aporta cada una, compáralas en una tabla y cítalas en el texto como [n]. Termina con la sección Referencias en formato IEEE."
+              )
+            }
+            className={chipClass}
+          >
+            <Quote className="w-3.5 h-3.5 text-andros-accent" />
+            Estado del arte con mis fuentes
+          </button>
+        )}
         {chatMode === "document" ? (
           DOCUMENT_PROMPTS.filter((p) => p.id !== "polish" || doc.markdown.trim()).map((p) => {
             const Icon = p.icon;

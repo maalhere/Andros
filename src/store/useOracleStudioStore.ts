@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { OracleDocument, OracleEngine, OracleIssueCode, OracleMode } from "@/types/oracle";
+import type { LibrarySource } from "@/types/library";
 
 // ============================================================================
 // ANDROS — ESTADO DEL ESTUDIO DEL ORÁCULO (chat + documento en vivo)
@@ -43,6 +44,8 @@ interface OracleStudioState {
   mobilePane: StudioMobilePane;
   linkChoice: string;
   isThinking: boolean;
+  /** Fuentes de la Biblioteca adjuntas como referencias citables (orden = [1], [2]…). */
+  references: LibrarySource[];
 
   addMessage: (message: Omit<StudioMessage, "id">) => void;
   /** La IA reescribió el documento: se guarda la versión anterior. */
@@ -57,11 +60,14 @@ interface OracleStudioState {
   setMobilePane: (pane: StudioMobilePane) => void;
   setLinkChoice: (choice: string) => void;
   setThinking: (thinking: boolean) => void;
+  /** Adjunta una fuente (si ya estaba, no la duplica). Devuelve su número [n]. */
+  addReference: (source: LibrarySource) => number;
+  removeReference: (id: string) => void;
 }
 
 let messageCounter = 0;
 
-export const useOracleStudioStore = create<OracleStudioState>((set) => ({
+export const useOracleStudioStore = create<OracleStudioState>((set, get) => ({
   messages: [],
   document: EMPTY_DOCUMENT,
   previousDocument: null,
@@ -70,6 +76,7 @@ export const useOracleStudioStore = create<OracleStudioState>((set) => ({
   mobilePane: "chat",
   linkChoice: STUDIO_LINK_AUTO,
   isThinking: false,
+  references: [],
 
   addMessage: (message) =>
     set((state) => ({
@@ -110,4 +117,15 @@ export const useOracleStudioStore = create<OracleStudioState>((set) => ({
   setLinkChoice: (linkChoice) => set({ linkChoice }),
 
   setThinking: (isThinking) => set({ isThinking }),
+
+  addReference: (source) => {
+    const current = get().references;
+    const index = current.findIndex((r) => r.id === source.id);
+    if (index >= 0) return index + 1;
+    const next = [...current, source].slice(0, 30);
+    set({ references: next });
+    return next.length;
+  },
+
+  removeReference: (id) => set((state) => ({ references: state.references.filter((r) => r.id !== id) })),
 }));

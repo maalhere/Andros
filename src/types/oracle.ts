@@ -114,8 +114,20 @@ export interface OracleDocument {
   markdown: string;
 }
 
+/** Fuente citable adjunta desde la Biblioteca (se numera en orden: [1], [2]…). */
+export interface OracleReference {
+  title: string;
+  /** Cita IEEE completa (sin el número). */
+  citation: string;
+  url: string;
+  doi?: string;
+  abstract?: string;
+}
+
 export interface OracleRequestBody {
   prompt: string;
+  /** Fuentes adjuntas que la IA debe citar como [n]. */
+  references?: OracleReference[];
   context: OracleCanvasContext;
   history?: OracleHistoryTurn[];
   /** Por defecto "canvas" (compatibilidad). */

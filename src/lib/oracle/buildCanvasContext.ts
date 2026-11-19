@@ -65,6 +65,11 @@ function excerptOf(node: EngineeringNodeData): string | undefined {
       lines.push(`Paper: "${data.paper.title}" — ${data.paper.authors} (${data.paper.source})`);
       if (data.paper.summary) lines.push(`Resumen: ${data.paper.summary}`);
     }
+    if (data.citation) {
+      if (data.citation.doi) lines.push(`DOI: ${data.citation.doi}`);
+      if (data.citation.designation) lines.push(`Designación: ${data.citation.designation}`);
+      lines.push(`Cita IEEE: ${data.citation.ieee}`);
+    }
     return clip(lines.join("\n"));
   }
 

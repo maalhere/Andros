@@ -9,6 +9,7 @@ import {
   FolderArchive,
   GraduationCap,
   KeyRound,
+  Library,
   MoreHorizontal,
   Settings,
   Swords,
@@ -16,6 +17,7 @@ import {
   X,
 } from "lucide-react";
 import { useMarketStore } from "@/store/useMarketStore";
+import { useLibraryStore } from "@/store/useLibraryStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useWorkspaceManagerStore } from "@/store/useWorkspaceManagerStore";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
@@ -155,6 +157,12 @@ export const MoreMenu: React.FC = () => {
       label: "Arena & Empleos",
       icon: <Swords className="w-4 h-4" />,
       onSelect: () => useMarketStore.getState().setArenaOpen(true),
+    },
+    {
+      id: "library",
+      label: "Biblioteca de fuentes",
+      icon: <Library className="w-4 h-4" />,
+      onSelect: () => useLibraryStore.getState().openLibrary({ origin: "canvas" }),
     },
     {
       id: "pro",

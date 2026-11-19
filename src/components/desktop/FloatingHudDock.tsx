@@ -8,6 +8,7 @@ import {
   Box,
   Calculator,
   MessagesSquare,
+  Library,
   Link2,
   MousePointer2,
   Plus,
@@ -26,6 +27,7 @@ import {
   useWorkspaceStore,
 } from "@/store/useWorkspaceStore";
 import type { CanvasInkColor, CanvasInkTip } from "@/types/workspace";
+import { useLibraryStore } from "@/store/useLibraryStore";
 
 // ============================================================================
 // 1. INDICADOR DE ZOOM DISCRETO (esquina inferior izquierda)  − 100% +
@@ -448,6 +450,14 @@ export const FloatingHudDock: React.FC = () => {
           pressed={isDrawing}
           tourId="draw"
           onClick={() => setActiveTool(isDrawing ? "pointer" : "draw")}
+        />
+
+        <DockButton
+          full={full}
+          title="Biblioteca de fuentes: papers, normas, YouTube y LinkedIn (B)"
+          label="Biblioteca"
+          icon={<Library className="w-4 h-4" />}
+          onClick={() => useLibraryStore.getState().openLibrary({ origin: "canvas" })}
         />
 
         <motion.button

@@ -11,6 +11,7 @@
 --   4. workspace_connections  → cables entre nodos
 --   5. Seguridad RLS: cada usuario solo ve y edita lo suyo (auth.uid())
 --   6. Bucket de Storage `print-files` (privado) para archivos 3D y otros
+--   7. Andros Arena: arena_posts + arena_submissions (con RLS)
 -- ============================================================================
 
 create extension if not exists "pgcrypto";
@@ -336,3 +337,118 @@ create policy "print_files_delete_own" on storage.objects
     bucket_id = 'print-files'
     and (storage.foldername(name))[1] = (select auth.uid())::text
   );
+
+-- ============================================================================
+-- 7. ANDROS ARENA (Sprint 3): publicaciones con etiquetas IA y postulaciones
+--    con un espacio de trabajo como portafolio.
+--    · arena_posts       → retos, actividades, prácticas y empleos
+--    · arena_submissions → soluciones / postulaciones (instantánea del lienzo)
+--    Si estas tablas no existen, la app funciona en modo local (localStorage).
+--    (Las tablas antiguas de supabase/arena.sql no se tocan.)
+-- ============================================================================
+create table if not exists public.arena_posts (
+  id                 uuid primary key default gen_random_uuid(),
+  owner_id           uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  type               text not null check (type in ('job', 'internship', 'activity', 'challenge')),
+  title              text not null check (char_length(title) between 4 and 140),
+  organization       text not null check (char_length(organization) between 2 and 100),
+  description        text not null check (char_length(description) between 20 and 4000),
+  stipend            text check (char_length(stipend) <= 80),
+  location           text check (char_length(location) <= 80),
+  -- { "type": "...", "discipline": [...], "level": [...], "skills": [...] }
+  tags               jsonb not null default '{}'::jsonb,
+  -- { "status": "...", "qualityScore": n, "issues": [...], "suggestions": [...] }
+  moderation         jsonb not null default '{}'::jsonb,
+  moderation_status  text not null default 'approved'
+                     check (moderation_status in ('approved', 'needs_review', 'rejected')),
+  ai_engine          text not null default 'keywords' check (ai_engine in ('gemini', 'keywords')),
+  author_name        text check (char_length(author_name) <= 120),
+  created_at         timestamptz not null default now(),
+  updated_at         timestamptz not null default now()
+);
+
+create index if not exists arena_posts_created_idx on public.arena_posts (created_at desc);
+create index if not exists arena_posts_type_idx on public.arena_posts (type);
+create index if not exists arena_posts_tags_idx on public.arena_posts using gin (tags jsonb_path_ops);
+
+drop trigger if exists arena_posts_set_updated_at on public.arena_posts;
+create trigger arena_posts_set_updated_at
+  before update on public.arena_posts
+  for each row execute function public.set_updated_at();
+
+create table if not exists public.arena_submissions (
+  id              uuid primary key default gen_random_uuid(),
+  post_id         uuid not null references public.arena_posts (id) on delete cascade,
+  applicant_id    uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  workspace_id    uuid references public.workspaces (id) on delete set null,
+  note            text check (char_length(note) <= 1500),
+  applicant_name  text check (char_length(applicant_name) <= 120),
+  -- Instantánea del lienzo: nº de nodos, insignias 3D/CodeLab/IA y mini-mapa.
+  snapshot        jsonb not null default '{}'::jsonb,
+  -- El postulante decide si su solución aparece en la galería pública.
+  is_public       boolean not null default false,
+  created_at      timestamptz not null default now(),
+  unique (post_id, applicant_id)
+);
+
+create index if not exists arena_submissions_post_idx on public.arena_submissions (post_id);
+
+alter table public.arena_posts enable row level security;
+alter table public.arena_submissions enable row level security;
+
+-- Publicaciones: cualquiera ve las no rechazadas; el autor ve también las suyas.
+drop policy if exists "arena_posts_select" on public.arena_posts;
+create policy "arena_posts_select" on public.arena_posts
+  for select to anon, authenticated
+  using (moderation_status <> 'rejected' or owner_id = (select auth.uid()));
+
+-- Solo usuarios con sesión publican, siempre como ellos mismos y nunca algo rechazado.
+drop policy if exists "arena_posts_insert_own" on public.arena_posts;
+create policy "arena_posts_insert_own" on public.arena_posts
+  for insert to authenticated
+  with check (owner_id = (select auth.uid()) and moderation_status <> 'rejected');
+
+drop policy if exists "arena_posts_update_own" on public.arena_posts;
+create policy "arena_posts_update_own" on public.arena_posts
+  for update to authenticated
+  using (owner_id = (select auth.uid()))
+  with check (owner_id = (select auth.uid()) and moderation_status <> 'rejected');
+
+drop policy if exists "arena_posts_delete_own" on public.arena_posts;
+create policy "arena_posts_delete_own" on public.arena_posts
+  for delete to authenticated
+  using (owner_id = (select auth.uid()));
+
+-- Postulaciones: públicas si el postulante lo eligió; si no, solo el
+-- postulante y quien publicó la oferta.
+drop policy if exists "arena_submissions_select" on public.arena_submissions;
+create policy "arena_submissions_select" on public.arena_submissions
+  for select to anon, authenticated
+  using (
+    is_public
+    or applicant_id = (select auth.uid())
+    or exists (
+      select 1 from public.arena_posts p
+      where p.id = post_id and p.owner_id = (select auth.uid())
+    )
+  );
+
+-- Solo se puede adjuntar un espacio propio.
+drop policy if exists "arena_submissions_insert_own" on public.arena_submissions;
+create policy "arena_submissions_insert_own" on public.arena_submissions
+  for insert to authenticated
+  with check (
+    applicant_id = (select auth.uid())
+    and (
+      workspace_id is null
+      or exists (
+        select 1 from public.workspaces w
+        where w.id = workspace_id and w.owner_id = (select auth.uid())
+      )
+    )
+  );
+
+drop policy if exists "arena_submissions_delete_own" on public.arena_submissions;
+create policy "arena_submissions_delete_own" on public.arena_submissions
+  for delete to authenticated
+  using (applicant_id = (select auth.uid()));

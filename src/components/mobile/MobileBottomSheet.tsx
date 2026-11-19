@@ -10,6 +10,7 @@ import {
   Calculator,
   Check,
   FileBox,
+  Library,
   Link2,
   MessagesSquare,
   NotebookPen,
@@ -21,6 +22,7 @@ import {
 import { QUICK_ADD_OPTIONS, quickAdd, type QuickAddKind } from "@/lib/canvas/quickAdd";
 import { NODE_ARCHETYPE_LABELS, useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { EngineeringNodeData, NodeArchetype } from "@/types/workspace";
+import { useLibraryStore } from "@/store/useLibraryStore";
 
 // ============================================================================
 // Piezas compartidas
@@ -360,6 +362,23 @@ const AddSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           </button>
         ))}
       </div>
+
+      <button
+        type="button"
+        onClick={() => {
+          onClose();
+          useLibraryStore.getState().openLibrary({ origin: "canvas" });
+        }}
+        className="w-full min-h-[56px] px-3.5 rounded-2xl bg-andros-canvas border border-andros-border flex items-center gap-3 text-left active:scale-98 spring-micro"
+      >
+        <span className="w-9 h-9 shrink-0 rounded-xl bg-andros-accent/10 text-andros-accent flex items-center justify-center">
+          <Library className="w-4 h-4" />
+        </span>
+        <span className="min-w-0">
+          <span className="block text-[13px] font-semibold text-andros-primary">Biblioteca de fuentes</span>
+          <span className="block text-[11px] leading-snug text-andros-muted">Papers, normas, YouTube y LinkedIn citables</span>
+        </span>
+      </button>
 
       {nodesCount >= 2 && (
         <button

@@ -4,7 +4,11 @@ import React, { useState } from "react";
 import {
   AlertCircle,
   BookOpen,
+  Check,
+  Copy,
   ExternalLink,
+  FileText,
+  Quote,
   GitFork,
   Link2,
   Loader2,
@@ -14,6 +18,7 @@ import {
   User,
 } from "lucide-react";
 import { ResourceLinkEngineeringNode, ResourceLinkPlatform } from "@/types/workspace";
+import type { ResourceCitationData } from "@/types/library";
 import { useWorkspaceStore, createEmptyResourceLinkPayload } from "@/store/useWorkspaceStore";
 
 // ============================================================================
@@ -51,6 +56,52 @@ const PLATFORM_ICON: Record<ResourceLinkPlatform, React.ReactNode> = {
   paper: <BookOpen className="w-4 h-4 text-andros-accent" />,
   linkedin: <User className="w-4 h-4 text-andros-accent" />,
   generic: <Link2 className="w-4 h-4 text-andros-accent" />,
+};
+
+/** Datos de cita (solo nodos creados desde la Biblioteca): DOI, PDF y copiar APA/IEEE. */
+const CitationStrip: React.FC<{ citation: ResourceCitationData }> = ({ citation }) => {
+  const [copied, setCopied] = useState<"apa" | "ieee" | null>(null);
+  const copy = async (style: "apa" | "ieee") => {
+    try {
+      await navigator.clipboard.writeText(style === "apa" ? citation.apa : citation.ieee);
+      setCopied(style);
+      setTimeout(() => setCopied(null), 1400);
+    } catch {
+      setCopied(null);
+    }
+  };
+  return (
+    <div className="rounded-xl border border-andros-border bg-andros-canvas/60 px-2.5 py-2 space-y-1.5" data-no-drag>
+      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[10px] font-mono text-andros-muted">
+        <span className="flex items-center gap-1 text-andros-primary">
+          <Quote className="w-3 h-3 text-andros-accent" />
+          Citable
+        </span>
+        {citation.designation && <span className="text-andros-primary font-semibold">{citation.designation}</span>}
+        {citation.doi && <span className="truncate max-w-[160px]">DOI {citation.doi}</span>}
+        {citation.year && <span>{citation.year}</span>}
+        {citation.pdfUrl && (
+          <a href={citation.pdfUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-0.5 text-andros-success hover:underline">
+            <FileText className="w-3 h-3" /> PDF
+          </a>
+        )}
+      </div>
+      <div className="flex items-center gap-1">
+        {(["apa", "ieee"] as const).map((style) => (
+          <button
+            key={style}
+            type="button"
+            onClick={() => void copy(style)}
+            title={style === "apa" ? citation.apa : citation.ieee}
+            className="h-6 px-2 rounded-md border border-andros-border text-[10px] font-mono font-semibold text-andros-primary hover:border-andros-accent flex items-center gap-1 spring-micro"
+          >
+            {copied === style ? <Check className="w-3 h-3 text-andros-success" /> : <Copy className="w-3 h-3" />}
+            {style.toUpperCase()}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 };
 
 export const ResourceLinkNodeView: React.FC<ResourceLinkNodeProps> = ({ node, variant }) => {
@@ -91,6 +142,8 @@ export const ResourceLinkNodeView: React.FC<ResourceLinkNodeProps> = ({ node, va
         youtube: result.youtube,
         github: result.github,
         paper: result.paper,
+        // Un enlace pegado a mano no trae metadatos de cita verificados.
+        citation: undefined,
         errorMessage: result.errorMessage,
       });
     } catch {
@@ -108,7 +161,7 @@ export const ResourceLinkNodeView: React.FC<ResourceLinkNodeProps> = ({ node, va
 
   const handleClear = () => {
     setDraftUrl("");
-    updateNodePayload(node.id, createEmptyResourceLinkPayload());
+    updateNodePayload(node.id, { ...createEmptyResourceLinkPayload(), citation: undefined });
   };
 
   // --------------------------------------------------------------------------
@@ -264,6 +317,8 @@ export const ResourceLinkNodeView: React.FC<ResourceLinkNodeProps> = ({ node, va
           </div>
         </div>
       )}
+
+      {data.citation && <CitationStrip citation={data.citation} />}
 
       <a
         href={data.url}

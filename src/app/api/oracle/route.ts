@@ -25,6 +25,7 @@ import type {
   OracleIssue,
   OracleLayoutZone,
   OracleMode,
+  OracleReference,
   OracleRequestBody,
   OracleResponseBody,
 } from "@/types/oracle";
@@ -252,7 +253,8 @@ function parseDocumentOutput(raw: unknown): { reply: string; document: OracleDoc
 function buildDocumentUserContent(
   prompt: string,
   context: OracleCanvasContext,
-  current: OracleDocument | null
+  current: OracleDocument | null,
+  references: OracleReference[] = []
 ): string {
   const linked = context.linkedNodeId
     ? context.nodes.find((n) => n.id === context.linkedNodeId)
@@ -264,17 +266,43 @@ function buildDocumentUserContent(
     current && current.markdown.trim()
       ? `DOCUMENTO ACTUAL\nTítulo: ${current.title}\n---\n${current.markdown.slice(0, MAX_DOCUMENT_CHARS)}\n---`
       : "DOCUMENTO ACTUAL: vacío (crea uno nuevo).";
-  return `Contexto actual del lienzo (JSON):\n${JSON.stringify(context)}${focus}\n\n${doc}\n\nInstrucción del usuario:\n${prompt}`;
+  return `Contexto actual del lienzo (JSON):\n${JSON.stringify(context)}${focus}\n\n${doc}${referencesBlock(references)}\n\nInstrucción del usuario:\n${prompt}`;
 }
 
-function buildUserContent(prompt: string, context: OracleCanvasContext): string {
+function sanitizeReferences(raw: unknown): OracleReference[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .slice(0, 30)
+    .map((r) => {
+      const ref = (r ?? {}) as Record<string, unknown>;
+      return {
+        title: str(ref.title, 300),
+        citation: str(ref.citation, 600),
+        url: str(ref.url, 500),
+        doi: str(ref.doi, 200) || undefined,
+        abstract: str(ref.abstract, 900) || undefined,
+      };
+    })
+    .filter((r) => r.title && r.citation);
+}
+
+/** Bloque de fuentes citables que se añade al mensaje del usuario. */
+function referencesBlock(refs: OracleReference[]): string {
+  if (refs.length === 0) return "";
+  const list = refs
+    .map((r, i) => `[${i + 1}] ${r.citation}${r.abstract ? `\n    Resumen: ${r.abstract}` : ""}`)
+    .join("\n");
+  return `\n\nFUENTES CITABLES ADJUNTAS POR EL USUARIO (verificadas desde la Biblioteca de Andros):\n${list}\n\nREGLAS DE CITA: cuando uses una de estas fuentes, cítala en el texto con su número entre corchetes ([1], [2]…). Si redactas un documento, termina con una sección "## Referencias" que liste en formato IEEE SOLO las fuentes que citaste, con el mismo número. No inventes otras referencias ni DOIs.`;
+}
+
+function buildUserContent(prompt: string, context: OracleCanvasContext, references: OracleReference[] = []): string {
   const linked = context.linkedNodeId
     ? context.nodes.find((n) => n.id === context.linkedNodeId)
     : undefined;
   const focus = linked
     ? `\n\nArchivo/nodo vinculado por el usuario: "${linked.title}" (id ${linked.id}).`
     : "";
-  return `Contexto actual del lienzo (JSON):\n${JSON.stringify(context)}${focus}\n\nInstrucción del usuario:\n${prompt}`;
+  return `Contexto actual del lienzo (JSON):\n${JSON.stringify(context)}${focus}${referencesBlock(references)}\n\nInstrucción del usuario:\n${prompt}`;
 }
 
 function sanitizeHistory(history: unknown): OracleHistoryTurn[] {
@@ -362,6 +390,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<OracleRes
   };
   const history = sanitizeHistory(body?.history);
   const currentDocument = mode === "document" ? sanitizeDocument(body?.document) : null;
+  const references = sanitizeReferences(body?.references);
 
   if (!prompt.trim()) {
     return NextResponse.json({
@@ -375,13 +404,13 @@ export async function POST(request: NextRequest): Promise<NextResponse<OracleRes
     mode === "document"
       ? {
           system: DOCUMENT_INSTRUCTIONS,
-          userContent: buildDocumentUserContent(prompt, context, currentDocument),
+          userContent: buildDocumentUserContent(prompt, context, currentDocument, references),
           history,
           maxOutputTokens: 16_384,
         }
       : {
           system: SYSTEM_INSTRUCTIONS,
-          userContent: buildUserContent(prompt, context),
+          userContent: buildUserContent(prompt, context, references),
           history,
           maxOutputTokens: 8192,
         };

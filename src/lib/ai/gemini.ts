@@ -54,6 +54,10 @@ export interface GeminiCallOptions {
   preferredModel?: string;
   /** `true` si la clave es del usuario (BYOK): cambia el texto de los errores. */
   userKey?: boolean;
+  /** Tiempo total máximo (ms). Por defecto 95 s; tareas rápidas usan menos. */
+  budgetMs?: number;
+  /** Temperatura (por defecto 0.4). */
+  temperature?: number;
 }
 
 const keyScope = (apiKey: string) => createHash("sha256").update(apiKey).digest("hex").slice(0, 12);
@@ -167,7 +171,7 @@ export async function callGemini(
   req: ModelRequest,
   options: GeminiCallOptions = {}
 ): Promise<{ raw: unknown; model: string }> {
-  const deadline = Date.now() + TOTAL_BUDGET_MS;
+  const deadline = Date.now() + (options.budgetMs ?? TOTAL_BUDGET_MS);
   const errors: { model: string; error: unknown }[] = [];
   const scope = keyScope(apiKey);
 
@@ -175,7 +179,7 @@ export async function callGemini(
     const remaining = deadline - Date.now();
     if (remaining < 4_000) break;
     try {
-      const raw = await callGeminiModel(model, apiKey, req, Math.min(ATTEMPT_TIMEOUT_MS, remaining));
+      const raw = await callGeminiModel(model, apiKey, req, Math.min(ATTEMPT_TIMEOUT_MS, remaining), true, options.temperature);
       coolingModels.delete(`${scope}:${model}`);
       return { raw, model };
     } catch (error) {
@@ -210,7 +214,8 @@ async function callGeminiModel(
   apiKey: string,
   req: ModelRequest,
   timeoutMs: number,
-  withThinking = true
+  withThinking = true,
+  temperature = 0.4
 ): Promise<unknown> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
   const thinkingConfig = withThinking ? thinkingConfigFor(model) : undefined;
@@ -229,7 +234,7 @@ async function callGeminiModel(
       ],
       generationConfig: {
         responseMimeType: "application/json",
-        temperature: 0.4,
+        temperature,
         maxOutputTokens: req.maxOutputTokens,
         ...(thinkingConfig ? { thinkingConfig } : {}),
       },
@@ -239,7 +244,7 @@ async function callGeminiModel(
     const detail = await res.text().catch(() => "");
     // Modelo que no acepta la configuración de razonamiento: un reintento sin ella.
     if (res.status === 400 && thinkingConfig && /thinking/i.test(detail)) {
-      return callGeminiModel(model, apiKey, req, timeoutMs, false);
+      return callGeminiModel(model, apiKey, req, timeoutMs, false, temperature);
     }
     throw new GeminiHttpError(res.status, detail);
   }

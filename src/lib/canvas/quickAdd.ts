@@ -39,7 +39,7 @@ export function takePendingFile(nodeId: string): File | null {
  * pantalla), con un pequeño escalonado para que varios nodos seguidos no se
  * tapen por completo.
  */
-function visibleSpawnPoint(): { x: number; y: number } {
+export function visibleSpawnPoint(): { x: number; y: number } {
   const { canvasTransform, nodes } = useWorkspaceStore.getState();
   const cascade = (nodes.length % 6) * 36;
   const centerX = (window.innerWidth / 2 - canvasTransform.x) / canvasTransform.scale;

@@ -1,333 +1,42 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { Briefcase, Check, Plus, Send, Swords, Trophy, X } from "lucide-react";
-import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { Building2, ChevronRight, Cloud, HardDrive, Loader2, MapPin, Plus, Search, Send, Sparkles, Swords, X } from "lucide-react";
+import {
+  ARENA_DISCIPLINES,
+  ARENA_LEVELS,
+  ARENA_TYPE_LABELS,
+  ARENA_TYPES,
+  type ArenaDiscipline,
+  type ArenaLevel,
+  type ArenaPost,
+  type ArenaPostType,
+} from "@/types/arena";
+import { loadArenaPosts } from "@/lib/arena/repository";
+import { EXAMPLE_POSTS, EXAMPLE_SUBMISSIONS } from "@/lib/arena/seed";
+import { normalizeText } from "@/lib/arena/keywordTagger";
 import { useCloudStore } from "@/store/useCloudStore";
 import { useMarketStore } from "@/store/useMarketStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
-import { useWorkspaceManagerStore } from "@/store/useWorkspaceManagerStore";
+import { ArenaPublishForm } from "./ArenaPublishForm";
+import { ArenaPostDetail, TagRow, TypeBadge, isSolutionType } from "./ArenaPostDetail";
 
 // ============================================================================
-// ANDROS ARENA — Retos de ingeniería y vacantes de empleo
-// Datos en Supabase (`arena_opportunities` / `arena_applications`, ver
-// supabase/arena.sql). Sin Supabase o sin la tabla: modo demostración local.
+// ANDROS ARENA — Retos, actividades, prácticas y empleos con etiquetas IA.
+// Búsqueda + píldoras de filtro (Tipo, Disciplina, Nivel, Habilidades) con
+// filtrado instantáneo en el cliente y en la base de datos. Publicar pasa por
+// el escáner IA; postular usa un espacio de Andros como portafolio.
+// Datos: Supabase (`arena_posts` / `arena_submissions`) o localStorage.
 // ============================================================================
 
-type Kind = "challenge" | "job";
-
-interface Opportunity {
-  id: string;
-  kind: Kind;
-  title: string;
-  company: string;
-  category: string;
-  description: string;
-  reward: string;
-  isLocal?: boolean;
-}
-
-const CATEGORIES = ["Diseño 3D", "Simulación", "Cálculo", "Manufactura", "General"];
-
-const DEMO_OPPORTUNITIES: Opportunity[] = [
-  {
-    id: "demo-1",
-    kind: "challenge",
-    title: "Optimiza un soporte de dron: -30 % de masa",
-    company: "AeroLab Industrial",
-    category: "Diseño 3D",
-    description:
-      "Rediseña un soporte de motor imprimible en 3D reduciendo masa sin bajar de FS 2.0. Entrega el modelo y la memoria de cálculo.",
-    reward: "Premio: 1,500 USD",
-    isLocal: true,
-  },
-  {
-    id: "demo-2",
-    kind: "challenge",
-    title: "Verificación de nudo reticular K bajo fatiga",
-    company: "Estructuras Norte",
-    category: "Cálculo",
-    description:
-      "Verifica un nudo HSS tipo K según AWS D1.1 y propone una mejora de soldadura. Gana la memoria más clara y correcta.",
-    reward: "Premio: 800 USD + entrevista",
-    isLocal: true,
-  },
-  {
-    id: "demo-3",
-    kind: "job",
-    title: "Ingeniero/a de Diseño Mecánico Jr.",
-    company: "Forja Digital",
-    category: "Manufactura",
-    description:
-      "Diseño de piezas para manufactura aditiva y mecanizado. Se valora portafolio con modelos 3D y cálculos.",
-    reward: "Salario: 1,800–2,400 USD/mes",
-    isLocal: true,
-  },
-  {
-    id: "demo-4",
-    kind: "job",
-    title: "Analista de Simulación FEA",
-    company: "Simula Labs",
-    category: "Simulación",
-    description:
-      "Modelado y análisis de elementos finitos de componentes estructurales. Remoto, jornada completa.",
-    reward: "Salario: 2,500–3,200 USD/mes",
-    isLocal: true,
-  },
-];
-
-interface Row {
-  id: string;
-  kind: Kind;
-  title: string;
-  company: string;
-  category: string;
-  description: string;
-  reward: string | null;
-}
-
-const toOpportunity = (r: Row): Opportunity => ({
-  id: r.id,
-  kind: r.kind,
-  title: r.title,
-  company: r.company,
-  category: r.category,
-  description: r.description,
-  reward: r.reward ?? "",
-});
-
-function errorText(error: unknown): string {
-  if (error && typeof error === "object" && "message" in error) {
-    const m = (error as { message: unknown }).message;
-    if (typeof m === "string" && m) return m;
-  }
-  return "Error desconocido";
-}
-
-const SETUP_HINT = "Ejecuta supabase/arena.sql en el SQL Editor de Supabase para activar la Arena en la nube.";
-
-// ----------------------------------------------------------------------------
-// Formulario de publicación
-// ----------------------------------------------------------------------------
-
-const PublishForm: React.FC<{
-  onCancel: () => void;
-  onPublished: (o: Opportunity, notice: string) => void;
-}> = ({ onCancel, onPublished }) => {
-  const user = useCloudStore((s) => s.user);
-  const [kind, setKind] = useState<Kind>("challenge");
-  const [title, setTitle] = useState("");
-  const [company, setCompany] = useState("");
-  const [category, setCategory] = useState(CATEGORIES[0]);
-  const [description, setDescription] = useState("");
-  const [reward, setReward] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const t = title.trim();
-    const c = company.trim();
-    const d = description.trim();
-    if (t.length < 4 || t.length > 120) return setError("El título debe tener entre 4 y 120 caracteres.");
-    if (c.length < 2 || c.length > 80) return setError("Escribe el nombre de la empresa o equipo (2–80 caracteres).");
-    if (d.length < 10 || d.length > 2000) return setError("La descripción debe tener entre 10 y 2000 caracteres.");
-    setError(null);
-    setBusy(true);
-
-    const draft = { kind, title: t, company: c, category, description: d, reward: reward.trim().slice(0, 80) || null };
-    const supabase = getSupabaseBrowserClient();
-
-    if (supabase && user) {
-      const { data, error: dbError } = await supabase
-        .from("arena_opportunities")
-        .insert(draft)
-        .select("id, kind, title, company, category, description, reward")
-        .single();
-      setBusy(false);
-      if (!dbError && data) {
-        onPublished(toOpportunity(data as Row), "Publicado en la Arena.");
-        return;
-      }
-      // Falla (p. ej. tabla sin crear): queda como simulación local.
-      onPublished(
-        { ...toOpportunity({ ...draft, id: `local-${Date.now()}` }), isLocal: true },
-        `Publicado solo en este navegador (${errorText(dbError)}). ${SETUP_HINT}`
-      );
-      return;
-    }
-    setBusy(false);
-    onPublished(
-      { ...toOpportunity({ ...draft, id: `local-${Date.now()}` }), isLocal: true },
-      "Publicación simulada en este navegador. Inicia sesión con Google para publicarla en la nube."
-    );
-  };
-
-  const field =
-    "w-full rounded-xl border border-andros-border bg-andros-canvas px-3 py-2 text-xs text-andros-primary placeholder:text-andros-muted focus:outline-none focus:border-andros-accent";
-
-  return (
-    <form onSubmit={submit} className="space-y-3">
-      <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-andros-border/30">
-        {(["challenge", "job"] as Kind[]).map((k) => (
-          <button
-            key={k}
-            type="button"
-            onClick={() => setKind(k)}
-            className={`min-h-[36px] rounded-lg text-xs font-medium ${
-              kind === k ? "bg-andros-card text-andros-primary shadow-sm" : "text-andros-muted"
-            }`}
-          >
-            {k === "challenge" ? "Reto / Concurso" : "Vacante de empleo"}
-          </button>
-        ))}
-      </div>
-      <input className={field} placeholder="Título" value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} />
-      <input className={field} placeholder="Empresa o equipo" value={company} maxLength={80} onChange={(e) => setCompany(e.target.value)} />
-      <select className={field} value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Categoría">
-        {CATEGORIES.map((c) => (
-          <option key={c}>{c}</option>
-        ))}
-      </select>
-      <textarea className={`${field} min-h-[90px] resize-y`} placeholder="Describe el reto o el puesto" value={description} maxLength={2000} onChange={(e) => setDescription(e.target.value)} />
-      <input className={field} placeholder={kind === "challenge" ? "Premio (opcional)" : "Salario (opcional)"} value={reward} maxLength={80} onChange={(e) => setReward(e.target.value)} />
-      {error && (
-        <p role="alert" className="text-[11px] text-red-500">
-          {error}
-        </p>
-      )}
-      <div className="grid grid-cols-2 gap-2">
-        <button type="button" onClick={onCancel} className="min-h-[40px] rounded-xl border border-andros-border text-xs text-andros-muted hover:text-andros-primary">
-          Cancelar
-        </button>
-        <button type="submit" disabled={busy} className="min-h-[40px] rounded-xl bg-andros-accent text-white text-xs font-semibold disabled:opacity-60">
-          {busy ? "Publicando…" : "Publicar"}
-        </button>
-      </div>
-    </form>
-  );
-};
-
-// ----------------------------------------------------------------------------
-// Postulación con el espacio de trabajo como portafolio
-// ----------------------------------------------------------------------------
-
-const ApplyForm: React.FC<{
-  opportunity: Opportunity;
-  onDone: (notice: string) => void;
-  onCancel: () => void;
-}> = ({ opportunity, onDone, onCancel }) => {
-  const user = useCloudStore((s) => s.user);
-  const currentWorkspaceId = useCloudStore((s) => s.workspaceId);
-  const workspaces = useWorkspaceManagerStore((s) => s.workspaces);
-  const [workspaceId, setWorkspaceId] = useState<string>(currentWorkspaceId ?? workspaces[0]?.id ?? "");
-  const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  const send = async () => {
-    const supabase = getSupabaseBrowserClient();
-    if (!supabase || !user || opportunity.isLocal) {
-      onDone("Postulación simulada. Inicia sesión y usa una oferta de la nube para enviarla de verdad.");
-      return;
-    }
-    setBusy(true);
-    const { error } = await supabase.from("arena_applications").insert({
-      opportunity_id: opportunity.id,
-      workspace_id: workspaceId || null,
-      message: message.trim().slice(0, 1000) || null,
-    });
-    setBusy(false);
-    if (error) {
-      const dup = (error as { code?: string }).code === "23505";
-      onDone(dup ? "Ya te habías postulado a esta oferta." : `No se pudo enviar: ${errorText(error)}`);
-      return;
-    }
-    onDone("¡Postulación enviada con tu espacio como portafolio!");
-  };
-
-  return (
-    <div className="mt-3 space-y-2 rounded-xl border border-andros-border bg-andros-canvas p-3">
-      <p className="text-[11px] font-semibold text-andros-primary">Adjuntar mi espacio de Andros como portafolio</p>
-      {workspaces.length > 0 ? (
-        <select
-          value={workspaceId}
-          onChange={(e) => setWorkspaceId(e.target.value)}
-          aria-label="Espacio de trabajo"
-          className="w-full rounded-lg border border-andros-border bg-andros-card px-2 py-2 text-xs text-andros-primary"
-        >
-          {workspaces.map((w) => (
-            <option key={w.id} value={w.id}>
-              {w.name}
-            </option>
-          ))}
-        </select>
-      ) : (
-        <p className="text-[11px] text-andros-muted">
-          Inicia sesión con Google para adjuntar un espacio verificable (nodos, cálculos y modelos).
-        </p>
-      )}
-      <textarea
-        value={message}
-        onChange={(e) => setMessage(e.target.value)}
-        maxLength={1000}
-        placeholder="Mensaje breve (opcional)"
-        className="w-full min-h-[60px] rounded-lg border border-andros-border bg-andros-card px-2 py-2 text-xs text-andros-primary placeholder:text-andros-muted"
-      />
-      <div className="grid grid-cols-2 gap-2">
-        <button type="button" onClick={onCancel} className="min-h-[36px] rounded-lg border border-andros-border text-xs text-andros-muted hover:text-andros-primary">
-          Cancelar
-        </button>
-        <button type="button" disabled={busy} onClick={send} className="min-h-[36px] rounded-lg bg-andros-accent text-white text-xs font-semibold flex items-center justify-center gap-1.5 disabled:opacity-60">
-          <Send className="w-3.5 h-3.5" />
-          {busy ? "Enviando…" : "Postularme"}
-        </button>
-      </div>
-    </div>
-  );
-};
-
-// ----------------------------------------------------------------------------
-// Modal
-// ----------------------------------------------------------------------------
+type View = { kind: "list" } | { kind: "publish" } | { kind: "detail"; postId: string; tab?: "details" | "solutions" | "apply" };
 
 export const ArenaModal: React.FC = () => {
   const open = useMarketStore((s) => s.arenaOpen);
   const setOpen = useMarketStore((s) => s.setArenaOpen);
   const animations = useSettingsStore((s) => s.animations);
-  const user = useCloudStore((s) => s.user);
-
-  const [tab, setTab] = useState<Kind>("challenge");
-  const [items, setItems] = useState<Opportunity[]>(DEMO_OPPORTUNITIES);
-  const [loading, setLoading] = useState(false);
-  const [showForm, setShowForm] = useState(false);
-  const [applyingId, setApplyingId] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [category, setCategory] = useState("Todas");
-
-  const load = useCallback(async () => {
-    const supabase = getSupabaseBrowserClient();
-    if (!supabase) return;
-    setLoading(true);
-    const { data, error } = await supabase
-      .from("arena_opportunities")
-      .select("id, kind, title, company, category, description, reward")
-      .order("created_at", { ascending: false })
-      .limit(100);
-    setLoading(false);
-    if (error) {
-      setNotice(`Modo demostración. ${SETUP_HINT}`);
-      return;
-    }
-    const cloud = ((data ?? []) as Row[]).map(toOpportunity);
-    // Las ofertas locales (demo y simuladas) se conservan debajo de las de la nube.
-    setItems((prev) => [...cloud, ...prev.filter((p) => p.isLocal)]);
-  }, []);
-
-  useEffect(() => {
-    if (open) void load();
-  }, [open, load, user?.id]);
 
   useEffect(() => {
     if (!open) return;
@@ -338,22 +47,18 @@ export const ArenaModal: React.FC = () => {
     return () => window.removeEventListener("keydown", onKey);
   }, [open, setOpen]);
 
-  const visible = useMemo(
-    () => items.filter((i) => i.kind === tab && (category === "Todas" || i.category === category)),
-    [items, tab, category]
-  );
-
   if (typeof document === "undefined") return null;
+  const reduced = animations === "reduced";
 
   return createPortal(
     <AnimatePresence>
       {open && (
         <motion.div
-          className="fixed inset-0 z-[85] flex items-end md:items-center justify-center p-3 bg-black/40 backdrop-blur-sm"
+          className="fixed inset-0 z-[85] flex items-end md:items-center justify-center p-0 md:p-4 bg-black/40 backdrop-blur-sm"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: animations === "reduced" ? 0 : 0.18 }}
+          transition={{ duration: reduced ? 0 : 0.18 }}
           onPointerDown={() => setOpen(false)}
         >
           <motion.div
@@ -361,127 +66,13 @@ export const ArenaModal: React.FC = () => {
             aria-modal="true"
             aria-label="Andros Arena"
             onPointerDown={(e) => e.stopPropagation()}
-            initial={{ opacity: 0, y: 24, scale: 0.95 }}
+            initial={{ opacity: 0, y: 24, scale: 0.97 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 16, scale: 0.97 }}
-            transition={animations === "reduced" ? { duration: 0 } : { type: "spring", stiffness: 450, damping: 32, mass: 0.8 }}
-            className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl bg-andros-card border border-andros-border shadow-hud-light dark:shadow-hud-dark p-5 space-y-4"
+            exit={{ opacity: 0, y: 16, scale: 0.98 }}
+            transition={reduced ? { duration: 0 } : { type: "spring", stiffness: 450, damping: 34, mass: 0.8 }}
+            className="relative w-full max-w-4xl h-[92vh] md:h-[88vh] flex flex-col rounded-t-3xl md:rounded-2xl bg-andros-card border border-andros-border shadow-hud-light dark:shadow-hud-dark overflow-hidden"
           >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-andros-primary">
-                <Swords className="w-4 h-4 text-andros-accent" />
-                <h2 className="text-sm font-semibold">Andros Arena · Retos y Empleos</h2>
-              </div>
-              <button type="button" onClick={() => setOpen(false)} aria-label="Cerrar Arena" className="p-1.5 rounded-lg text-andros-muted hover:text-andros-primary hover:bg-andros-border/40">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {showForm ? (
-              <PublishForm
-                onCancel={() => setShowForm(false)}
-                onPublished={(o, msg) => {
-                  setItems((prev) => [o, ...prev]);
-                  setTab(o.kind);
-                  setCategory("Todas");
-                  setShowForm(false);
-                  setNotice(msg);
-                }}
-              />
-            ) : (
-              <>
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-andros-border/30 flex-1 min-w-[220px]">
-                    {(["challenge", "job"] as Kind[]).map((k) => (
-                      <button
-                        key={k}
-                        type="button"
-                        onClick={() => setTab(k)}
-                        className={`min-h-[36px] rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 ${
-                          tab === k ? "bg-andros-card text-andros-primary shadow-sm border border-andros-border-active" : "text-andros-muted"
-                        }`}
-                      >
-                        {k === "challenge" ? <Trophy className="w-3.5 h-3.5" /> : <Briefcase className="w-3.5 h-3.5" />}
-                        {k === "challenge" ? "Retos / Concursos" : "Vacantes"}
-                      </button>
-                    ))}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setNotice(null);
-                      setShowForm(true);
-                    }}
-                    className="min-h-[40px] px-3 rounded-xl bg-andros-accent text-white text-xs font-semibold flex items-center gap-1.5"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    Publicar
-                  </button>
-                </div>
-
-                <div className="flex flex-wrap gap-1.5">
-                  {["Todas", ...CATEGORIES].map((c) => (
-                    <button
-                      key={c}
-                      type="button"
-                      onClick={() => setCategory(c)}
-                      className={`px-2.5 py-1 rounded-full text-[11px] border ${
-                        category === c ? "border-andros-accent text-andros-accent bg-andros-accent/10" : "border-andros-border text-andros-muted hover:text-andros-primary"
-                      }`}
-                    >
-                      {c}
-                    </button>
-                  ))}
-                </div>
-
-                {notice && (
-                  <p role="status" className="text-[11px] text-andros-muted rounded-lg bg-andros-border/30 px-3 py-2">
-                    {notice}
-                  </p>
-                )}
-                {loading && <p className="text-[11px] text-andros-muted">Cargando…</p>}
-
-                <ul className="space-y-2.5">
-                  {visible.length === 0 && !loading && (
-                    <li className="text-xs text-andros-muted text-center py-6">No hay publicaciones en esta categoría todavía.</li>
-                  )}
-                  {visible.map((o) => (
-                    <li key={o.id} className="rounded-xl border border-andros-border bg-andros-canvas p-3.5">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <h3 className="text-sm font-semibold text-andros-primary">{o.title}</h3>
-                          <p className="text-[11px] text-andros-muted mt-0.5">
-                            {o.company} · {o.category}
-                            {o.isLocal ? " · demo" : ""}
-                          </p>
-                        </div>
-                        {o.reward && <span className="shrink-0 text-[11px] font-mono text-andros-success text-right">{o.reward}</span>}
-                      </div>
-                      <p className="mt-2 text-xs leading-relaxed text-andros-muted">{o.description}</p>
-                      {applyingId === o.id ? (
-                        <ApplyForm
-                          opportunity={o}
-                          onCancel={() => setApplyingId(null)}
-                          onDone={(msg) => {
-                            setApplyingId(null);
-                            setNotice(msg);
-                          }}
-                        />
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => setApplyingId(o.id)}
-                          className="mt-3 min-h-[36px] px-3 rounded-lg border border-andros-border-active text-xs font-medium text-andros-primary hover:border-andros-accent flex items-center gap-1.5"
-                        >
-                          <Check className="w-3.5 h-3.5 text-andros-accent" />
-                          {o.kind === "challenge" ? "Participar con mi espacio" : "Postularme con mi espacio"}
-                        </button>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
+            <ArenaContent onClose={() => setOpen(false)} />
           </motion.div>
         </motion.div>
       )}
@@ -489,3 +80,327 @@ export const ArenaModal: React.FC = () => {
     document.body
   );
 };
+
+const ArenaContent: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  const userId = useCloudStore((s) => s.user?.id);
+  const [posts, setPosts] = useState<ArenaPost[]>(EXAMPLE_POSTS);
+  const [cloudReady, setCloudReady] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [modeNotice, setModeNotice] = useState<string | null>(null);
+  const [view, setView] = useState<View>({ kind: "list" });
+
+  // Filtros
+  const [text, setText] = useState("");
+  const [type, setType] = useState<ArenaPostType | null>(null);
+  const [discipline, setDiscipline] = useState<ArenaDiscipline | null>(null);
+  const [level, setLevel] = useState<ArenaLevel | null>(null);
+  const [skills, setSkills] = useState<string[]>([]);
+  const requestRef = useRef(0);
+
+  const load = useCallback(async () => {
+    const id = ++requestRef.current;
+    setLoading(true);
+    const result = await loadArenaPosts({
+      text: text.trim() || undefined,
+      type: type ?? undefined,
+      discipline: discipline ?? undefined,
+      level: level ?? undefined,
+    });
+    if (id !== requestRef.current) return; // Respuesta vieja: se descarta.
+    setLoading(false);
+    setPosts(result.posts);
+    setCloudReady(result.cloudReady);
+    setModeNotice(result.notice ?? null);
+  }, [text, type, discipline, level]);
+
+  // Recarga (con filtros en la base de datos) con un pequeño retardo al escribir.
+  useEffect(() => {
+    const t = setTimeout(() => void load(), text ? 300 : 0);
+    return () => clearTimeout(t);
+  }, [load, text, userId]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 7000);
+    return () => clearTimeout(t);
+  }, [notice]);
+
+  // Filtrado instantáneo en el cliente (locales y ejemplos, y doble check de la nube).
+  const visible = useMemo(() => {
+    const q = normalizeText(text).trim();
+    return posts.filter((p) => {
+      if (p.moderation.status === "rejected") return false;
+      if (type && p.type !== type) return false;
+      if (discipline && !p.tags.discipline.includes(discipline)) return false;
+      if (level && !p.tags.level.includes(level)) return false;
+      if (skills.length > 0 && !skills.every((s) => p.tags.skills.includes(s))) return false;
+      if (q) {
+        const hay = normalizeText(`${p.title} ${p.organization} ${p.description} ${p.tags.skills.join(" ")} ${p.tags.discipline.join(" ")}`);
+        if (!q.split(" ").every((w) => hay.includes(w))) return false;
+      }
+      return true;
+    });
+  }, [posts, text, type, discipline, level, skills]);
+
+  // Conteos para las píldoras (sobre todas las publicaciones cargadas).
+  const counts = useMemo(() => {
+    const disc = new Map<string, number>();
+    const lvl = new Map<string, number>();
+    const sk = new Map<string, number>();
+    const typ = new Map<string, number>();
+    for (const p of posts) {
+      typ.set(p.type, (typ.get(p.type) ?? 0) + 1);
+      p.tags.discipline.forEach((d) => disc.set(d, (disc.get(d) ?? 0) + 1));
+      p.tags.level.forEach((l) => lvl.set(l, (lvl.get(l) ?? 0) + 1));
+      p.tags.skills.forEach((s) => sk.set(s, (sk.get(s) ?? 0) + 1));
+    }
+    const topSkills = [...sk.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 14).map(([s]) => s);
+    return { disc, lvl, typ, topSkills };
+  }, [posts]);
+
+  const hasFilters = Boolean(text || type || discipline || level || skills.length);
+  const clearFilters = () => {
+    setText("");
+    setType(null);
+    setDiscipline(null);
+    setLevel(null);
+    setSkills([]);
+  };
+
+  const solutionCount = (p: ArenaPost) => EXAMPLE_SUBMISSIONS.filter((s) => s.postId === p.id).length;
+  const detailPost = view.kind === "detail" ? posts.find((p) => p.id === view.postId) : undefined;
+
+  const pill = (active: boolean, tone: "accent" | "success" | "neutral" = "accent") =>
+    `shrink-0 px-2.5 py-1 rounded-full text-[11px] border spring-micro ${
+      active
+        ? tone === "success"
+          ? "border-andros-success text-andros-success bg-andros-success/10"
+          : tone === "neutral"
+            ? "border-andros-primary text-andros-primary bg-andros-border/50"
+            : "border-andros-accent text-andros-accent bg-andros-accent/10"
+        : "border-andros-border text-andros-muted hover:text-andros-primary"
+    }`;
+
+  return (
+    <>
+      {/* Cabecera */}
+      <div className="flex items-center justify-between gap-3 px-5 h-14 border-b border-andros-border shrink-0">
+        <div className="md:hidden absolute left-1/2 -translate-x-1/2 top-1.5 w-10 h-1 rounded-full bg-andros-border-active" />
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="p-1.5 rounded-lg bg-andros-accent/15 text-andros-accent">
+            <Swords className="w-4 h-4" />
+          </div>
+          <div className="min-w-0">
+            <h2 className="text-[13px] font-semibold text-andros-primary leading-tight">Andros Arena</h2>
+            <p className="text-[10px] font-mono text-andros-muted truncate flex items-center gap-1">
+              {cloudReady ? <Cloud className="w-3 h-3 text-andros-success" /> : <HardDrive className="w-3 h-3" />}
+              {cloudReady ? "Nube conectada" : "Modo local"} · retos, actividades, prácticas y empleos
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5">
+          {view.kind === "list" && (
+            <button
+              type="button"
+              onClick={() => {
+                setNotice(null);
+                setView({ kind: "publish" });
+              }}
+              className="h-9 px-3 rounded-xl bg-andros-accent text-white text-xs font-semibold flex items-center gap-1.5"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Publicar
+            </button>
+          )}
+          <button type="button" onClick={onClose} aria-label="Cerrar Arena" className="p-1.5 rounded-lg text-andros-muted hover:text-andros-primary hover:bg-andros-border/40">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+
+      {notice && (
+        <p role="status" className="mx-5 mt-3 text-[11px] text-andros-primary rounded-lg bg-andros-success/10 border border-andros-success/30 px-3 py-2 shrink-0">
+          {notice}
+        </p>
+      )}
+
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        {view.kind === "publish" && (
+          <div className="px-5 py-4">
+            <ArenaPublishForm
+              cloudReady={cloudReady}
+              onCancel={() => setView({ kind: "list" })}
+              onPublished={(post, msg) => {
+                setPosts((prev) => [post, ...prev.filter((p) => p.id !== post.id)]);
+                setNotice(msg);
+                clearFilters();
+                setView({ kind: "detail", postId: post.id });
+              }}
+            />
+          </div>
+        )}
+
+        {view.kind === "detail" && detailPost && (
+          <div className="px-5 py-4">
+            <ArenaPostDetail
+              key={detailPost.id}
+              post={detailPost}
+              cloudReady={cloudReady}
+              initialTab={view.tab}
+              onBack={() => setView({ kind: "list" })}
+              onNotice={setNotice}
+              onDeleted={(id) => {
+                setPosts((prev) => prev.filter((p) => p.id !== id));
+                setNotice("Publicación eliminada de este navegador.");
+                setView({ kind: "list" });
+              }}
+            />
+          </div>
+        )}
+
+        {(view.kind === "list" || (view.kind === "detail" && !detailPost)) && (
+          <>
+            {/* Buscador y filtros (fijos arriba) */}
+            <div className="sticky top-0 z-10 bg-andros-card/95 backdrop-blur px-5 pt-4 pb-3 space-y-2.5 border-b border-andros-border">
+              <div className="flex items-center gap-2 h-10 px-3 rounded-xl bg-andros-canvas border border-andros-border focus-within:border-andros-accent spring-micro">
+                <Search className="w-4 h-4 text-andros-muted shrink-0" />
+                <input
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  placeholder="Busca por título, organización, habilidad… (ej. FEA, Next.js, drone)"
+                  aria-label="Buscar en la Arena"
+                  className="flex-1 min-w-0 bg-transparent text-xs text-andros-primary placeholder:text-andros-muted outline-none"
+                />
+                {loading && <Loader2 className="w-3.5 h-3.5 animate-spin text-andros-muted" />}
+                {hasFilters && (
+                  <button type="button" onClick={clearFilters} className="text-[10px] text-andros-muted hover:text-andros-primary shrink-0">
+                    Limpiar
+                  </button>
+                )}
+              </div>
+
+              <FilterRow label="Tipo">
+                <button type="button" onClick={() => setType(null)} className={pill(type === null, "neutral")}>
+                  Todos
+                </button>
+                {ARENA_TYPES.map((t) => (
+                  <button key={t} type="button" onClick={() => setType(type === t ? null : t)} className={pill(type === t, "neutral")}>
+                    {ARENA_TYPE_LABELS[t]} <span className="font-mono opacity-70">{counts.typ.get(t) ?? 0}</span>
+                  </button>
+                ))}
+              </FilterRow>
+              <FilterRow label="Disciplina" ai>
+                {ARENA_DISCIPLINES.filter((d) => counts.disc.has(d) || discipline === d).map((d) => (
+                  <button key={d} type="button" onClick={() => setDiscipline(discipline === d ? null : d)} className={pill(discipline === d)}>
+                    {d} <span className="font-mono opacity-70">{counts.disc.get(d) ?? 0}</span>
+                  </button>
+                ))}
+              </FilterRow>
+              <FilterRow label="Nivel" ai>
+                {ARENA_LEVELS.filter((l) => counts.lvl.has(l) || level === l).map((l) => (
+                  <button key={l} type="button" onClick={() => setLevel(level === l ? null : l)} className={pill(level === l, "success")}>
+                    {l} <span className="font-mono opacity-70">{counts.lvl.get(l) ?? 0}</span>
+                  </button>
+                ))}
+              </FilterRow>
+              <FilterRow label="Habilidades" ai>
+                {[...new Set([...skills, ...counts.topSkills])].map((s) => {
+                  const on = skills.includes(s);
+                  return (
+                    <button key={s} type="button" onClick={() => setSkills(on ? skills.filter((x) => x !== s) : [...skills, s])} className={pill(on, "neutral")}>
+                      {s}
+                    </button>
+                  );
+                })}
+              </FilterRow>
+            </div>
+
+            <div className="px-5 py-4 space-y-3">
+              {modeNotice && <p className="text-[11px] text-andros-muted rounded-lg bg-andros-border/30 px-3 py-2">{modeNotice}</p>}
+
+              <p className="text-[10px] font-mono text-andros-muted">
+                {visible.length} publicación(es){hasFilters ? " con estos filtros" : ""}
+              </p>
+
+              {visible.length === 0 && !loading && (
+                <div className="text-center py-10 space-y-2">
+                  <p className="text-xs text-andros-muted">Nada coincide con estos filtros.</p>
+                  <button type="button" onClick={clearFilters} className="h-8 px-3 rounded-lg border border-andros-border text-[11px] text-andros-primary">
+                    Quitar filtros
+                  </button>
+                </div>
+              )}
+
+              <ul className="grid gap-3 md:grid-cols-2">
+                {visible.map((p) => {
+                  const sols = solutionCount(p);
+                  return (
+                    <li key={p.id} className="rounded-xl border border-andros-border bg-andros-canvas p-3.5 flex flex-col gap-2 hover:border-andros-border-active spring-micro">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <TypeBadge post={p} />
+                        {p.isExample && <span className="px-1.5 py-0.5 rounded-md text-[9px] font-mono uppercase tracking-wider bg-andros-border/60 text-andros-muted">Ejemplo</span>}
+                        {p.isLocal && <span className="px-1.5 py-0.5 rounded-md text-[9px] font-mono uppercase tracking-wider bg-andros-border/60 text-andros-muted">Este navegador</span>}
+                        {!p.isExample && p.engine === "gemini" && (
+                          <span className="flex items-center gap-0.5 text-[9px] font-mono text-andros-accent" title="Etiquetas generadas por el escáner IA">
+                            <Sparkles className="w-2.5 h-2.5" /> IA
+                          </span>
+                        )}
+                        {p.stipend && <span className="ml-auto text-[10px] font-mono text-andros-success truncate max-w-[45%]">{p.stipend}</span>}
+                      </div>
+                      <button type="button" onClick={() => setView({ kind: "detail", postId: p.id })} className="text-left">
+                        <h3 className="text-[13px] font-semibold text-andros-primary leading-snug hover:text-andros-accent">{p.title}</h3>
+                      </button>
+                      <p className="text-[11px] text-andros-muted flex flex-wrap gap-x-2.5">
+                        <span className="flex items-center gap-1">
+                          <Building2 className="w-3 h-3" />
+                          {p.organization}
+                        </span>
+                        {p.location && (
+                          <span className="flex items-center gap-1">
+                            <MapPin className="w-3 h-3" />
+                            {p.location}
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-[11px] leading-relaxed text-andros-muted line-clamp-2">{p.description}</p>
+                      <TagRow post={p} max={4} />
+                      <div className="mt-auto pt-1 flex flex-wrap items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setView({ kind: "detail", postId: p.id, tab: "apply" })}
+                          className="h-8 px-2.5 rounded-lg bg-andros-accent text-white text-[11px] font-semibold flex items-center gap-1.5"
+                        >
+                          <Send className="w-3.5 h-3.5" />
+                          {isSolutionType(p) ? "Enviar solución" : "Postular"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setView({ kind: "detail", postId: p.id, tab: "solutions" })}
+                          className="h-8 px-2.5 rounded-lg border border-andros-border text-[11px] text-andros-primary hover:border-andros-border-active flex items-center gap-1"
+                        >
+                          {sols > 0 ? `Ver ${sols} solución(es) de ejemplo` : "Ver soluciones"}
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          </>
+        )}
+      </div>
+    </>
+  );
+};
+
+const FilterRow: React.FC<{ label: string; ai?: boolean; children: React.ReactNode }> = ({ label, ai, children }) => (
+  <div className="flex items-center gap-2 min-w-0">
+    <span className="w-[74px] shrink-0 text-[10px] font-mono uppercase tracking-wider text-andros-muted flex items-center gap-1">
+      {ai && <Sparkles className="w-2.5 h-2.5 text-andros-accent" />}
+      {label}
+    </span>
+    <div className="flex gap-1.5 overflow-x-auto no-scrollbar min-w-0">{children}</div>
+  </div>
+);
