@@ -310,3 +310,20 @@ export function runLocalOracle(prompt: string, context: OracleCanvasContext): Or
 
   return { reply: replies.join(" "), actions, engine: "local" };
 }
+
+/**
+ * Reflejos locales (0 ms, sin gasto de API): órdenes cortas y sin ambigüedad
+ * que el intérprete local resuelve igual de bien que un modelo. Devuelve `null`
+ * si la petición necesita IA de verdad (análisis, redacción, preguntas…).
+ */
+export function localReflex(prompt: string, context: OracleCanvasContext): OracleResponseBody | null {
+  const p = normalize(prompt).replace(/[.!¡¿?]+/g, "").replace(/^(por favor|oraculo)[, ]+/, "").trim();
+  if (p.length === 0 || p.length > 48) return null;
+  if (/^(ordena|organiza|acomoda|alinea|limpia)( el| mi| todo el)? ?(lienzo|tablero|espacio|todo|nodos|tarjetas)?( por favor)?$/.test(p)) {
+    return runLocalOracle("ordena el lienzo", context);
+  }
+  if (/^conecta( los| todos los)? (nodos|tarjetas|bloques) (sueltos|aislados)$/.test(p)) {
+    return runLocalOracle("conecta los nodos sueltos", context);
+  }
+  return null;
+}

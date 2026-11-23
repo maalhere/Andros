@@ -6,7 +6,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { GraduationCap, X } from "lucide-react";
 import { useShortcutsGuideStore, type ShortcutsGuideTab } from "@/store/useShortcutsGuideStore";
 import { useOnboardingStore } from "@/store/useOnboardingStore";
-import { useSettingsStore } from "@/store/useSettingsStore";
+import { useIsExpert, useSettingsStore } from "@/store/useSettingsStore";
 import { SPRING_SNAPPY } from "@/lib/motion";
 import { useModKey } from "@/components/shared/Kbd";
 import {
@@ -33,11 +33,14 @@ interface Row {
   keys: string[];
   label: string;
   note?: string;
+  /** Solo se lista en Modo Experto (3D, CodeLab, Biblioteca). */
+  expertOnly?: boolean;
 }
 
 const useGroups = (): { title: string; rows: Row[] }[] => {
   const mod = useModKey();
-  return [
+  const expert = useIsExpert();
+  const groups: { title: string; rows: Row[] }[] = [
     {
       title: "Navegación y pestañas",
       rows: [
@@ -57,7 +60,7 @@ const useGroups = (): { title: string; rows: Row[] }[] => {
         { keys: ["N"], label: "Nuevo nodo" },
         { keys: ["C"], label: "Conectar con cables" },
         { keys: ["L"], label: "Nuevo enlace web o YouTube" },
-        { keys: ["M"], label: "Nuevo CodeLab" },
+        { keys: ["M"], label: "Nuevo CodeLab", expertOnly: true },
         { keys: ["D"], label: "Dibujo a mano alzada" },
         { keys: ["E"], label: "Borrador o lápiz", note: "con el lápiz activo" },
         { keys: [mod, "Z"], label: "Deshacer el último trazo", note: "con el lápiz activo" },
@@ -69,10 +72,11 @@ const useGroups = (): { title: string; rows: Row[] }[] => {
       rows: [
         { keys: [mod, "K"], label: "Paleta de comandos" },
         { keys: ["O"], label: "Oráculo IA" },
-        { keys: ["B"], label: "Biblioteca científica" },
+        { keys: ["B"], label: "Biblioteca científica", expertOnly: true },
       ],
     },
   ];
+  return groups.map((g) => ({ ...g, rows: g.rows.filter((r) => expert || !r.expertOnly) }));
 };
 
 const TABS: { id: ShortcutsGuideTab; label: string }[] = [

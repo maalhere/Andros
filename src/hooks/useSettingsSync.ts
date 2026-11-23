@@ -28,6 +28,7 @@ export function collectPreferences(): Preferences {
     canvasBackground: s.canvasBackground,
     animations: s.animations,
     autosave: s.autosave,
+    experienceMode: s.experienceMode,
     onboardingDone: s.onboardingDone,
   };
 }
@@ -50,7 +51,10 @@ export function useSettingsSync() {
     suppress = true;
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY);
-      applyAll({ ...DEFAULT_PREFERENCES, ...sanitizePreferences(raw ? JSON.parse(raw) : null) });
+      const stored = sanitizePreferences(raw ? JSON.parse(raw) : null);
+      // Quien ya usaba Andros antes del Modo Simple conserva todas sus herramientas.
+      if (raw && !stored.experienceMode) stored.experienceMode = "expert";
+      applyAll({ ...DEFAULT_PREFERENCES, ...stored });
     } catch {
       applyAll(DEFAULT_PREFERENCES);
     }

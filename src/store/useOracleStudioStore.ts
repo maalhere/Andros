@@ -44,6 +44,8 @@ interface OracleStudioState {
   mobilePane: StudioMobilePane;
   linkChoice: string;
   isThinking: boolean;
+  /** Texto de la respuesta que llega por streaming (se vacía al terminar). */
+  streamingText: string;
   /** Fuentes de la Biblioteca adjuntas como referencias citables (orden = [1], [2]…). */
   references: LibrarySource[];
 
@@ -60,6 +62,8 @@ interface OracleStudioState {
   setMobilePane: (pane: StudioMobilePane) => void;
   setLinkChoice: (choice: string) => void;
   setThinking: (thinking: boolean) => void;
+  setStreamingText: (text: string) => void;
+  appendStreamingText: (text: string) => void;
   /** Adjunta una fuente (si ya estaba, no la duplica). Devuelve su número [n]. */
   addReference: (source: LibrarySource) => number;
   removeReference: (id: string) => void;
@@ -76,6 +80,7 @@ export const useOracleStudioStore = create<OracleStudioState>((set, get) => ({
   mobilePane: "chat",
   linkChoice: STUDIO_LINK_AUTO,
   isThinking: false,
+  streamingText: "",
   references: [],
 
   addMessage: (message) =>
@@ -117,6 +122,10 @@ export const useOracleStudioStore = create<OracleStudioState>((set, get) => ({
   setLinkChoice: (linkChoice) => set({ linkChoice }),
 
   setThinking: (isThinking) => set({ isThinking }),
+
+  setStreamingText: (streamingText) => set({ streamingText }),
+
+  appendStreamingText: (text) => set((state) => ({ streamingText: state.streamingText + text })),
 
   addReference: (source) => {
     const current = get().references;

@@ -20,6 +20,11 @@ export const QUICK_ADD_OPTIONS: { kind: QuickAddKind; label: string; description
   { kind: "ai-import", label: "Importar chat", description: "Trae una conversación de ChatGPT, Claude o Gemini" },
 ];
 
+/** Opciones de «+ Agregar» según el modo: el Modo Simple oculta la subida de archivos 3D. */
+export function quickAddOptionsFor(expert: boolean) {
+  return expert ? QUICK_ADD_OPTIONS : QUICK_ADD_OPTIONS.filter((o) => o.kind !== "file3d");
+}
+
 // ----------------------------------------------------------------------------
 // Archivos elegidos en el menú que esperan a que su nodo aparezca en pantalla.
 // FileNodeView los recoge al montarse y los adjunta (lectura + subida a la nube).

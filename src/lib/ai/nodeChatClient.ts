@@ -9,6 +9,7 @@
 
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { getUserAiKey } from "@/store/useAiProvidersStore";
+import { checkFreeQuota, recordFreeQuery } from "@/store/useAiQuotaStore";
 import { collectUpstreamContext } from "@/lib/canvas/contextGraph";
 import { AI_PROVIDER_LABELS, type NodeChatResponse } from "@/lib/ai/providers";
 import { PLATFORM_LABELS, turnKey, type ImportedTurn } from "@/lib/ai/chatImport";
@@ -67,6 +68,16 @@ export async function sendAiNodeTurn(nodeId: string, text: string, opts: { resyn
     return;
   }
 
+  // Gemini sin clave propia gasta la clave del servidor: tope diario (15/día) con aviso amable.
+  const usesFreeQuota = provider === "gemini" && !apiKey;
+  if (usesFreeQuota) {
+    const quota = checkFreeQuota();
+    if (!quota.ok) {
+      patchAiNode(nodeId, () => ({ status: "error", errorMessage: quota.message }));
+      return;
+    }
+  }
+
   const { nodes, connections } = useWorkspaceStore.getState();
   const context = collectUpstreamContext(nodes, connections, nodeId);
   const userMessage: AiChatMessage = {
@@ -97,6 +108,7 @@ export async function sendAiNodeTurn(nodeId: string, text: string, opts: { resyn
       patchAiNode(nodeId, () => ({ status: "error", errorMessage: data.error.message }));
       return;
     }
+    if (usesFreeQuota) recordFreeQuery();
     patchAiNode(nodeId, (current) => ({
       messages: [
         ...current.messages,

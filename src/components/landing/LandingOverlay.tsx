@@ -265,11 +265,12 @@ export const LandingOverlay: React.FC<LandingOverlayProps> = ({ isMobile }) => {
                 id="andros-landing-title"
                 className="mt-5 md:mt-6 max-w-[22ch] text-2xl md:text-[2rem] font-semibold leading-tight tracking-tight text-andros-primary"
               >
-                El lienzo de ingeniería donde tus piezas 3D, cálculos y fuentes viven juntos.
+                Organiza tu evento o tu equipo en tiempo real, con IA.
               </h1>
               <p className="mt-3 max-w-md text-sm md:text-base leading-relaxed text-andros-muted">
-                Sube un STL o 3MF, dibuja encima, enlaza cálculos y papers citables, y redacta el
-                informe con el Oráculo IA. Gratis, sin instalar nada.
+                Sin el caos de WhatsApp ni hojas de cálculo imposibles en el celular: tarjetas,
+                cables y un Oráculo IA que ordena todo mientras tu equipo lo ve al instante. Gratis,
+                sin instalar nada.
               </p>
 
               {/* CTA: en el teléfono se queda pegado abajo mientras se desplaza la portada */}

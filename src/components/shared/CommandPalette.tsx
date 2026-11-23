@@ -7,6 +7,11 @@ import {
   Bot,
   Cable,
   Code2,
+  Gauge,
+  Headphones,
+  Share2,
+  StickyNote,
+  Users,
   Crown,
   FileBox,
   CircleHelp,
@@ -31,7 +36,11 @@ import { useCommandPaletteStore } from "@/store/useCommandPaletteStore";
 import { NODE_ARCHETYPE_LABELS, useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { useLibraryStore } from "@/store/useLibraryStore";
 import { useMarketStore } from "@/store/useMarketStore";
-import { useSettingsStore } from "@/store/useSettingsStore";
+import { useIsExpert, useSettingsStore } from "@/store/useSettingsStore";
+import { useCollabStore } from "@/store/useCollabStore";
+import { useSocialStore } from "@/store/useSocialStore";
+import { joinCollabRoom } from "@/lib/collab/useCollabRoom";
+import { quickAdd } from "@/lib/canvas/quickAdd";
 import { useAiProvidersStore } from "@/store/useAiProvidersStore";
 import { useShortcutsGuideStore } from "@/store/useShortcutsGuideStore";
 import { SHORTCUT_KEYS } from "@/hooks/useGlobalShortcuts";
@@ -43,6 +52,9 @@ import type { NodeArchetype } from "@/types/workspace";
 // ANDROS — PALETA DE COMANDOS (⌘K / Ctrl+K)
 // Buscar y saltar a nodos, abrir Oráculo, Biblioteca, Arena, cambiar el tema
 // o crear un nodo. ↑↓ para moverse, Enter para ejecutar, Esc para cerrar.
+// Reflejos locales: TODAS las acciones de esta paleta (crear tarjeta, cambiar de
+// modo, abrir sala, compartir…) se ejecutan en el navegador al instante, sin
+// llamar a ningún modelo de IA ni gastar consultas.
 // ============================================================================
 
 interface Command {
@@ -118,6 +130,7 @@ export const CommandPalette: React.FC = () => {
 const PaletteDialog: React.FC<{ reduced: boolean; onClose: () => void }> = ({ reduced, onClose }) => {
   const nodes = useWorkspaceStore((s) => s.nodes);
   const theme = useWorkspaceStore((s) => s.theme);
+  const expert = useIsExpert();
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -142,6 +155,52 @@ const PaletteDialog: React.FC<{ reduced: boolean; onClose: () => void }> = ({ re
         shortcut: SHORTCUT_KEYS.newNode,
         icon: <Plus className="w-4 h-4" />,
         run: () => ws().spawnNode(),
+      },
+      {
+        id: "new-card",
+        group: "Acciones",
+        label: "Nueva tarjeta",
+        hint: "Una nota en el centro de tu vista",
+        keywords: "crear nota bloque tarjeta apunte",
+        icon: <StickyNote className="w-4 h-4" />,
+        run: () => quickAdd("note"),
+      },
+      {
+        id: "mode",
+        group: "Acciones",
+        label: expert ? "Cambiar a Modo Simple" : "Cambiar a Modo Experto",
+        hint: expert ? "Oculta 3D, CodeLab y Biblioteca" : "Muestra 3D, CodeLab y Biblioteca",
+        keywords: "modo simple experto avanzado herramientas ingenieria",
+        icon: <Gauge className="w-4 h-4" />,
+        run: () => useSettingsStore.getState().setExperienceMode(expert ? "simple" : "expert"),
+      },
+      {
+        id: "voice-room",
+        group: "Acciones",
+        label: "Abrir sala de voz",
+        keywords: "voz llamada sala hablar microfono equipo",
+        icon: <Headphones className="w-4 h-4" />,
+        run: () => {
+          const collab = useCollabStore.getState();
+          if (collab.inCall) collab.setPanelOpen(true);
+          else void joinCollabRoom();
+        },
+      },
+      {
+        id: "share",
+        group: "Acciones",
+        label: "Compartir espacio",
+        keywords: "invitar enlace colaborar equipo",
+        icon: <Share2 className="w-4 h-4" />,
+        run: () => useSocialStore.getState().setShareOpen(true),
+      },
+      {
+        id: "friends",
+        group: "Acciones",
+        label: "Amigos",
+        keywords: "contactos usuarios solicitudes",
+        icon: <Users className="w-4 h-4" />,
+        run: () => useSocialStore.getState().setFriendsOpen(true),
       },
       {
         id: "oracle",
@@ -273,8 +332,10 @@ const PaletteDialog: React.FC<{ reduced: boolean; onClose: () => void }> = ({ re
       icon: NODE_ICONS[n.type],
       run: () => jumpToNode(n.id),
     }));
-    return [...actions, ...nodeCommands];
-  }, [nodes, theme]);
+    // Biblioteca Científica y CodeLab son del Modo Experto.
+    const visible = expert ? actions : actions.filter((c) => c.id !== "library" && c.id !== "codelab");
+    return [...visible, ...nodeCommands];
+  }, [nodes, theme, expert]);
 
   const results = useMemo(() => {
     const tokens = normalize(query).split(/\s+/).filter(Boolean);

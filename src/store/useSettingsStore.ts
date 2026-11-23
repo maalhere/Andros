@@ -12,6 +12,12 @@ export type CableStyle = "bezier" | "orthogonal" | "straight";
 export type CanvasBackground = "dots" | "grid" | "plain";
 export type AnimationLevel = "full" | "reduced";
 export type AutosaveMode = "instant" | "moderate";
+/**
+ * Complejidad progresiva: "simple" (por defecto) deja al frente notas, cables,
+ * lápiz, Oráculo, sala de voz y compartir; "expert" añade 3D, CodeLab y la
+ * Biblioteca Científica (nada se borra: solo se muestra u oculta).
+ */
+export type ExperienceMode = "simple" | "expert";
 
 export interface Preferences {
   theme: ThemeMode;
@@ -20,6 +26,7 @@ export interface Preferences {
   canvasBackground: CanvasBackground;
   animations: AnimationLevel;
   autosave: AutosaveMode;
+  experienceMode: ExperienceMode;
   /** `true` cuando el usuario terminó o saltó el tutorial guiado de 5 pasos. */
   onboardingDone: boolean;
 }
@@ -31,6 +38,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   canvasBackground: "dots",
   animations: "full",
   autosave: "instant",
+  experienceMode: "simple",
   onboardingDone: false,
 };
 
@@ -55,6 +63,7 @@ export function sanitizePreferences(raw: unknown): Partial<Preferences> {
     out.canvasBackground = r.canvasBackground;
   if (r.animations === "full" || r.animations === "reduced") out.animations = r.animations;
   if (r.autosave === "instant" || r.autosave === "moderate") out.autosave = r.autosave;
+  if (r.experienceMode === "simple" || r.experienceMode === "expert") out.experienceMode = r.experienceMode;
   if (typeof r.onboardingDone === "boolean") out.onboardingDone = r.onboardingDone;
   return out;
 }
@@ -66,6 +75,7 @@ interface SettingsState extends SettingsValues {
   setModalOpen: (open: boolean) => void;
   /** Aplica varios ajustes a la vez (ignora `theme`, que vive en el workspace). */
   applyPreferences: (prefs: Partial<Preferences>) => void;
+  setExperienceMode: (mode: ExperienceMode) => void;
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
@@ -74,8 +84,10 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   canvasBackground: DEFAULT_PREFERENCES.canvasBackground,
   animations: DEFAULT_PREFERENCES.animations,
   autosave: DEFAULT_PREFERENCES.autosave,
+  experienceMode: DEFAULT_PREFERENCES.experienceMode,
   onboardingDone: DEFAULT_PREFERENCES.onboardingDone,
   modalOpen: false,
+  setExperienceMode: (experienceMode) => set({ experienceMode }),
   setModalOpen: (modalOpen) => set({ modalOpen }),
   applyPreferences: (prefs) => {
     const rest: Partial<Preferences> = { ...prefs };
@@ -85,3 +97,6 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     set(rest);
   },
 }));
+
+/** `true` en Modo Experto (3D, CodeLab y Biblioteca Científica visibles). */
+export const useIsExpert = (): boolean => useSettingsStore((s) => s.experienceMode === "expert");

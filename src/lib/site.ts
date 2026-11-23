@@ -13,10 +13,10 @@ export const SITE_URL = (
 
 export const SITE_NAME = "Andros";
 
-export const SITE_TAGLINE = "Lienzo de ingeniería para piezas 3D, cálculos e investigación";
+export const SITE_TAGLINE = "Organiza eventos y equipos en tiempo real, con IA";
 
 export const SITE_DESCRIPTION =
-  "Andros es un lienzo infinito para ingeniería: visualiza piezas STL/3MF, dibuja a mano alzada, enlaza cálculos y fuentes citables, y redacta documentos con IA.";
+  "Andros es un lienzo infinito para organizar eventos y equipos en tiempo real con IA, sin el caos de WhatsApp ni hojas de cálculo incómodas en el celular. Con Modo Experto para piezas 3D, cálculos y fuentes citables.";
 
 /**
  * TODO(fundador): correo provisional. Cámbialo aquí por el buzón real antes del

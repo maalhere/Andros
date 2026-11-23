@@ -41,9 +41,9 @@ export const AI_PROVIDER_MODELS: Record<AiProvider, AiModelOption[]> = {
     { id: "gemini-flash-lite-latest", label: "Gemini Flash Lite" },
   ],
   anthropic: [
-    { id: "claude-opus-5-5", label: "Claude Opus 5.5" },
+    { id: "claude-haiku-5-5", label: "Claude Haiku 5.5 (económico)" },
     { id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5" },
-    { id: "claude-haiku-5-5", label: "Claude Haiku 5.5" },
+    { id: "claude-opus-5-5", label: "Claude Opus 5.5" },
     { id: "claude-fable-5-2", label: "Claude Fable 5.2" },
   ],
   openai: [
@@ -55,7 +55,8 @@ export const AI_PROVIDER_MODELS: Record<AiProvider, AiModelOption[]> = {
 
 export const AI_DEFAULT_MODELS: Record<AiProvider, string> = {
   gemini: "auto",
-  anthropic: "claude-opus-5-5",
+  // El más económico y rápido; Sonnet y Opus quedan como opción manual (BYOK).
+  anthropic: "claude-haiku-5-5",
   openai: "gpt-5-mini",
 };
 
@@ -94,6 +95,7 @@ export type NodeChatErrorCode =
   | "model_not_found"
   | "refusal"
   | "network"
+  | "daily_limit"
   | "bad_request";
 
 export interface NodeChatSuccess {

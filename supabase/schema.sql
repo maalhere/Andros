@@ -805,3 +805,27 @@ create policy "arena_submissions_delete_own" on public.arena_submissions
 --    · Un espacio compartido (workspace_members) usa la sala de la carpeta
 --      de su dueño, así dueño y miembros coinciden en el mismo canal.
 -- ============================================================================
+
+-- ============================================================================
+-- 8b. REALTIME PRIVADO (Sprint 8): canales de la sala solo para autenticados
+--     La app abre los canales con `config: { private: true }`. Para que
+--     entren, Realtime exige estas políticas sobre `realtime.messages`
+--     (Broadcast y Presence). Incluye a invitados con sesión anónima
+--     (también son el rol `authenticated`). Sin ellas la app NO se rompe:
+--     avisa en la consola y vuelve al canal público.
+--     Ejecuta este bloque una vez en Supabase → SQL Editor.
+-- ============================================================================
+
+drop policy if exists "andros_collab_receive" on realtime.messages;
+create policy "andros_collab_receive"
+  on realtime.messages
+  for select
+  to authenticated
+  using ( realtime.topic() like 'andros-collab:%' );
+
+drop policy if exists "andros_collab_send" on realtime.messages;
+create policy "andros_collab_send"
+  on realtime.messages
+  for insert
+  to authenticated
+  with check ( realtime.topic() like 'andros-collab:%' );

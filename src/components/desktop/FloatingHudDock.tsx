@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useMotionValue, useSpring } from "framer-motion";
-import { useSettingsStore } from "@/store/useSettingsStore";
+import { useIsExpert, useSettingsStore } from "@/store/useSettingsStore";
 import {
   Bot,
   Box,
@@ -19,7 +19,7 @@ import {
   Undo2,
   Minus,
 } from "lucide-react";
-import { QUICK_ADD_OPTIONS, quickAdd, type QuickAddKind } from "@/lib/canvas/quickAdd";
+import { quickAdd, quickAddOptionsFor, type QuickAddKind } from "@/lib/canvas/quickAdd";
 import {
   INK_TIP_WIDTHS,
   MAX_CANVAS_SCALE,
@@ -322,6 +322,7 @@ const AddMenu: React.FC<{ onClose: () => void; onPickFile: () => void }> = ({
   onPickFile,
 }) => {
   const ref = useRef<HTMLDivElement>(null);
+  const expert = useIsExpert();
 
   useEffect(() => {
     const handlePointer = (e: PointerEvent) => {
@@ -351,7 +352,7 @@ const AddMenu: React.FC<{ onClose: () => void; onPickFile: () => void }> = ({
       transition={SPRING_SNAPPY}
       className="absolute bottom-[calc(100%+12px)] left-1/2 -ml-36 w-72 p-1.5 rounded-2xl bg-andros-card border border-andros-border shadow-hud-light dark:shadow-hud-dark"
     >
-      {QUICK_ADD_OPTIONS.map((option) => (
+      {quickAddOptionsFor(expert).map((option) => (
         <button
           key={option.kind}
           type="button"
@@ -385,6 +386,7 @@ export const FloatingHudDock: React.FC = () => {
   const setActiveTool = useWorkspaceStore((s) => s.setActiveTool);
   const setOracleModalOpen = useWorkspaceStore((s) => s.setOracleModalOpen);
   const full = useSettingsStore((s) => s.animations) === "full";
+  const expert = useIsExpert();
 
   const [addOpen, setAddOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -428,7 +430,7 @@ export const FloatingHudDock: React.FC = () => {
         <div className="relative" data-add-trigger>
           <DockButton
             full={full}
-            title="Agregar archivo 3D, nota, enlace o cálculo"
+            title={expert ? "Agregar archivo 3D, nota, enlace o cálculo" : "Agregar nota, enlace, cálculo o Nodo IA"}
             label="Agregar"
             icon={<Plus className="w-4 h-4" />}
             active={addOpen}
@@ -455,13 +457,15 @@ export const FloatingHudDock: React.FC = () => {
           onClick={() => setActiveTool(isDrawing ? "pointer" : "draw")}
         />
 
-        <DockButton
-          full={full}
-          title="Biblioteca de fuentes: papers, normas, YouTube y LinkedIn (B)"
-          label="Biblioteca"
-          icon={<Library className="w-4 h-4" />}
-          onClick={() => useLibraryStore.getState().openLibrary({ origin: "canvas" })}
-        />
+        {expert && (
+          <DockButton
+            full={full}
+            title="Biblioteca científica: papers, normas, YouTube y LinkedIn (B)"
+            label="Biblioteca"
+            icon={<Library className="w-4 h-4" />}
+            onClick={() => useLibraryStore.getState().openLibrary({ origin: "canvas" })}
+          />
+        )}
 
         <motion.button
           type="button"

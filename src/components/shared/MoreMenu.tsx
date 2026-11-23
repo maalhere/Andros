@@ -6,6 +6,8 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   Crown,
   Eraser,
+  Gauge,
+  Sparkle,
   FolderArchive,
   CircleHelp,
   GraduationCap,
@@ -21,7 +23,7 @@ import {
 } from "lucide-react";
 import { useMarketStore } from "@/store/useMarketStore";
 import { useLibraryStore } from "@/store/useLibraryStore";
-import { useSettingsStore } from "@/store/useSettingsStore";
+import { useIsExpert, useSettingsStore } from "@/store/useSettingsStore";
 import { useWorkspaceManagerStore } from "@/store/useWorkspaceManagerStore";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { useOnboardingStore } from "@/store/useOnboardingStore";
@@ -163,7 +165,15 @@ export const MoreMenu: React.FC = () => {
     };
   }, [open]);
 
+  const expert = useIsExpert();
+
   const items: MenuItem[] = [
+    {
+      id: "mode",
+      label: expert ? "Cambiar a Modo Simple" : "Cambiar a Modo Experto (3D, CodeLab)",
+      icon: expert ? <Sparkle className="w-4 h-4" /> : <Gauge className="w-4 h-4" />,
+      onSelect: () => useSettingsStore.getState().setExperienceMode(expert ? "simple" : "expert"),
+    },
     {
       id: "friends",
       label: "Amigos",
@@ -183,12 +193,16 @@ export const MoreMenu: React.FC = () => {
       icon: <Swords className="w-4 h-4" />,
       onSelect: () => useMarketStore.getState().setArenaOpen(true),
     },
-    {
-      id: "library",
-      label: "Biblioteca de fuentes",
-      icon: <Library className="w-4 h-4" />,
-      onSelect: () => useLibraryStore.getState().openLibrary({ origin: "canvas" }),
-    },
+    ...(expert
+      ? [
+          {
+            id: "library",
+            label: "Biblioteca científica",
+            icon: <Library className="w-4 h-4" />,
+            onSelect: () => useLibraryStore.getState().openLibrary({ origin: "canvas" }),
+          },
+        ]
+      : []),
     {
       id: "pro",
       label: "Planes Pro",

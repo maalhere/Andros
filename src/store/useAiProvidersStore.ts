@@ -46,6 +46,14 @@ export const useAiProvidersStore = create<AiProvidersState>()(
     }),
     {
       name: "andros-ai-providers",
+      version: 2,
+      // v2 (Sprint 8): el modelo por defecto de Claude pasa de Opus a Haiku (más barato y rápido).
+      migrate: (persisted) => {
+        const p = (persisted ?? {}) as Partial<AiProvidersState>;
+        const defaults = { ...AI_DEFAULT_MODELS, ...(p.defaultModels ?? {}) };
+        if (defaults.anthropic === "claude-opus-5-5") defaults.anthropic = AI_DEFAULT_MODELS.anthropic;
+        return { ...p, defaultModels: defaults } as AiProvidersState;
+      },
       storage: createJSONStorage(() => window.localStorage),
       // El estado del modal no se guarda: solo claves y modelos.
       partialize: (state) => ({ keys: state.keys, defaultModels: state.defaultModels }),

@@ -116,6 +116,10 @@ interface PresenceSession {
   assembler: SnapshotAssembler;
   stopCanvasSync: (() => void) | null;
   subscribed: boolean;
+  /** `true` si el canal se pidió como privado (config.private). */
+  isPrivate: boolean;
+  /** Ya llegó a SUBSCRIBED alguna vez (para distinguir "sin permisos" de "se cayó la red"). */
+  everSubscribed: boolean;
   snapshotReceived: boolean;
   snapshotTimer: ReturnType<typeof setTimeout> | null;
   cursorPruneTimer: ReturnType<typeof setInterval> | null;
@@ -130,6 +134,14 @@ interface CallSession {
 }
 
 let session: PresenceSession | null = null;
+
+/**
+ * Canales Realtime PRIVADOS (config.private): solo entran usuarios autenticados
+ * que pasen las políticas RLS de `realtime.messages` (ver supabase/schema.sql,
+ * sección 8). Si el proyecto aún no las tiene, el primer intento falla y la
+ * sala vuelve a un canal público con un aviso discreto en consola, sin romperse.
+ */
+let privateChannelsAvailable = true;
 let call: CallSession | null = null;
 let micStream: MediaStream | null = null;
 let cameraStream: MediaStream | null = null;
@@ -553,8 +565,9 @@ function connectPresence(target?: { roomId: string; label: string }): void {
   collab().setRoom(room.roomId, room.label);
   collab().setStatus("connecting", null);
 
+  const isPrivate = privateChannelsAvailable;
   const channel = supabase.channel(channelNameFor(room.roomId), {
-    config: { broadcast: { self: false, ack: false }, presence: { key: selfId } },
+    config: { private: isPrivate, broadcast: { self: false, ack: false }, presence: { key: selfId } },
   });
 
   session = {
@@ -564,6 +577,8 @@ function connectPresence(target?: { roomId: string; label: string }): void {
     assembler: new SnapshotAssembler(),
     stopCanvasSync: null,
     subscribed: false,
+    isPrivate,
+    everSubscribed: false,
     snapshotReceived: false,
     snapshotTimer: null,
     cursorPruneTimer: setInterval(() => {
@@ -621,6 +636,7 @@ function connectPresence(target?: { roomId: string; label: string }): void {
       if (token !== presenceToken || !session) return;
       if (status === "SUBSCRIBED") {
         session.subscribed = true;
+        session.everSubscribed = true;
         collab().setStatus("connected", null);
         retrackPresence();
         if (!session.stopCanvasSync) {
@@ -636,6 +652,17 @@ function connectPresence(target?: { roomId: string; label: string }): void {
         }
         if (collab().guest && !session.snapshotReceived && !session.snapshotTimer) requestSnapshot(0);
       } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+        // Canal privado rechazado antes de entrar (sin políticas RLS de Realtime):
+        // se reintenta una vez como canal público sin romper la sala.
+        if (session.isPrivate && !session.everSubscribed) {
+          privateChannelsAvailable = false;
+          console.warn(
+            "[Andros] Realtime privado no disponible en este proyecto de Supabase (faltan las políticas de realtime.messages, ver supabase/schema.sql §8). Se usa el canal público."
+          );
+          disconnectPresence();
+          connectPresence(room);
+          return;
+        }
         session.subscribed = false;
         collab().setStatus(
           "error",

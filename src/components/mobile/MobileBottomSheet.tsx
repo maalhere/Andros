@@ -19,10 +19,11 @@ import {
   Terminal,
   X,
 } from "lucide-react";
-import { QUICK_ADD_OPTIONS, quickAdd, type QuickAddKind } from "@/lib/canvas/quickAdd";
+import { quickAdd, quickAddOptionsFor, type QuickAddKind } from "@/lib/canvas/quickAdd";
 import { NODE_ARCHETYPE_LABELS, useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { EngineeringNodeData, NodeArchetype } from "@/types/workspace";
 import { useLibraryStore } from "@/store/useLibraryStore";
+import { useIsExpert } from "@/store/useSettingsStore";
 import { motion, useReducedMotion } from "framer-motion";
 import { useSwipeToDismiss } from "@/hooks/useSwipeToDismiss";
 import { springOrInstant } from "@/lib/motion";
@@ -325,6 +326,7 @@ const AddSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const nodesCount = useWorkspaceStore((s) => s.nodes.length);
   const setActiveMobileSheet = useWorkspaceStore((s) => s.setActiveMobileSheet);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const expert = useIsExpert();
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -346,7 +348,7 @@ const AddSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       />
 
       <div className="grid grid-cols-2 gap-2.5">
-        {QUICK_ADD_OPTIONS.map((option) => (
+        {quickAddOptionsFor(expert).map((option) => (
           <button
             key={option.kind}
             type="button"
@@ -366,22 +368,24 @@ const AddSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         ))}
       </div>
 
-      <button
-        type="button"
-        onClick={() => {
-          onClose();
-          useLibraryStore.getState().openLibrary({ origin: "canvas" });
-        }}
-        className="w-full min-h-[56px] px-3.5 rounded-2xl bg-andros-canvas border border-andros-border flex items-center gap-3 text-left active:scale-98 spring-micro"
-      >
-        <span className="w-9 h-9 shrink-0 rounded-xl bg-andros-accent/10 text-andros-accent-ink flex items-center justify-center">
-          <Library className="w-4 h-4" />
-        </span>
-        <span className="min-w-0">
-          <span className="block text-[13px] font-semibold text-andros-primary">Biblioteca de fuentes</span>
-          <span className="block text-[11px] leading-snug text-andros-muted">Papers, normas, YouTube y LinkedIn citables</span>
-        </span>
-      </button>
+      {expert && (
+        <button
+          type="button"
+          onClick={() => {
+            onClose();
+            useLibraryStore.getState().openLibrary({ origin: "canvas" });
+          }}
+          className="w-full min-h-[56px] px-3.5 rounded-2xl bg-andros-canvas border border-andros-border flex items-center gap-3 text-left active:scale-98 spring-micro"
+        >
+          <span className="w-9 h-9 shrink-0 rounded-xl bg-andros-accent/10 text-andros-accent-ink flex items-center justify-center">
+            <Library className="w-4 h-4" />
+          </span>
+          <span className="min-w-0">
+            <span className="block text-[13px] font-semibold text-andros-primary">Biblioteca científica</span>
+            <span className="block text-[11px] leading-snug text-andros-muted">Papers, normas, YouTube y LinkedIn citables</span>
+          </span>
+        </button>
+      )}
 
       {nodesCount >= 2 && (
         <button

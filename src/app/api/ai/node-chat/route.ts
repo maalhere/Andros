@@ -28,7 +28,7 @@ export const maxDuration = 120;
 
 const MAX_MESSAGES = 40;
 const MAX_MESSAGE_CHARS = 12_000;
-const MAX_CONTEXT_CHARS = 40_000;
+const MAX_CONTEXT_CHARS = 12_000;
 const PROVIDER_TIMEOUT_MS = 90_000;
 
 const SYSTEM_PROMPT = `Eres un asistente de IA que vive dentro de un nodo del lienzo espacial Andros (ingeniería, diseño 3D, fabricación e investigación).
@@ -160,10 +160,14 @@ async function chatClaude(req: NodeChatRequest, system: string, turns: NodeChatT
   if (!apiKey) {
     throw new ChatError("missing_key", "Para usar Claude añade tu clave de Anthropic en Claves IA.", 400);
   }
-  const model = req.model?.trim() || "claude-opus-5-5";
+  const model = req.model?.trim() || "claude-haiku-5-5";
   const client = new Anthropic({ apiKey, maxRetries: 1, timeout: PROVIDER_TIMEOUT_MS });
   const messages: Anthropic.MessageParam[] = turns.map((t) => ({ role: t.role, content: t.text }));
-  const outputConfig = { effort: "medium" as const, format: { type: "json_schema" as const, schema: REPLY_SCHEMA } };
+  // Haiku (el modelo por defecto, el más económico) no admite el parámetro `effort`.
+  const outputConfig = {
+    ...(/haiku/i.test(model) ? {} : { effort: "medium" as const }),
+    format: { type: "json_schema" as const, schema: REPLY_SCHEMA },
+  };
   const maxTokens = req.test ? 512 : 16_000;
 
   try {

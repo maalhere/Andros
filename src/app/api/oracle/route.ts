@@ -28,18 +28,25 @@ import type {
   OracleReference,
   OracleRequestBody,
   OracleResponseBody,
+  OracleStreamEvent,
 } from "@/types/oracle";
 import type { NodeArchetype } from "@/types/workspace";
 import {
   ATTEMPT_TIMEOUT_MS,
-  callGemini,
+  isNetworkError,
+  markGeminiModelFailed,
+  openGeminiStream,
   ProviderFailure,
+  type GeminiStream,
   type ModelRequest,
 } from "@/lib/ai/gemini";
-import { parseJsonText, repairLatexControlChars } from "@/lib/ai/jsonText";
+import { extractStreamingStringField, parseJsonText, repairLatexControlChars } from "@/lib/ai/jsonText";
+import { DAILY_LIMIT_MESSAGE } from "@/lib/ai/freeQuota";
+import { clientIp, serverQuotaAllows, serverQuotaConsume } from "@/lib/ai/serverQuota";
 
 /** Gemini puede tardar con documentos largos: margen para la función serverless. */
-export const maxDuration = 120;
+/** Streaming: el primer fragmento sale en ~1 s; 60 s cubre incluso documentos largos en Vercel. */
+export const maxDuration = 60;
 
 
 
@@ -55,7 +62,7 @@ TIPOS DE NODO
 Cada nodo trae connectedNodeIds; la lista "connections" trae los cables con su etiqueta.
 
 FORMATO DE RESPUESTA (obligatorio)
-Responde SOLO con JSON: {"reply": string, "actions": Action[]}.
+Responde SOLO con JSON: {"reply": string, "actions": Action[]}. Escribe SIEMPRE la clave "reply" PRIMERO (el usuario la ve mientras escribes) y "actions" después.
 - "reply": en español, claro y accionable (2 a 5 frases). Di qué hiciste en el lienzo y cuál es el siguiente paso concreto para el usuario.
 - "actions": acciones que se ejecutan en vivo. Arreglo vacío si solo respondes una pregunta.
 
@@ -211,7 +218,7 @@ const DOCUMENT_INSTRUCTIONS = `Eres el Oráculo IA de Andros en modo ESTUDIO DE 
 RECIBES: el contexto del lienzo (JSON, para usar datos reales de archivos y nodos), el DOCUMENTO ACTUAL (título + Markdown; puede estar vacío) y la instrucción del usuario.
 
 FORMATO DE RESPUESTA (obligatorio)
-Responde SOLO con JSON: {"reply": string, "document": {"title": string, "markdown": string} | null}
+Responde SOLO con JSON: {"reply": string, "document": {"title": string, "markdown": string} | null}. Escribe SIEMPRE la clave "reply" PRIMERO (el usuario la ve mientras escribes) y "document" después.
 - "reply": en español, 1 a 3 frases conversacionales: qué escribiste o cambiaste y un siguiente paso sugerido. NO copies el documento en "reply".
 - "document": el documento COMPLETO ya actualizado (nunca un fragmento ni un diff). Usa null SOLO si el usuario hace una pregunta que no requiere cambiar el documento.
 - Si el documento actual tiene contenido y te piden un cambio, edítalo conservando todo lo que no se pidió cambiar.
@@ -367,37 +374,61 @@ const MISSING_KEY_ISSUE: OracleIssue = {
     "Falta GEMINI_API_KEY. Créala gratis en https://aistudio.google.com/apikey y pégala en .env.local (local) o en Vercel → Settings → Environment Variables (producción); después reinicia el servidor.",
 };
 
+const DAILY_LIMIT_ISSUE: OracleIssue = { code: "daily_limit", message: DAILY_LIMIT_MESSAGE };
+
 // ----------------------------------------------------------------------------
-// Handler
+// Ejecución (una sola ruta para respuesta normal y streaming)
 // ----------------------------------------------------------------------------
 
-export async function POST(request: NextRequest): Promise<NextResponse<OracleResponseBody>> {
-  let body: Partial<OracleRequestBody> | null = null;
-  try {
-    body = await request.json();
-  } catch {
-    body = null;
+interface OracleRun {
+  prompt: string;
+  mode: OracleMode;
+  context: OracleCanvasContext;
+  history: OracleHistoryTurn[];
+  currentDocument: OracleDocument | null;
+  references: OracleReference[];
+  /** Clave de Gemini del usuario (BYOK): sin tope diario. */
+  userKey?: string;
+  ip: string;
+}
+
+interface OracleHooks {
+  /** Fragmento nuevo del texto de "reply" mientras el modelo escribe. */
+  onDelta?: (text: string) => void;
+  /** Modelo que abrió el stream. */
+  onModel?: (model: string) => void;
+  /** El modelo se cortó a mitad: el cliente debe descartar el texto mostrado. */
+  onReset?: () => void;
+}
+
+/** Lee el stream de Gemini y va soltando el texto de "reply"; al final devuelve el JSON completo. */
+async function readGeminiStream(
+  stream: GeminiStream,
+  hooks: OracleHooks
+): Promise<{ raw: string; streamedReply: string; finishReason?: string }> {
+  let raw = "";
+  let streamedReply = "";
+  while (true) {
+    const step = await stream.chunks.next();
+    if (step.done) return { raw, streamedReply, finishReason: step.value?.finishReason };
+    raw += step.value;
+    const { text } = extractStreamingStringField(raw, "reply");
+    if (text.length > streamedReply.length) {
+      hooks.onDelta?.(text.slice(streamedReply.length));
+      streamedReply = text;
+    }
   }
+}
 
-  const prompt = typeof body?.prompt === "string" ? body.prompt.slice(0, 4000) : "";
-  const mode: OracleMode = body?.mode === "document" ? "document" : "canvas";
-  const rawContext = body?.context;
-  const context: OracleCanvasContext = {
-    nodes: Array.isArray(rawContext?.nodes) ? rawContext.nodes.slice(0, 200) : [],
-    connections: Array.isArray(rawContext?.connections) ? rawContext.connections.slice(0, 500) : [],
-    selectedNodeId: rawContext?.selectedNodeId ?? null,
-    linkedNodeId: rawContext?.linkedNodeId ?? null,
-  };
-  const history = sanitizeHistory(body?.history);
-  const currentDocument = mode === "document" ? sanitizeDocument(body?.document) : null;
-  const references = sanitizeReferences(body?.references);
+async function runOracle(run: OracleRun, hooks: OracleHooks = {}): Promise<OracleResponseBody> {
+  const { prompt, mode, context, history, currentDocument, references } = run;
 
   if (!prompt.trim()) {
-    return NextResponse.json({
+    return {
       reply: "Escribe una instrucción o usa uno de los botones de acción rápida.",
       actions: [],
       engine: "local",
-    });
+    };
   }
 
   const request_: ModelRequest =
@@ -415,65 +446,206 @@ export async function POST(request: NextRequest): Promise<NextResponse<OracleRes
           maxOutputTokens: 8192,
         };
 
-  const providers: {
-    engine: OracleEngine;
-    key: string | undefined;
-    call: (key: string, req: ModelRequest) => Promise<{ raw: unknown; model: string }>;
-  }[] = [
-    { engine: "gemini", key: process.env.GEMINI_API_KEY?.trim(), call: callGemini },
-    { engine: "openai", key: process.env.OPENAI_API_KEY?.trim(), call: callOpenAI },
-  ];
+  const geminiKey = run.userKey || process.env.GEMINI_API_KEY?.trim();
+  const usingServerKey = !run.userKey;
+  const openaiKey = process.env.OPENAI_API_KEY?.trim();
 
-  let issue: OracleIssue | null = null;
-  for (const provider of providers) {
-    if (!provider.key) continue;
-    try {
-      const { raw, model } = await provider.call(provider.key, request_);
-      if (mode === "document") {
-        const parsed = parseDocumentOutput(raw);
-        if (parsed) {
-          return NextResponse.json({ ...parsed, actions: [], engine: provider.engine, model });
+  // Respaldo anti-abuso: la clave del servidor tiene un tope diario por IP.
+  const overServerQuota = usingServerKey && !serverQuotaAllows(run.ip);
+
+  let issue: OracleIssue | null = overServerQuota ? DAILY_LIMIT_ISSUE : null;
+
+  /** Convierte la salida cruda (JSON) del modelo en la respuesta final, o `null` si no sirve. */
+  const finish = (raw: unknown, engine: OracleEngine, model: string): OracleResponseBody | null => {
+    if (mode === "document") {
+      const parsed = parseDocumentOutput(raw);
+      return parsed ? { ...parsed, actions: [], engine, model } : null;
+    }
+    const parsed = parseModelOutput(raw, context);
+    return parsed ? { ...parsed, engine, model } : null;
+  };
+
+  if (geminiKey && !overServerQuota) {
+    // Si un modelo se corta a mitad de la respuesta (503 dentro del stream), se
+    // descarta lo mostrado (reset) y se reintenta con el siguiente modelo.
+    const failedModels: string[] = [];
+    const startedAt = Date.now();
+    for (let attempt = 0; attempt < 3 && Date.now() - startedAt < 35_000; attempt += 1) {
+      let model = "";
+      try {
+        const stream = await openGeminiStream(geminiKey, request_, {
+          userKey: Boolean(run.userKey),
+          skipModels: failedModels,
+        });
+        model = stream.model;
+        hooks.onModel?.(model);
+        const { raw, streamedReply, finishReason } = await readGeminiStream(stream, hooks);
+        let parsedRaw: unknown = null;
+        try {
+          parsedRaw = parseJsonText(raw);
+        } catch {
+          parsedRaw = null;
         }
-      } else {
-        const parsed = parseModelOutput(raw, context);
-        if (parsed) return NextResponse.json({ ...parsed, engine: provider.engine, model });
+        const done = parsedRaw ? finish(parsedRaw, "gemini", model) : null;
+        if (done) {
+          if (usingServerKey) serverQuotaConsume(run.ip);
+          return done;
+        }
+        // JSON inválido pero terminado con normalidad: no tiene sentido reintentar.
+        const truncated = finishReason === "MAX_TOKENS";
+        issue = {
+          code: "unavailable",
+          message: truncated
+            ? "La respuesta de la IA era demasiado larga y se cortó. Pide algo más acotado (por ejemplo, un solo bloque o una sección)."
+            : "La IA respondió en un formato inesperado. Vuelve a intentarlo.",
+        };
+        if (streamedReply.trim() && mode === "canvas") {
+          if (usingServerKey) serverQuotaConsume(run.ip);
+          return { reply: streamedReply.trim(), actions: [], engine: "gemini", model, issue };
+        }
+        break;
+      } catch (error) {
+        console.error("[oracle] gemini falló:", error instanceof Error ? error.message.slice(0, 200) : error);
+        if (error instanceof ProviderFailure) {
+          issue = error.issue;
+          break;
+        }
+        // Fallo a mitad del stream: el modelo descansa y se reintenta con otro.
+        if (model) {
+          failedModels.push(model);
+          markGeminiModelFailed(geminiKey, model, error);
+          hooks.onReset?.();
+        }
+        issue = isNetworkError(error)
+          ? { code: "network", message: "Se perdió la conexión con Google a mitad de la respuesta. Inténtalo de nuevo." }
+          : { code: "overloaded", message: "Los modelos de Gemini están saturados ahora mismo. Vuelve a intentarlo en unos segundos." };
+        if (isNetworkError(error)) break;
       }
-      issue ??= {
-        code: "unavailable",
-        message: "La IA respondió en un formato inesperado. Vuelve a intentarlo.",
-      };
-    } catch (error) {
-      // Clave presente pero la llamada falló: se prueba el siguiente motor.
-      console.error(`[oracle] ${provider.engine} falló:`, error instanceof Error ? error.message : error);
-      issue ??=
-        error instanceof ProviderFailure
-          ? error.issue
-          : {
-              code: "unavailable",
-              message: `No pude obtener respuesta de ${provider.engine === "gemini" ? "Gemini" : "OpenAI"}. Inténtalo de nuevo.`,
-            };
     }
   }
 
-  const hadExternalKey = providers.some((p) => p.key);
+  // Respaldo: OpenAI (clave del servidor), sin streaming.
+  if (openaiKey && !overServerQuota) {
+    try {
+      const { raw, model } = await callOpenAI(openaiKey, request_);
+      const done = finish(raw, "openai", model);
+      if (done) {
+        hooks.onDelta?.(done.reply);
+        return done;
+      }
+      issue ??= { code: "unavailable", message: "La IA respondió en un formato inesperado. Vuelve a intentarlo." };
+    } catch (error) {
+      console.error("[oracle] openai falló:", error instanceof Error ? error.message.slice(0, 200) : error);
+      issue ??=
+        error instanceof ProviderFailure
+          ? error.issue
+          : { code: "unavailable", message: "No pude obtener respuesta de OpenAI. Inténtalo de nuevo." };
+    }
+  }
+
+  const hadExternalKey = Boolean(geminiKey || openaiKey);
   const finalIssue = hadExternalKey ? issue : MISSING_KEY_ISSUE;
 
   // Modo documento: sin IA no se puede redactar; se explica qué hacer.
   if (mode === "document") {
-    return NextResponse.json({
+    return {
       reply: finalIssue?.message ?? "No pude redactar el documento. Inténtalo de nuevo.",
       actions: [],
       engine: "local",
       document: null,
       ...(finalIssue ? { issue: finalIssue } : {}),
-    });
+    };
   }
 
   // Modo lienzo: el intérprete local sigue ejecutando las órdenes básicas.
   const local = runLocalOracle(prompt, context);
-  return NextResponse.json({
+  return {
     ...local,
     reply: finalIssue ? `${finalIssue.message}\n\nModo local: ${local.reply}` : local.reply,
     ...(finalIssue ? { issue: finalIssue } : {}),
+  };
+}
+
+// ----------------------------------------------------------------------------
+// Handler
+// ----------------------------------------------------------------------------
+
+export async function POST(request: NextRequest): Promise<Response> {
+  let body: Partial<OracleRequestBody> | null = null;
+  try {
+    body = await request.json();
+  } catch {
+    body = null;
+  }
+
+  const mode: OracleMode = body?.mode === "document" ? "document" : "canvas";
+  const rawContext = body?.context;
+  const userKey = typeof body?.apiKey === "string" && body.apiKey.trim() ? body.apiKey.trim().slice(0, 500) : undefined;
+  const run: OracleRun = {
+    prompt: typeof body?.prompt === "string" ? body.prompt.slice(0, 4000) : "",
+    mode,
+    context: {
+      nodes: Array.isArray(rawContext?.nodes) ? rawContext.nodes.slice(0, 200) : [],
+      connections: Array.isArray(rawContext?.connections) ? rawContext.connections.slice(0, 500) : [],
+      selectedNodeId: rawContext?.selectedNodeId ?? null,
+      linkedNodeId: rawContext?.linkedNodeId ?? null,
+    },
+    history: sanitizeHistory(body?.history),
+    currentDocument: mode === "document" ? sanitizeDocument(body?.document) : null,
+    references: sanitizeReferences(body?.references),
+    ...(userKey ? { userKey } : {}),
+    ip: clientIp(request.headers),
+  };
+
+  if (body?.stream !== true) {
+    return NextResponse.json<OracleResponseBody>(await runOracle(run));
+  }
+
+  // Streaming NDJSON: el primer byte sale al instante y el texto fluye mientras
+  // el modelo escribe, así la función nunca queda "muda" hasta el timeout de Vercel.
+  const encoder = new TextEncoder();
+  const readable = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const send = (event: OracleStreamEvent) => {
+        try {
+          controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+        } catch {
+          // El cliente cerró la conexión: se ignora.
+        }
+      };
+      send({ t: "start" });
+      try {
+        const data = await runOracle(run, {
+          onModel: (model) => send({ t: "meta", model }),
+          onDelta: (text) => send({ t: "delta", text }),
+          onReset: () => send({ t: "reset" }),
+        });
+        send({ t: "final", data });
+      } catch (error) {
+        console.error("[oracle] error inesperado:", error instanceof Error ? error.message.slice(0, 200) : error);
+        send({
+          t: "final",
+          data: {
+            reply: "El Oráculo tuvo un error inesperado. Inténtalo de nuevo.",
+            actions: [],
+            engine: "local",
+            issue: { code: "unavailable", message: "El Oráculo tuvo un error inesperado. Inténtalo de nuevo." },
+          },
+        });
+      } finally {
+        try {
+          controller.close();
+        } catch {
+          // Ya cerrado.
+        }
+      }
+    },
+  });
+  return new Response(readable, {
+    headers: {
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      "X-Accel-Buffering": "no",
+    },
   });
 }

@@ -16,6 +16,7 @@ import { useTabsBarVisible } from "@/store/useTabsStore";
 import { useShortcutsGuideStore } from "@/store/useShortcutsGuideStore";
 import { CollabRoomButton } from "@/components/collab/VoiceRoomBar";
 import { ShareWorkspaceButton } from "@/components/social/ShareWorkspaceModal";
+import { ExperienceModeToggle } from "./ExperienceModeToggle";
 
 // ============================================================================
 // ANDROS — BARRA SUPERIOR (mínima)
@@ -104,6 +105,7 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({ isMobile }) => {
         >
           <CircleHelp className="w-4 h-4" aria-hidden="true" />
         </button>
+        <ExperienceModeToggle />
         <CollabRoomButton />
         <ShareWorkspaceButton />
         <ThemeToggle />

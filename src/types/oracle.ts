@@ -134,7 +134,20 @@ export interface OracleRequestBody {
   mode?: OracleMode;
   /** Solo modo "document": borrador actual, para que la IA lo edite. */
   document?: OracleDocument | null;
+  /** Clave de Gemini propia del usuario (BYOK): sin tope diario. Solo viaja en esta petición. */
+  apiKey?: string;
+  /** `true`: respuesta en streaming (NDJSON, ver `OracleStreamEvent`). */
+  stream?: boolean;
 }
+
+/** Eventos de la respuesta en streaming de /api/oracle (una línea JSON cada uno). */
+export type OracleStreamEvent =
+  | { t: "start" }
+  | { t: "meta"; model: string }
+  | { t: "delta"; text: string }
+  /** El modelo se cortó a mitad: se descarta el texto parcial y se reintenta con otro. */
+  | { t: "reset" }
+  | { t: "final"; data: OracleResponseBody };
 
 /** Qué motor respondió: útil solo para mostrar un estado discreto en la UI. */
 export type OracleEngine = "gemini" | "openai" | "local";
@@ -146,6 +159,7 @@ export type OracleIssueCode =
   | "rate_limited"
   | "overloaded"
   | "network"
+  | "daily_limit"
   | "unavailable";
 
 export interface OracleIssue {

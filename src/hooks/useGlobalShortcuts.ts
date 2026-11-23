@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { useLibraryStore } from "@/store/useLibraryStore";
+import { useSettingsStore } from "@/store/useSettingsStore";
 import { useMarketStore } from "@/store/useMarketStore";
 import { useCommandPaletteStore } from "@/store/useCommandPaletteStore";
 import { useShortcutsGuideStore } from "@/store/useShortcutsGuideStore";
@@ -91,13 +92,18 @@ export function useGlobalShortcuts(isDesktop: boolean) {
           ws.setActiveTool("draw");
           break;
         case "b":
-          useLibraryStore.getState().openLibrary({ origin: "canvas" });
+          // Biblioteca y CodeLab son herramientas del Modo Experto.
+          if (useSettingsStore.getState().experienceMode === "expert") {
+            useLibraryStore.getState().openLibrary({ origin: "canvas" });
+          }
           break;
         case "l":
           ws.spawnNode({ type: "resource-link-node" });
           break;
         case "m":
-          ws.spawnNode({ type: "code-lab-node" });
+          if (useSettingsStore.getState().experienceMode === "expert") {
+            ws.spawnNode({ type: "code-lab-node" });
+          }
           break;
         case "o":
           e.preventDefault();

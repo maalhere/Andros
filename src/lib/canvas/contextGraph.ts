@@ -18,18 +18,29 @@ import type {
 } from "@/types/workspace";
 import { formatScale, isIdentityScale } from "@/lib/3d/modelScale";
 
-/** Límite de texto por nodo y total, para no saturar el contexto del modelo. */
-const MAX_NODE_CHARS = 6000;
-const MAX_TOTAL_CHARS = 30_000;
+/**
+ * Límite de texto por nodo y total, para no saturar el contexto del modelo ni
+ * encarecer/ralentizar las llamadas cuando hay muchos documentos conectados.
+ */
+const MAX_NODE_CHARS = 4000;
+export const MAX_TOTAL_CHARS = 12_000;
 const MAX_DEPTH = 6;
 
 export const MODEL_3D_EXTENSIONS = new Set(["stl", "obj", "3mf"]);
 
 export const AI_PROVIDER_NAMES = { gemini: "Gemini", openai: "ChatGPT", anthropic: "Claude" } as const;
 
+/** Recorta a `max` caracteres en un salto de línea (o espacio) limpio y añade «…». */
+export function clipCleanly(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const head = text.slice(0, Math.max(0, max));
+  const breakAt = Math.max(head.lastIndexOf("\n"), head.lastIndexOf(". "), head.lastIndexOf(" "));
+  const cut = breakAt > max * 0.6 ? head.slice(0, breakAt) : head;
+  return `${cut.trimEnd()}…`;
+}
+
 function clip(text: string, max: number): string {
-  const clean = text.replace(/[ \t]+\n/g, "\n").trim();
-  return clean.length > max ? `${clean.slice(0, max)}…` : clean;
+  return clipCleanly(text.replace(/[ \t]+\n/g, "\n").trim(), max);
 }
 
 function formatBytes(bytes: number): string {
@@ -257,16 +268,25 @@ export function collectUpstreamContext(
 
   let total = 0;
   const blocks: string[] = [];
-  for (const e of entries) {
-    const block = `### ${e.title} [${e.type}${e.depth > 1 ? `, a ${e.depth} saltos` : ", conexión directa"}${
+  for (let i = 0; i < entries.length; i += 1) {
+    const e = entries[i];
+    const header = `### ${e.title} [${e.type}${e.depth > 1 ? `, a ${e.depth} saltos` : ", conexión directa"}${
       e.via ? `, cable "${e.via}"` : ""
-    }]\n${e.text}`;
-    if (total + block.length > MAX_TOTAL_CHARS) {
-      blocks.push(`(… ${entries.length - blocks.length} nodo(s) más omitidos por tamaño)`);
+    }]\n`;
+    const block = `${header}${e.text}`;
+    const room = MAX_TOTAL_CHARS - total;
+    if (block.length > room) {
+      // Tope total: el nodo que ya no cabe se recorta limpiamente y el resto se omite.
+      let omitted = entries.length - i;
+      if (room > header.length + 200) {
+        blocks.push(`${header}${clipCleanly(e.text, room - header.length - 4)}`);
+        omitted -= 1;
+      }
+      if (omitted > 0) blocks.push(`(… ${omitted} nodo(s) más omitidos por el límite de contexto)`);
       break;
     }
     blocks.push(block);
-    total += block.length;
+    total += block.length + 2;
   }
   const text = blocks.join("\n\n");
 

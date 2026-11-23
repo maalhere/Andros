@@ -37,6 +37,10 @@ import {
   type StudioMessage,
 } from "@/store/useOracleStudioStore";
 import { buildOracleCanvasContext } from "@/lib/oracle/buildCanvasContext";
+import { OracleClientError, queryOracle } from "@/lib/oracle/oracleClient";
+import { localReflex } from "@/lib/oracle/localInterpreter";
+import { getUserAiKey } from "@/store/useAiProvidersStore";
+import { checkFreeQuota, recordFreeQuery } from "@/store/useAiQuotaStore";
 import { countWords, markdownToNoteText } from "@/lib/oracle/markdownDocument";
 import { MarkdownPreview } from "@/components/oracle/MarkdownPreview";
 import { useLibraryStore } from "@/store/useLibraryStore";
@@ -47,7 +51,6 @@ import type {
   OracleEngine,
   OracleHistoryTurn,
   OracleMode,
-  OracleResponseBody,
 } from "@/types/oracle";
 
 // ============================================================================
@@ -150,7 +153,7 @@ const OracleStudio: React.FC = () => {
   const selectedNodeId = useWorkspaceStore((s) => s.selectedNodeId);
 
   const studio = useOracleStudioStore();
-  const { messages, document: doc, chatMode, editorView, mobilePane, linkChoice, isThinking, references } = studio;
+  const { messages, document: doc, chatMode, editorView, mobilePane, linkChoice, isThinking, references, streamingText } = studio;
 
   const [prompt, setPrompt] = useState("");
   const [toast, setToast] = useState<Toast | null>(null);
@@ -182,7 +185,7 @@ const OracleStudio: React.FC = () => {
   // Desplaza el chat al último mensaje.
   useEffect(() => {
     threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages.length, isThinking]);
+  }, [messages.length, isThinking, streamingText.length]);
 
   // Foco en la entrada al abrir (escritorio).
   useEffect(() => {
@@ -267,25 +270,57 @@ const OracleStudio: React.FC = () => {
 
     setPrompt("");
     st.addMessage({ role: "user", text: clean, mode });
+    const ws = useWorkspaceStore.getState();
+    const context = buildOracleCanvasContext(ws.nodes, ws.connections, ws.selectedNodeId, linkedNodeId);
+
+    // Reflejo local: órdenes simples («ordena el lienzo») se ejecutan al instante, sin gastar IA.
+    if (mode === "canvas") {
+      const reflex = localReflex(clean, context);
+      if (reflex) {
+        const log = applyActions(reflex.actions);
+        useOracleStudioStore.getState().addMessage({
+          role: "oracle",
+          text: reflex.reply,
+          mode,
+          engine: "local",
+          log: log.length > 0 ? log : undefined,
+        });
+        return;
+      }
+    }
+
+    // Límite diario gratis (15/día con la clave del servidor; sin tope con clave propia).
+    const quota = checkFreeQuota();
+    if (!quota.ok) {
+      useOracleStudioStore.getState().addMessage({
+        role: "oracle",
+        text: quota.message,
+        mode,
+        engine: "local",
+        issue: "daily_limit",
+      });
+      return;
+    }
+
     st.setThinking(true);
+    st.setStreamingText("");
     try {
-      const ws = useWorkspaceStore.getState();
-      const res = await fetch("/api/oracle", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const data = await queryOracle(
+        {
           prompt: clean,
           mode,
-          context: buildOracleCanvasContext(ws.nodes, ws.connections, ws.selectedNodeId, linkedNodeId),
+          context,
           history,
           references: useOracleStudioStore.getState().references.map(toOracleReference),
+          ...(getUserAiKey("gemini") ? { apiKey: getUserAiKey("gemini") } : {}),
           ...(mode === "document" ? { document: useOracleStudioStore.getState().document } : {}),
-        }),
-      });
-      if (!res.headers.get("content-type")?.includes("application/json")) {
-        throw new Error(`el servidor respondió ${res.status}`);
-      }
-      const data: OracleResponseBody = await res.json();
+        },
+        {
+          onDelta: (text) => useOracleStudioStore.getState().appendStreamingText(text),
+          onReset: () => useOracleStudioStore.getState().setStreamingText(""),
+        }
+      );
+      if (data.engine === "gemini" && !data.issue) recordFreeQuery();
       const studioNow = useOracleStudioStore.getState();
 
       if (mode === "document" && data.document) {
@@ -306,14 +341,17 @@ const OracleStudio: React.FC = () => {
     } catch (error) {
       useOracleStudioStore.getState().addMessage({
         role: "oracle",
-        text: `No pude contactar al Oráculo (${
-          error instanceof Error ? error.message : "sin conexión"
-        }). Revisa tu conexión e inténtalo de nuevo.`,
+        text:
+          error instanceof OracleClientError
+            ? error.message
+            : "No pude contactar al Oráculo. Revisa tu conexión e inténtalo de nuevo.",
         mode,
-        issue: "unavailable",
+        issue: error instanceof OracleClientError ? error.code : "unavailable",
       });
     } finally {
-      useOracleStudioStore.getState().setThinking(false);
+      const done = useOracleStudioStore.getState();
+      done.setStreamingText("");
+      done.setThinking(false);
     }
   };
 
@@ -549,10 +587,25 @@ const OracleStudio: React.FC = () => {
         {messages.map((m) => (
           <ChatBubble key={m.id} message={m} />
         ))}
+        {isThinking && streamingText && (
+          <div className="flex flex-col items-start gap-1">
+            <p className="max-w-[92%] px-3.5 py-2.5 rounded-2xl rounded-bl-md border border-andros-border bg-andros-canvas text-[13px] leading-relaxed whitespace-pre-wrap break-words text-andros-primary">
+              {streamingText}
+            </p>
+          </div>
+        )}
         {isThinking && (
-          <div className="flex items-center gap-2 text-xs text-andros-muted">
+          <div className="flex items-center gap-2 text-xs text-andros-muted" role="status">
             <Loader2 className="w-3.5 h-3.5 animate-spin text-andros-accent-ink" />
-            <span>{chatMode === "document" ? "Redactando el documento…" : "Analizando el lienzo…"}</span>
+            <span>
+              {chatMode === "document"
+                ? streamingText
+                  ? "Terminando el documento…"
+                  : "Redactando el documento…"
+                : streamingText
+                  ? "Aplicando cambios al lienzo…"
+                  : "Analizando el lienzo…"}
+            </span>
           </div>
         )}
       </div>

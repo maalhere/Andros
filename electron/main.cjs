@@ -12,6 +12,10 @@
 //     sesión de Supabase y se trae al frente.
 //   · Descargas: siempre con el diálogo nativo "Guardar como…" (el usuario
 //     elige carpeta o cancela antes de escribir nada en disco).
+//   · Compartir pantalla en la sala de voz: `setDisplayMediaRequestHandler` con
+//     `desktopCapturer` (Electron no trae selector propio; sin esto
+//     `getDisplayMedia` falla en la app .exe). Un menú limpio lista las
+//     pantallas (la principal primero) y las ventanas abiertas.
 //   · Puente nativo de impresora (preload.cjs → window.androsDesktop): busca la
 //     FlashForge Adventurer 3 en el Wi-Fi (UDP 19000/48899 + barrido TCP 8899),
 //     lee su estado y le envía el .gx — con sockets reales desde este equipo,
@@ -25,6 +29,7 @@ const {
   Notification,
   WebContentsView,
   clipboard,
+  desktopCapturer,
   ipcMain,
   screen,
   session,
@@ -431,6 +436,102 @@ function setupSession() {
     const origin = parseUrl(details.requestingUrl ?? "")?.origin;
     callback(origin === APP_ORIGIN && allowed.has(permission));
   });
+
+  // «Compartir pantalla» (getDisplayMedia) de la sala de voz.
+  ses.setDisplayMediaRequestHandler(
+    (request, callback) => {
+      void handleDisplayMediaRequest(request, callback);
+    },
+    // Sin selector del sistema: lo resuelve nuestro menú (la web sigue pidiendo
+    // la pantalla con getDisplayMedia, exactamente igual que en el navegador).
+    { useSystemPicker: false }
+  );
+}
+
+/**
+ * Elige qué capturar: si solo hay una fuente (un monitor y ninguna ventana),
+ * esa; si hay varias, un menú nativo con la pantalla principal primero y las
+ * ventanas después. Cerrar el menú sin elegir cancela (la web lo trata como
+ * «cancelado», sin error). Solo responde al origen de Andros.
+ */
+async function handleDisplayMediaRequest(request, callback) {
+  try {
+    const origin = parseUrl(request.frame?.url ?? "")?.origin;
+    if (origin !== APP_ORIGIN) {
+      callback({});
+      return;
+    }
+    const sources = await desktopCapturer.getSources({
+      types: ["screen", "window"],
+      thumbnailSize: { width: 160, height: 90 },
+      fetchWindowIcons: false,
+    });
+    const primaryId = String(screen.getPrimaryDisplay().id);
+    const screens = sources
+      .filter((s) => s.id.startsWith("screen:"))
+      .sort((a, b) => Number(b.display_id === primaryId) - Number(a.display_id === primaryId));
+    // Las ventanas propias de Andros no se ofrecen (evita el espejo infinito).
+    const ownTitle = win && !win.isDestroyed() ? win.getTitle() : "";
+    const windows = sources.filter(
+      (s) => s.id.startsWith("window:") && s.name.trim() && s.name !== ownTitle && s.name !== config.productName
+    );
+    const options = [...screens, ...windows];
+    if (options.length === 0) {
+      callback({});
+      return;
+    }
+    // Un solo monitor y nada más que compartir: pantalla principal directa.
+    if (options.length === 1) {
+      callback({ video: options[0] });
+      return;
+    }
+
+    const choice = await new Promise((resolve) => {
+      let done = false;
+      const finish = (value) => {
+        if (!done) {
+          done = true;
+          resolve(value);
+        }
+      };
+      const label = (s, i) =>
+        s.id.startsWith("screen:")
+          ? screens.length === 1
+            ? "Pantalla completa"
+            : s.display_id === primaryId
+              ? "Pantalla principal"
+              : `Pantalla ${i + 1}`
+          : s.name.length > 60
+            ? `${s.name.slice(0, 57)}…`
+            : s.name;
+      const items = options.map((s, i) => ({
+        label: label(s, i),
+        icon: s.thumbnail.isEmpty() ? undefined : s.thumbnail.resize({ width: 32, height: 18 }),
+        click: () => finish(s),
+      }));
+      const template = [
+        { label: "¿Qué quieres compartir?", enabled: false },
+        { type: "separator" },
+        ...items.slice(0, screens.length),
+        ...(windows.length > 0 ? [{ type: "separator" }, { label: "Ventanas", enabled: false }] : []),
+        ...items.slice(screens.length),
+      ];
+      Menu.buildFromTemplate(template).popup({
+        window: win && !win.isDestroyed() ? win : undefined,
+        // El cierre del menú puede llegar antes que el clic del elemento: se le da un respiro.
+        callback: () => setTimeout(() => finish(null), 150),
+      });
+    });
+
+    if (!choice) {
+      callback({});
+      return;
+    }
+    callback({ video: choice });
+  } catch (error) {
+    console.warn("[Andros] No se pudo preparar la captura de pantalla:", error instanceof Error ? error.message : error);
+    callback({});
+  }
 }
 
 // ---------------------------------------------------------------------------
