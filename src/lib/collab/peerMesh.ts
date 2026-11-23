@@ -1,14 +1,16 @@
 // ============================================================================
 // ANDROS — MALLA WEBRTC PARA 2–6 PERSONAS ($0: sin servidor multimedia)
 //
-// Cada pareja de participantes tiene UN RTCPeerConnection que lleva su audio
-// y, si alguien comparte, su pantalla. La señalización viaja por Supabase
-// Broadcast. Para que dos ofertas simultáneas no rompan la conexión:
+// Cada pareja de participantes tiene UN RTCPeerConnection que lleva su audio,
+// su cámara (si la enciende) y su pantalla (si comparte). Cámara y pantalla
+// viajan con un `MediaStream.id` fijo por llamada que se anuncia en Presence,
+// así el receptor las distingue sin mezclarlas. La señalización viaja por
+// Supabase Broadcast. Para que dos ofertas simultáneas no rompan la conexión:
 //   · La PRIMERA oferta la envía solo el peer con el id MAYOR (regla
 //     determinista anti-glare); el menor solo responde.
 //   · Una vez negociado, cualquiera puede renegociar (p. ej. al compartir
-//     pantalla) con el patrón "negociación perfecta" (W3C): el id menor es el
-//     "educado" y cede ante una colisión.
+//     pantalla o encender la cámara) con el patrón "negociación perfecta"
+//     (W3C): el id menor es el "educado" y cede ante una colisión.
 // Los candidatos ICE que llegan antes de la descripción remota se guardan en
 // `pendingCandidates` y se aplican justo después de `setRemoteDescription`.
 // ============================================================================
@@ -57,6 +59,7 @@ interface PeerLink {
   /** Ya hubo una negociación completa (desde aquí cualquiera puede renegociar). */
   negotiated: boolean;
   micSender: RTCRtpSender | null;
+  cameraSender: RTCRtpSender | null;
   screenSender: RTCRtpSender | null;
   stuckTimer: ReturnType<typeof setTimeout> | null;
   /** Candidatos ICE que llegaron antes de la descripción remota. */
@@ -67,7 +70,11 @@ export interface PeerMeshOptions {
   selfId: string;
   sendSignal: (payload: RtcSignalPayload) => void;
   onRemoteAudio: (peerId: string, stream: MediaStream | null) => void;
-  onRemoteScreen: (peerId: string, stream: MediaStream | null) => void;
+  /**
+   * Vídeo remoto (cámara o pantalla) con el `MediaStream.id` del emisor.
+   * `streamId === null` = se cerró el enlace: borra todos sus vídeos.
+   */
+  onRemoteVideo: (peerId: string, streamId: string | null, stream: MediaStream | null) => void;
   /** Estado real del enlace (`null` = enlace cerrado). */
   onLinkState?: (peerId: string, state: LinkState | null) => void;
 }
@@ -77,7 +84,10 @@ export class PeerMesh {
   private micTrack: MediaStreamTrack | null = null;
   private micStream: MediaStream | null = null;
   private screenTrack: MediaStreamTrack | null = null;
-  private screenStream: MediaStream | null = null;
+  private cameraTrack: MediaStreamTrack | null = null;
+  /** Flujos "contenedor" de salida: su id identifica la cámara y la pantalla. */
+  private readonly cameraOut = new MediaStream();
+  private readonly screenOut = new MediaStream();
   private closed = false;
 
   constructor(private readonly options: PeerMeshOptions) {}
@@ -87,6 +97,12 @@ export class PeerMesh {
     return [...this.links.keys()];
   }
 
+  /** Ids con los que viajan tu cámara y tu pantalla (se anuncian en Presence). */
+  outStreamIds(): { camera: string; screen: string } {
+    return { camera: this.cameraOut.id, screen: this.screenOut.id };
+  }
+
+  /** Micrófono: si ya hay emisor, se cambia la pista en caliente (replaceTrack). */
   setMicStream(stream: MediaStream | null): void {
     this.micStream = stream;
     this.micTrack = stream?.getAudioTracks()[0] ?? null;
@@ -94,9 +110,14 @@ export class PeerMesh {
   }
 
   setScreenStream(stream: MediaStream | null): void {
-    this.screenStream = stream;
     this.screenTrack = stream?.getVideoTracks()[0] ?? null;
     for (const link of this.links.values()) this.syncScreenSender(link);
+  }
+
+  /** Cámara: `null` la quita; otra pista la cambia en caliente (replaceTrack). */
+  setCameraTrack(track: MediaStreamTrack | null): void {
+    this.cameraTrack = track;
+    for (const link of this.links.values()) this.syncCameraSender(link);
   }
 
   private syncMicSender(link: PeerLink): void {
@@ -109,23 +130,38 @@ export class PeerMesh {
   }
 
   private syncScreenSender(link: PeerLink): void {
-    if (this.screenTrack && this.screenStream) {
-      if (link.screenSender) {
-        void link.screenSender.replaceTrack(this.screenTrack).catch(() => undefined);
-      } else {
-        link.screenSender = link.pc.addTrack(this.screenTrack, this.screenStream);
+    link.screenSender = this.syncVideoSender(link, link.screenSender, this.screenTrack, this.screenOut);
+  }
+
+  private syncCameraSender(link: PeerLink): void {
+    link.cameraSender = this.syncVideoSender(link, link.cameraSender, this.cameraTrack, this.cameraOut);
+  }
+
+  /** Añade, cambia (replaceTrack) o quita una pista de vídeo de un enlace. */
+  private syncVideoSender(
+    link: PeerLink,
+    sender: RTCRtpSender | null,
+    track: MediaStreamTrack | null,
+    outStream: MediaStream
+  ): RTCRtpSender | null {
+    if (track) {
+      if (sender) {
+        void sender.replaceTrack(track).catch(() => undefined);
+        return sender;
       }
-    } else if (link.screenSender) {
+      return link.pc.addTrack(track, outStream);
+    }
+    if (sender) {
       try {
-        link.pc.removeTrack(link.screenSender);
+        link.pc.removeTrack(sender);
       } catch {
         /* conexión cerrada */
       }
-      link.screenSender = null;
     }
+    return null;
   }
 
-  /** Crea (si falta) la conexión con `peerId` y le adjunta micrófono y pantalla. */
+  /** Crea (si falta) la conexión con `peerId` y le adjunta micrófono, cámara y pantalla. */
   ensurePeer(peerId: string): PeerLink | null {
     if (this.closed || peerId === this.options.selfId) return null;
     const existing = this.links.get(peerId);
@@ -141,6 +177,7 @@ export class PeerMesh {
       initiator,
       negotiated: false,
       micSender: null,
+      cameraSender: null,
       screenSender: null,
       stuckTimer: null,
       pendingCandidates: [],
@@ -209,8 +246,10 @@ export class PeerMesh {
         }
         this.options.onRemoteAudio(peerId, stream);
       } else if (track.kind === "video") {
-        // La pantalla siempre llega en su propio flujo, separado del micrófono.
-        this.options.onRemoteScreen(peerId, new MediaStream([track]));
+        // Cámara o pantalla: el id del flujo del emisor (anunciado en
+        // Presence) dice cuál es. Cada una llega en su propio flujo.
+        const streamId = streams[0]?.id ?? `track-${track.id}`;
+        this.options.onRemoteVideo(peerId, streamId, new MediaStream([track]));
       }
     };
 
@@ -225,6 +264,7 @@ export class PeerMesh {
     } else {
       this.syncMicSender(link);
     }
+    this.syncCameraSender(link);
     this.syncScreenSender(link);
     return link;
   }
@@ -276,6 +316,11 @@ export class PeerMesh {
     }
   }
 
+  /** `true` si hay un enlace abierto con `peerId`. */
+  hasPeer(peerId: string): boolean {
+    return this.links.has(peerId);
+  }
+
   /** Cierra la conexión con un participante que salió. */
   removePeer(peerId: string): void {
     const link = this.links.get(peerId);
@@ -283,7 +328,7 @@ export class PeerMesh {
     this.links.delete(peerId);
     this.closeLink(link);
     this.options.onRemoteAudio(peerId, null);
-    this.options.onRemoteScreen(peerId, null);
+    this.options.onRemoteVideo(peerId, null, null);
     this.options.onLinkState?.(peerId, null);
   }
 
@@ -305,13 +350,13 @@ export class PeerMesh {
     for (const [peerId, link] of this.links) {
       this.closeLink(link);
       this.options.onRemoteAudio(peerId, null);
-      this.options.onRemoteScreen(peerId, null);
+      this.options.onRemoteVideo(peerId, null, null);
       this.options.onLinkState?.(peerId, null);
     }
     this.links.clear();
     this.micTrack = null;
     this.micStream = null;
     this.screenTrack = null;
-    this.screenStream = null;
+    this.cameraTrack = null;
   }
 }

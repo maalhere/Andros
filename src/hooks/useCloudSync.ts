@@ -31,12 +31,14 @@ import {
   useWorkspaceStore,
 } from "@/store/useWorkspaceStore";
 import { useLandingStore } from "@/store/useLandingStore";
+import { useToastStore } from "@/store/useToastStore";
 import { useCollabStore } from "@/store/useCollabStore";
 import { shouldSkipAutosaveForRemote } from "@/lib/collab/remoteFlag";
 import { sanitizeCanvasStrokes } from "@/lib/canvas/inkGeometry";
 import { getDesktopBridge, type AndrosDesktopBridge } from "@/lib/printer/printerClient";
 import {
   useWorkspaceManagerStore,
+  type SharedWorkspaceSummary,
   type WorkspaceSummary,
 } from "@/store/useWorkspaceManagerStore";
 import type {
@@ -419,6 +421,10 @@ interface CloudEngine {
   renameFolder: (from: string, to: string) => Promise<void>;
   duplicateWorkspace: (id: string) => Promise<void>;
   deleteWorkspace: (id: string) => Promise<void>;
+  /** Vuelve a leer «Mis espacios» y «Compartidos conmigo». */
+  refreshList: () => Promise<void>;
+  /** Abre el espacio pedido por un enlace `?espacio=` (si eres miembro). */
+  consumeLink: () => Promise<void>;
 }
 
 const LAST_WORKSPACE_KEY = "andros:last-workspace:";
@@ -444,6 +450,12 @@ const FOLDERS_SETUP_HINT =
 
 let activeEngine: CloudEngine | null = null;
 
+/** Espacio pedido por un enlace `?espacio=<id>` que aún no se abrió. */
+let pendingLinkWorkspaceId: string | null = null;
+
+const NO_ACCESS_MESSAGE =
+  "No tienes acceso a ese espacio. Pide a su dueño que te añada desde «Compartir».";
+
 function startCloudEngine(supabase: SupabaseClient): CloudEngine {
   const cloud = useCloudStore.getState;
 
@@ -452,6 +464,11 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
   let epoch = 0;
   let userId: string | null = null;
   let workspaceId: string | null = null;
+  /**
+   * `owner_id` de las filas que se guardan: SIEMPRE el dueño del espacio
+   * (también si escribe un miembro de un espacio compartido).
+   */
+  let rowOwnerId: string | null = null;
   let ready = false;
   /** `true` mientras el lienzo muestra el espacio de otra cuenta (sala en vivo). */
   let collabGuest = false;
@@ -485,6 +502,7 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
     ready = false;
     userId = null;
     workspaceId = null;
+    rowOwnerId = null;
     nodeSnapshot = new Map();
     connectionSnapshot = new Map();
     strokesSnapshot = null;
@@ -504,7 +522,7 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
     if (!ready || !userId || !workspaceId || disposed || collabGuest) return;
     const ep = epoch;
     const ws = workspaceId;
-    const uid = userId;
+    const uid = rowOwnerId ?? userId;
 
     const { nodes, connections, canvasStrokes } = useWorkspaceStore.getState();
     const nextStrokesSnapshot = JSON.stringify(canvasStrokes);
@@ -784,6 +802,46 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
       })
     );
 
+  /**
+   * «Compartidos conmigo»: espacios de otras cuentas que la RLS te deja leer
+   * por ser miembro. Si las tablas nuevas aún no existen, la lista queda vacía
+   * (sin romper nada).
+   */
+  const refreshSharedList = async (uid: string): Promise<SharedWorkspaceSummary[]> => {
+    const { data, error } = await supabase
+      .from("workspaces")
+      .select("id, name, folder, owner_id, created_at, updated_at")
+      .neq("owner_id", uid)
+      .order("updated_at", { ascending: false });
+    if (error) {
+      useWorkspaceManagerStore.getState().setSharedWorkspaces([]);
+      return [];
+    }
+    const rows = (data ?? []) as unknown as Record<string, unknown>[];
+    const ownerIds = [...new Set(rows.map((r) => String(r.owner_id ?? "")).filter(Boolean))];
+    const names = new Map<string, string>();
+    if (ownerIds.length > 0) {
+      const { data: profiles } = await supabase.rpc("get_basic_profiles", { ids: ownerIds });
+      for (const profile of (profiles ?? []) as Record<string, unknown>[]) {
+        const username =
+          typeof profile.username === "string" && profile.username ? `@${profile.username}` : "";
+        const fullName = typeof profile.full_name === "string" ? profile.full_name.trim() : "";
+        names.set(String(profile.id), fullName || username || "Otra cuenta");
+      }
+    }
+    const list: SharedWorkspaceSummary[] = rows.map((r) => ({
+      id: String(r.id),
+      name: typeof r.name === "string" && r.name ? r.name : "Sin nombre",
+      folder: typeof r.folder === "string" ? r.folder : "",
+      createdAt: String(r.created_at ?? ""),
+      updatedAt: String(r.updated_at ?? ""),
+      ownerId: String(r.owner_id ?? ""),
+      ownerName: names.get(String(r.owner_id ?? "")) ?? "Otra cuenta",
+    }));
+    useWorkspaceManagerStore.getState().setSharedWorkspaces(list);
+    return list;
+  };
+
   /** Lista los espacios del usuario (con carpeta si la columna existe). */
   const refreshWorkspaceList = async (uid: string): Promise<WorkspaceSummary[]> => {
     const toSummary = (r: Record<string, unknown>): WorkspaceSummary => ({
@@ -810,6 +868,7 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
     if (result.error) throw result.error;
     const list = ((result.data ?? []) as unknown as Record<string, unknown>[]).map(toSummary);
     useWorkspaceManagerStore.getState().setWorkspaces(list, foldersSupported);
+    await refreshSharedList(uid).catch(() => [] as SharedWorkspaceSummary[]);
     return list;
   };
 
@@ -821,14 +880,26 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
     cloud().setStatus("loading", null);
 
     try {
-      // 1. Espacio pedido, último usado, o el primero del usuario (o uno nuevo).
+      // 1. Espacio pedido (o del enlace ?espacio=), último usado, o el primero
+      //    del usuario (o uno nuevo). Los compartidos contigo también valen.
       const list = await refreshWorkspaceList(uid);
+      const shared = useWorkspaceManagerStore.getState().sharedWorkspaces;
+      const accessible = (id: string | null | undefined): id is string =>
+        Boolean(id) && (list.some((w) => w.id === id) || shared.some((w) => w.id === id));
+      let requested = opts.workspaceId ?? null;
+      let fromLink = false;
+      if (!requested && pendingLinkWorkspaceId) {
+        requested = pendingLinkWorkspaceId;
+        pendingLinkWorkspaceId = null;
+        fromLink = true;
+      }
       let wsId: string | null = null;
-      if (opts.workspaceId && list.some((w) => w.id === opts.workspaceId)) {
-        wsId = opts.workspaceId;
+      if (accessible(requested)) {
+        wsId = requested;
       } else {
+        if (fromLink) useToastStore.getState().show({ message: NO_ACCESS_MESSAGE, tone: "error" });
         const last = readLastWorkspace(uid);
-        wsId = (last && list.find((w) => w.id === last)?.id) || list[0]?.id || null;
+        wsId = (accessible(last) ? last : null) || list[0]?.id || null;
       }
       if (!wsId) {
         const { data: created, error: createError } = await supabase
@@ -841,6 +912,8 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
         await refreshWorkspaceList(uid);
       }
       writeLastWorkspace(uid, wsId);
+      const sharedSummary = shared.find((w) => w.id === wsId);
+      const ownerForRows = sharedSummary?.ownerId ?? uid;
 
       // 2. Nodos, cables y trazos de tinta guardados.
       const [nodesResult, connectionsResult, strokesResult] = await Promise.all([
@@ -857,6 +930,7 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
       if (ep !== epoch || disposed) return;
 
       workspaceId = wsId;
+      rowOwnerId = ownerForRows;
       cloud().setWorkspaceId(wsId);
 
       const nodeRows = (nodesResult.data ?? []) as unknown as NodeRow[];
@@ -879,8 +953,9 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
           // Espacio nuevo con contenido (importado de un .andros.zip).
           useWorkspaceStore.getState().hydrateWorkspace(opts.seed.nodes, opts.seed.connections);
           useWorkspaceStore.getState().hydrateCanvasStrokes(opts.seed.strokes);
-        } else if (opts.workspaceId) {
-          // Espacio vacío abierto desde el gestor: lienzo en blanco.
+        } else if (opts.workspaceId || wsId === requested || sharedSummary) {
+          // Espacio vacío abierto desde el gestor, un enlace o compartido
+          // contigo: lienzo en blanco (tu lienzo local nunca se sube a él).
           useWorkspaceStore.getState().hydrateWorkspace([], []);
           useWorkspaceStore.getState().hydrateCanvasStrokes([]);
         }
@@ -909,11 +984,14 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
       for (const row of nodeRows) {
         const node = rowToNode(row);
         if (!node) continue;
-        const normalized = nodeToRow(node, Number(row.sort_order) || 0, wsId, uid);
+        const normalized = nodeToRow(node, Number(row.sort_order) || 0, wsId, ownerForRows);
         nodeSnapshot.set(row.id, JSON.stringify(normalized));
       }
       connectionSnapshot = new Map(
-        loadedConnections.map((c) => [c.id, JSON.stringify(connectionToRow(c, wsId, uid))])
+        loadedConnections.map((c) => [
+          c.id,
+          JSON.stringify(connectionToRow(c, wsId, ownerForRows)),
+        ])
       );
       syncedStoragePaths = storagePathsOf(loadedNodes);
       strokesSnapshot = strokesAvailable ? JSON.stringify(loadedStrokes) : null;
@@ -1250,6 +1328,25 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
     openWorkspace: async (id, seed) => {
       await guarded(() => openWorkspaceRaw(id, seed));
     },
+    refreshList: async () => {
+      if (userId && !disposed) await refreshWorkspaceList(userId).catch(() => undefined);
+    },
+    consumeLink: async () => {
+      const uid = userId;
+      const id = pendingLinkWorkspaceId;
+      // Sin sesión o sin lienzo cargado: lo abrirá `loadWorkspace` al entrar.
+      if (!uid || !id || !ready || disposed) return;
+      pendingLinkWorkspaceId = null;
+      const list = await refreshWorkspaceList(uid).catch(() => [] as WorkspaceSummary[]);
+      const ok =
+        list.some((w) => w.id === id) ||
+        useWorkspaceManagerStore.getState().sharedWorkspaces.some((w) => w.id === id);
+      if (!ok) {
+        useToastStore.getState().show({ message: NO_ACCESS_MESSAGE, tone: "error" });
+        return;
+      }
+      await guarded(() => openWorkspaceRaw(id));
+    },
     createWorkspace,
     renameWorkspace,
     moveWorkspace,
@@ -1409,6 +1506,24 @@ export const duplicateCloudWorkspace = async (id: string): Promise<void> =>
   activeEngine?.duplicateWorkspace(id);
 export const deleteCloudWorkspace = async (id: string): Promise<void> =>
   activeEngine?.deleteWorkspace(id);
+
+/** Vuelve a leer «Mis espacios» y «Compartidos conmigo». */
+export const refreshCloudWorkspaceList = async (): Promise<void> => activeEngine?.refreshList();
+
+/**
+ * Enlace `?espacio=<id>`: abre ese espacio si eres su dueño o miembro. Si aún
+ * no hay sesión, queda pendiente y se abre al iniciar sesión.
+ */
+export function openWorkspaceFromLink(workspaceId: string): void {
+  pendingLinkWorkspaceId = workspaceId;
+  const status = useCloudStore.getState().status;
+  if (status === "signed-out" || status === "disabled") {
+    useToastStore.getState().show({
+      message: "Inicia sesión con Google para abrir el espacio compartido.",
+    });
+  }
+  void activeEngine?.consumeLink();
+}
 
 /** Sala en vivo: congela el autoguardado mientras ves el lienzo de otra cuenta. */
 export const suspendCloudForCollabGuest = async (): Promise<void> =>

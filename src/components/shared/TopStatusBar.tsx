@@ -15,11 +15,12 @@ import { InstallAppButton } from "@/components/pwa/InstallAppButton";
 import { useTabsBarVisible } from "@/store/useTabsStore";
 import { useShortcutsGuideStore } from "@/store/useShortcutsGuideStore";
 import { CollabRoomButton } from "@/components/collab/VoiceRoomBar";
+import { ShareWorkspaceButton } from "@/components/social/ShareWorkspaceModal";
 
 // ============================================================================
 // ANDROS — BARRA SUPERIOR (mínima)
 //   Izquierda: logo + selector de proyecto/carpeta.
-//   Derecha:   Sala de voz · Invitar · Día/Noche · Instalar App · Cuenta de Google · ⋯ Más opciones.
+//   Derecha:   Canal de voz · Compartir · Día/Noche · Instalar App · Cuenta de Google · ⋯ Más opciones.
 // ============================================================================
 
 interface TopStatusBarProps {
@@ -104,6 +105,7 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({ isMobile }) => {
           <CircleHelp className="w-4 h-4" aria-hidden="true" />
         </button>
         <CollabRoomButton />
+        <ShareWorkspaceButton />
         <ThemeToggle />
         <InstallAppButton isMobile={isMobile} />
         <GoogleAuthButton isMobile={isMobile} />

@@ -35,6 +35,19 @@ export interface CollabPresence {
   /** `true` si ve el lienzo de otro como invitado (no es dueño del espacio). */
   guest: boolean;
   joinedAt: number;
+  /**
+   * `true` si está DENTRO del canal de voz (WebRTC activo). Con `false` solo
+   * está en el espacio (presencia pasiva: sin micrófono ni conexiones).
+   */
+  inCall: boolean;
+  /** `true` con la cámara encendida. */
+  hasVideo: boolean;
+  /** Id de esta entrada a la voz: si cambia, el enlace WebRTC se rehace. */
+  callId: string | null;
+  /** `MediaStream.id` con el que viaja su cámara (separa cámara y pantalla). */
+  cameraStreamId: string | null;
+  /** `MediaStream.id` con el que viaja su pantalla compartida. */
+  screenStreamId: string | null;
 }
 
 /** Cursor remoto en coordenadas del lienzo. */
@@ -141,7 +154,10 @@ export interface ScreenStopPayload {
   senderId: string;
 }
 
-/** Invitación leída de la URL (`?sala=…&espacio=…`). */
+/**
+ * Invitación ANTIGUA leída de la URL (`?sala=…&espacio=…`). Los enlaces
+ * nuevos son solo `?espacio=<id>` y abren el espacio compartido directamente.
+ */
 export interface CollabInvite {
   roomId: string;
   workspaceId: string | null;

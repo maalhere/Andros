@@ -42,23 +42,58 @@ export default function PrivacidadPage() {
           <strong>Publicaciones y postulaciones en Andros Arena</strong> que decidas enviar, junto
           con el nombre que se muestra en ellas.
         </li>
+        <li>
+          <strong>Tu @usuario</strong> (opcional), que eliges tú. Junto con tu nombre y tu foto de
+          perfil es lo que ven otras personas cuando te buscan o te añaden.
+        </li>
       </ul>
-      <h3>Si entras a una sala en vivo (voz, pantalla y edición conjunta)</h3>
+      <h3>Amistades y espacios compartidos</h3>
       <ul>
         <li>
-          <strong>Presencia</strong>: tu nombre, un color, el nombre del espacio que tienes abierto y
-          si tienes el micrófono silenciado o compartes pantalla. Solo lo ven las personas de esa
-          sala mientras estás dentro; no se guarda en la base de datos.
+          <strong>Búsqueda</strong>: alguien puede encontrarte solo escribiendo tu @usuario exacto o
+          tu correo exacto. La búsqueda nunca muestra tu correo, no lista cuentas de forma masiva y
+          devuelve como mucho unos pocos resultados.
         </li>
         <li>
-          <strong>Voz y pantalla compartida</strong>: viajan directamente entre los navegadores de
-          los participantes (WebRTC). No pasan por nuestros servidores ni se graban. El micrófono y
-          la pantalla solo se activan si tú das permiso y se apagan al salir de la llamada.
+          <strong>Amistades</strong>: guardamos quién envió la solicitud, a quién y si está
+          pendiente, aceptada o rechazada. Solo las dos personas de la pareja pueden verla, y
+          cualquiera de las dos puede borrarla.
+        </li>
+        <li>
+          <strong>Espacios compartidos</strong>: si el dueño de un espacio te añade como miembro,
+          guardamos esa relación. Los miembros pueden ver y editar ese lienzo (nodos, cables,
+          dibujos y archivos adjuntos) y ver los nombres de los demás miembros. El dueño puede
+          quitar a cualquier miembro y cada miembro puede salir cuando quiera.
+        </li>
+        <li>
+          <strong>Enlace del espacio</strong>: el enlace que copias solo contiene el identificador
+          del espacio; únicamente lo abren las personas que son miembros.
+        </li>
+      </ul>
+      <h3>Si abres un espacio en la nube o entras a su canal de voz</h3>
+      <ul>
+        <li>
+          <strong>Presencia</strong>: al abrir un espacio en la nube, las demás personas de ese
+          espacio (o de su carpeta) ven tu nombre, un color, qué espacio tienes abierto y si estás
+          dentro del canal de voz, con el micrófono silenciado, la cámara encendida o compartiendo
+          pantalla. Abrir un espacio NO enciende tu micrófono ni tu cámara. La presencia no se
+          guarda en la base de datos.
+        </li>
+        <li>
+          <strong>Voz, cámara y pantalla compartida</strong>: solo al pulsar «Unirse a voz» se pide
+          el micrófono; la cámara y la pantalla solo se encienden si tú las activas. Viajan
+          directamente entre los navegadores de quienes están en la voz (WebRTC). No pasan por
+          nuestros servidores ni se graban, y se apagan al pulsar «Salir de voz».
+        </li>
+        <li>
+          <strong>Dispositivos</strong>: el micrófono, la salida de audio y la cámara que elijas se
+          recuerdan solo en el almacenamiento local de este dispositivo; nunca se envían a nuestros
+          servidores.
         </li>
         <li>
           <strong>Cursor y cambios del lienzo</strong>: la posición de tu puntero y los nodos que
-          editas se envían en tiempo real a la sala; solo el dueño del espacio los guarda en su
-          nube.
+          editas se envían en tiempo real a las personas del espacio y se guardan en la nube del
+          espacio, al que solo acceden su dueño y sus miembros.
         </li>
       </ul>
       <p>No pedimos teléfono, dirección, datos de pago ni documentos de identidad.</p>
@@ -81,9 +116,14 @@ export default function PrivacidadPage() {
           las salas en vivo.
         </li>
         <li>
-          <strong>Participantes de una sala en vivo</strong>: para conectar la voz y la pantalla
-          directamente, los navegadores intercambian sus direcciones IP de red. Para descubrirlas se
-          consulta un servidor STUN público de Google, que solo ve tu dirección IP.
+          <strong>Participantes del canal de voz</strong>: para conectar la voz, la cámara y la
+          pantalla directamente, los navegadores de quienes están en la voz intercambian sus
+          direcciones IP de red. Para descubrirlas se consulta un servidor STUN público de Google,
+          que solo ve tu dirección IP.
+        </li>
+        <li>
+          <strong>Tus amistades y los miembros de tus espacios compartidos</strong>: ven tu nombre,
+          tu @usuario y tu foto de perfil, y el contenido de los espacios que compartes con ellos.
         </li>
         <li>
           <strong>Google</strong>: inicio de sesión (OAuth) y, si usas el Oráculo o los nodos IA
@@ -128,6 +168,10 @@ export default function PrivacidadPage() {
       <ul>
         <li>Descargar cualquier espacio como archivo .zip (menú ⋯ → Descargar / Importar .zip).</li>
         <li>Eliminar espacios y publicaciones desde la propia app.</li>
+        <li>
+          Quitar amistades, cancelar solicitudes, quitar miembros de tus espacios o salir de un
+          espacio compartido desde ⋯ → Amigos y ⋯ → Compartir espacio.
+        </li>
         <li>Cerrar sesión y seguir usando Andros en modo local.</li>
       </ul>
       <p>

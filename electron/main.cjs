@@ -408,12 +408,19 @@ function setupSession() {
     });
   });
 
+  // Sala de voz (Sprint 7.5): micrófono y cámara ("media" / "audioCapture"),
+  // compartir pantalla ("display-capture"), elegir audífonos ("speaker-selection")
+  // y medios protegidos ("mediaKeySystem"). Solo para el origen de Andros.
   const allowed = new Set([
     "clipboard-read",
     "clipboard-sanitized-write",
     "notifications",
     "fullscreen",
     "media",
+    "audioCapture",
+    "display-capture",
+    "speaker-selection",
+    "mediaKeySystem",
     "pointerLock",
   ]);
   ses.setPermissionRequestHandler((_wc, permission, callback, details) => {

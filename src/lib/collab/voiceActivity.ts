@@ -16,6 +16,8 @@ interface Entry {
   buffer: Float32Array<ArrayBuffer>;
   speaking: boolean;
   lastLoudAt: number;
+  /** Último nivel RMS medido (0–1), para el medidor del micrófono. */
+  level: number;
 }
 
 type AudioContextCtor = typeof AudioContext;
@@ -62,6 +64,7 @@ export class VoiceActivityMonitor {
         buffer: new Float32Array(analyser.fftSize),
         speaking: false,
         lastLoudAt: 0,
+        level: 0,
       });
     } catch {
       return;
@@ -93,6 +96,7 @@ export class VoiceActivityMonitor {
       let sum = 0;
       for (let i = 0; i < entry.buffer.length; i += 1) sum += entry.buffer[i] * entry.buffer[i];
       const rms = Math.sqrt(sum / entry.buffer.length);
+      entry.level = rms;
       if (rms > SPEAKING_THRESHOLD) entry.lastLoudAt = now;
       const speaking = now - entry.lastLoudAt < HOLD_MS;
       if (speaking !== entry.speaking) {
@@ -100,6 +104,11 @@ export class VoiceActivityMonitor {
         this.onChange(id, speaking);
       }
     }
+  }
+
+  /** Nivel actual (0–1) de `id`, o 0 si no se está midiendo. */
+  level(id: string): number {
+    return this.entries.get(id)?.level ?? 0;
   }
 
   /** Reanuda el AudioContext si el navegador lo dejó suspendido. */

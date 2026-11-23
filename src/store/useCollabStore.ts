@@ -11,7 +11,10 @@ import type {
 // ============================================================================
 // ANDROS — ESTADO DE LA SALA EN VIVO (voz, presencia, cursores, pantallas)
 // Lo escribe `useCollabRoom` (src/lib/collab); lo leen VoiceRoomBar,
-// CollabCursorsLayer y ScreenShareNode. Nada de aquí se guarda en la nube.
+// CollabVideoStrip, CollabCursorsLayer y ScreenShareNode. Nada de aquí se
+// guarda en la nube.
+//   · `status`  → presencia PASIVA del espacio (canal de Realtime).
+//   · `inCall`  → estás DENTRO del canal de voz (micrófono + WebRTC).
 // ============================================================================
 
 /** Colores de participante: todos ≥ 4.5:1 con texto blanco (etiquetas del cursor). */
@@ -53,12 +56,25 @@ interface CollabState {
   selfPeerId: string;
   selfColor: string;
 
+  /** Dentro del canal de voz (WebRTC activo con quien también está dentro). */
+  inCall: boolean;
+  /** Pidiendo el micrófono / entrando a la voz. */
+  callConnecting: boolean;
+
   muted: boolean;
   deafened: boolean;
   hasMic: boolean;
   sharing: boolean;
+  /** Tu cámara está encendida. */
+  hasVideo: boolean;
+  /** Vista previa de tu propia cámara. */
+  localCamera: MediaStream | null;
+  /** Cámara de cada participante (separada de su pantalla compartida). */
+  remoteCameras: Record<string, MediaStream>;
+  /** Tira de vídeo desplegada (se puede plegar sin apagar cámaras). */
+  videoStripOpen: boolean;
 
-  /** Otros participantes (sin incluirte). */
+  /** Participantes del espacio, dentro o fuera de la voz (sin incluirte). */
   peers: Record<string, CollabPresence>;
   /** Quién está hablando ahora (incluye tu propio id). */
   speaking: Record<string, boolean>;
@@ -82,7 +98,13 @@ interface CollabState {
 
   setStatus: (status: CollabRoomStatus, errorMessage?: string | null) => void;
   setRoom: (roomId: string | null, roomLabel: string) => void;
-  setMedia: (patch: Partial<Pick<CollabState, "muted" | "deafened" | "hasMic" | "sharing">>) => void;
+  setMedia: (
+    patch: Partial<Pick<CollabState, "muted" | "deafened" | "hasMic" | "sharing" | "hasVideo">>
+  ) => void;
+  setCall: (patch: Partial<Pick<CollabState, "inCall" | "callConnecting">>) => void;
+  setLocalCamera: (stream: MediaStream | null) => void;
+  setRemoteCamera: (peerId: string, stream: MediaStream | null) => void;
+  setVideoStripOpen: (open: boolean) => void;
   setPeers: (peers: Record<string, CollabPresence>) => void;
   setSpeaking: (peerId: string, speaking: boolean) => void;
   setCursor: (cursor: CollabCursor) => void;
@@ -102,7 +124,9 @@ interface CollabState {
   setInvite: (invite: CollabInvite | null) => void;
   setGuest: (guest: CollabGuestSession | null) => void;
   setPanelOpen: (open: boolean) => void;
-  /** Vacía todo lo de la sala (al salir o al desmontar). */
+  /** Vacía todo lo de la LLAMADA (sigues en el espacio con presencia pasiva). */
+  resetCall: () => void;
+  /** Vacía todo lo de la sala (al cerrar sesión, cambiar de sala o desmontar). */
   resetRoom: () => void;
 }
 
@@ -116,10 +140,17 @@ export const useCollabStore = create<CollabState>((set) => ({
   selfPeerId: initialPeerId,
   selfColor: colorForPeer(initialPeerId),
 
+  inCall: false,
+  callConnecting: false,
+
   muted: false,
   deafened: false,
   hasMic: false,
   sharing: false,
+  hasVideo: false,
+  localCamera: null,
+  remoteCameras: {},
+  videoStripOpen: true,
 
   peers: {},
   speaking: {},
@@ -142,6 +173,17 @@ export const useCollabStore = create<CollabState>((set) => ({
     })),
   setRoom: (roomId, roomLabel) => set({ roomId, roomLabel }),
   setMedia: (patch) => set(patch),
+  setCall: (patch) => set(patch),
+  setLocalCamera: (localCamera) => set({ localCamera }),
+  setRemoteCamera: (peerId, stream) =>
+    set((state) => {
+      if ((state.remoteCameras[peerId] ?? null) === stream) return {};
+      const remoteCameras = { ...state.remoteCameras };
+      if (stream) remoteCameras[peerId] = stream;
+      else delete remoteCameras[peerId];
+      return { remoteCameras };
+    }),
+  setVideoStripOpen: (videoStripOpen) => set({ videoStripOpen }),
   setPeers: (peers) =>
     set((state) => {
       // Cursores y "hablando" de quien ya salió se descartan.
@@ -227,16 +269,39 @@ export const useCollabStore = create<CollabState>((set) => ({
   setInvite: (invite) => set({ invite }),
   setGuest: (guest) => set({ guest }),
   setPanelOpen: (panelOpen) => set({ panelOpen }),
+  resetCall: () =>
+    set({
+      inCall: false,
+      callConnecting: false,
+      muted: false,
+      deafened: false,
+      hasMic: false,
+      sharing: false,
+      hasVideo: false,
+      localCamera: null,
+      remoteCameras: {},
+      speaking: {},
+      remoteAudio: {},
+      linkStates: {},
+      audioBlocked: false,
+      screenShares: [],
+      screenStreams: {},
+    }),
   resetRoom: () =>
     set({
       status: "idle",
       errorMessage: null,
       roomId: null,
       roomLabel: "",
+      inCall: false,
+      callConnecting: false,
       muted: false,
       deafened: false,
       hasMic: false,
       sharing: false,
+      hasVideo: false,
+      localCamera: null,
+      remoteCameras: {},
       peers: {},
       speaking: {},
       cursors: {},

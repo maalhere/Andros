@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Folder, FolderOpen, Settings2 } from "lucide-react";
+import { ChevronDown, Folder, FolderOpen, Settings2, Users } from "lucide-react";
 import { useCloudStore } from "@/store/useCloudStore";
 import { useWorkspaceManagerStore } from "@/store/useWorkspaceManagerStore";
 import { openCloudWorkspace } from "@/hooks/useCloudSync";
@@ -28,7 +28,8 @@ export const WorkspaceQuickSwitcher: React.FC = () => {
     return () => window.removeEventListener("pointerdown", close);
   }, [open]);
 
-  const active = workspaces.find((w) => w.id === activeId);
+  const sharedWorkspaces = useWorkspaceManagerStore((s) => s.sharedWorkspaces);
+  const active = workspaces.find((w) => w.id === activeId) ?? sharedWorkspaces.find((w) => w.id === activeId);
   const label = signedIn ? (active?.name ?? "Cargando…") : "Espacio local";
 
   const groups = useMemo(() => {
@@ -90,6 +91,31 @@ export const WorkspaceQuickSwitcher: React.FC = () => {
               ))}
             </div>
           ))}
+          {sharedWorkspaces.length > 0 && (
+            <div className="mb-1">
+              <div className="px-2 pt-1 pb-0.5 flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-mono text-andros-muted">
+                <Users className="w-3 h-3" aria-hidden="true" />
+                Compartidos conmigo
+              </div>
+              {sharedWorkspaces.map((w) => (
+                <button
+                  key={w.id}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setOpen(false);
+                    void openCloudWorkspace(w.id);
+                  }}
+                  className={`w-full text-left px-2 py-1.5 rounded-lg text-xs hover:bg-andros-border/40 spring-micro ${
+                    w.id === activeId ? "text-andros-accent-ink font-semibold" : "text-andros-primary"
+                  }`}
+                >
+                  <span className="block truncate">{w.name}</span>
+                  <span className="block truncate text-[10px] text-andros-muted font-normal">de {w.ownerName}</span>
+                </button>
+              ))}
+            </div>
+          )}
           <button
             type="button"
             role="menuitem"

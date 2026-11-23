@@ -15,6 +15,7 @@ import {
   Plus,
   Trash2,
   Upload,
+  Users,
   X,
 } from "lucide-react";
 import { useCloudStore } from "@/store/useCloudStore";
@@ -30,8 +31,11 @@ import {
   moveCloudWorkspace,
   openCloudWorkspace,
   renameCloudFolder,
+  refreshCloudWorkspaceList,
   renameCloudWorkspace,
 } from "@/hooks/useCloudSync";
+import { useSocialStore } from "@/store/useSocialStore";
+import { SOCIAL_SETUP_HINT } from "@/lib/social/repository";
 import {
   applyImportedProject,
   downloadWorkspaceZip,
@@ -65,6 +69,8 @@ export const WorkspaceManagerDrawer: React.FC = () => {
   const open = useWorkspaceManagerStore((s) => s.drawerOpen);
   const setOpen = useWorkspaceManagerStore((s) => s.setDrawerOpen);
   const workspaces = useWorkspaceManagerStore((s) => s.workspaces);
+  const sharedWorkspaces = useWorkspaceManagerStore((s) => s.sharedWorkspaces);
+  const socialSetupMissing = useSocialStore((s) => s.setupMissing);
   const foldersSupported = useWorkspaceManagerStore((s) => s.foldersSupported);
   const busy = useWorkspaceManagerStore((s) => s.busy);
   const message = useWorkspaceManagerStore((s) => s.message);
@@ -78,6 +84,11 @@ export const WorkspaceManagerDrawer: React.FC = () => {
   const [editing, setEditing] = useState<Editing>(null);
   const [zipBusy, setZipBusy] = useState<null | "export" | "import">(null);
   const fileInput = useRef<HTMLInputElement>(null);
+
+  // Al abrir se actualiza «Compartidos conmigo» (por si alguien te añadió).
+  useEffect(() => {
+    if (open) void refreshCloudWorkspaceList();
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -508,6 +519,63 @@ export const WorkspaceManagerDrawer: React.FC = () => {
                       <ul className="space-y-1.5">{group.items.map(renderRow)}</ul>
                     </div>
                   ))}
+                </section>
+
+                {/* Espacios de otras cuentas donde eres miembro */}
+                <section className="space-y-2" aria-labelledby="andros-shared-with-me">
+                  <h3
+                    id="andros-shared-with-me"
+                    className="text-xs font-semibold uppercase tracking-wider text-andros-primary flex items-center gap-2"
+                  >
+                    <Users className="w-3.5 h-3.5 text-andros-muted" aria-hidden="true" />
+                    Compartidos conmigo
+                  </h3>
+                  {socialSetupMissing ? (
+                    <p className="text-[11px] text-andros-warning">{SOCIAL_SETUP_HINT}</p>
+                  ) : sharedWorkspaces.length === 0 ? (
+                    <p className="text-[11px] text-andros-muted">
+                      Cuando una amistad te añada a su espacio, aparecerá aquí.
+                    </p>
+                  ) : (
+                    <ul className="space-y-1.5">
+                      {sharedWorkspaces.map((w) => {
+                        const isActive = w.id === activeId;
+                        return (
+                          <li
+                            key={w.id}
+                            className={`rounded-xl border p-2 ${
+                              isActive
+                                ? "border-andros-accent/60 bg-andros-accent/5"
+                                : "border-andros-border bg-andros-surface"
+                            }`}
+                          >
+                            <button
+                              type="button"
+                              disabled={locked}
+                              onClick={() => {
+                                void openCloudWorkspace(w.id).then(() => setOpen(false));
+                              }}
+                              className="w-full min-w-0 text-left px-1.5 py-1 rounded-lg hover:bg-andros-border/30 spring-micro"
+                              title="Abrir este espacio compartido"
+                            >
+                              <span className="flex items-center gap-1.5 text-xs font-medium text-andros-primary">
+                                <span className="truncate">{w.name}</span>
+                                {isActive && (
+                                  <span className="shrink-0 text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-andros-accent/15 text-andros-accent-ink">
+                                    abierto
+                                  </span>
+                                )}
+                              </span>
+                              <span className="block truncate text-[11px] text-andros-muted">
+                                de {w.ownerName}
+                                {w.folder ? ` · carpeta ${w.folder}` : ""}
+                              </span>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
                 </section>
               </>
             ) : (

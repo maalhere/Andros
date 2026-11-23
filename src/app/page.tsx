@@ -30,6 +30,11 @@ import { SITE_DESCRIPTION, SITE_TAGLINE, LEGAL_LINKS } from "@/lib/site";
 import { useCollabRoom } from "@/lib/collab/useCollabRoom";
 import { VoiceRoomBar } from "@/components/collab/VoiceRoomBar";
 import { ScreenShareDock } from "@/components/nodes/ScreenShareNode";
+import { CollabVideoStrip } from "@/components/collab/CollabVideoStrip";
+import { useSocialSync } from "@/lib/social/useSocialSync";
+import { UsernameSetupModal } from "@/components/social/UsernameSetupModal";
+import { FriendsModal } from "@/components/social/FriendsModal";
+import { ShareWorkspaceModal } from "@/components/social/ShareWorkspaceModal";
 
 export default function AndrosWorkspacePage() {
   const { isMobile, isMounted } = useDeviceLayout();
@@ -39,6 +44,8 @@ export default function AndrosWorkspacePage() {
   useSettingsSync();
   // Sala en vivo: voz, presencia, cursores, pantalla compartida y edición simultánea.
   useCollabRoom();
+  // @usuario y amistades (espacios compartidos).
+  useSocialSync();
   const showLanding = useLandingStore((s) => s.phase !== "workspace");
   // ⌘K / Ctrl+K (paleta) en todas partes; atajos de letra solo en escritorio.
   useGlobalShortcuts(!isMobile);
@@ -68,12 +75,16 @@ export default function AndrosWorkspacePage() {
       <WorkspaceTabsBar isMobile={isMobile} />
       <TopStatusBar isMobile={isMobile} />
       <VoiceRoomBar isMobile={isMobile} />
+      <CollabVideoStrip />
       <QualityOfLifeModal />
       <AiKeysModal />
       <WorkspaceManagerDrawer />
       <ArenaModal />
       <LibraryDrawer />
       <UpgradeModal />
+      <FriendsModal />
+      <ShareWorkspaceModal />
+      <UsernameSetupModal />
 
       {isMobile ? (
         /* MODO TELÉFONO (< 768px): Tactile Deck & Bottom Sheet Mode */

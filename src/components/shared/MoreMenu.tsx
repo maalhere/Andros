@@ -13,8 +13,10 @@ import {
   Library,
   MoreHorizontal,
   Settings,
+  Share2,
   Swords,
   Trash2,
+  Users,
   X,
 } from "lucide-react";
 import { useMarketStore } from "@/store/useMarketStore";
@@ -25,6 +27,7 @@ import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { useOnboardingStore } from "@/store/useOnboardingStore";
 import { useShortcutsGuideStore } from "@/store/useShortcutsGuideStore";
 import { useAiProvidersStore } from "@/store/useAiProvidersStore";
+import { selectIncomingCount, useSocialStore } from "@/store/useSocialStore";
 import { clearInkWithUndo, resetWorkspaceWithUndo } from "@/lib/canvas/undoable";
 import { LEGAL_LINKS } from "@/lib/site";
 import { openCookiePreferences } from "@/lib/consent";
@@ -41,6 +44,8 @@ interface MenuItem {
   icon: React.ReactNode;
   onSelect: () => void;
   danger?: boolean;
+  /** Conteo pendiente (p. ej. solicitudes de amistad). */
+  badge?: number;
 }
 
 /** Confirmación antes de borrar el contenido del espacio actual. */
@@ -140,6 +145,7 @@ export const MoreMenu: React.FC = () => {
   const [open, setOpen] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const incomingRequests = useSocialStore(selectIncomingCount);
 
   useEffect(() => {
     if (!open) return;
@@ -158,6 +164,19 @@ export const MoreMenu: React.FC = () => {
   }, [open]);
 
   const items: MenuItem[] = [
+    {
+      id: "friends",
+      label: "Amigos",
+      icon: <Users className="w-4 h-4" />,
+      onSelect: () => useSocialStore.getState().setFriendsOpen(true),
+      badge: incomingRequests,
+    },
+    {
+      id: "share",
+      label: "Compartir espacio",
+      icon: <Share2 className="w-4 h-4" />,
+      onSelect: () => useSocialStore.getState().setShareOpen(true),
+    },
     {
       id: "arena",
       label: "Arena & Empleos",
@@ -222,11 +241,18 @@ export const MoreMenu: React.FC = () => {
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label="Más opciones"
+        aria-label={
+          incomingRequests > 0
+            ? `Más opciones (${incomingRequests} solicitudes de amistad)`
+            : "Más opciones"
+        }
         title="Más opciones"
-        className="w-11 h-11 md:w-9 md:h-9 rounded-xl bg-andros-surface backdrop-blur-md border border-andros-border shadow-sm text-andros-muted hover:text-andros-primary hover:border-andros-border-active active:scale-[0.96] spring-micro flex items-center justify-center"
+        className="relative w-11 h-11 md:w-9 md:h-9 rounded-xl bg-andros-surface backdrop-blur-md border border-andros-border shadow-sm text-andros-muted hover:text-andros-primary hover:border-andros-border-active active:scale-[0.96] spring-micro flex items-center justify-center"
       >
         <MoreHorizontal className="w-4 h-4" />
+        {incomingRequests > 0 && (
+          <span aria-hidden="true" className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-andros-accent" />
+        )}
       </button>
 
       <AnimatePresence>
@@ -258,6 +284,11 @@ export const MoreMenu: React.FC = () => {
                 >
                   <span className={item.danger ? "text-andros-danger" : "text-andros-muted"}>{item.icon}</span>
                   {item.label}
+                  {item.badge ? (
+                    <span className="ml-auto min-w-[1.25rem] h-5 px-1 rounded-full bg-andros-accent-fill text-white text-[11px] font-mono tabular-nums flex items-center justify-center">
+                      {item.badge}
+                    </span>
+                  ) : null}
                 </button>
               </React.Fragment>
             ))}
