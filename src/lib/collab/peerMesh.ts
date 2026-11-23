@@ -1,5 +1,5 @@
 // ============================================================================
-// ANDROS — MALLA WEBRTC PARA 2–6 PERSONAS ($0: sin servidor multimedia)
+// ANDROS — MALLA WEBRTC PARA 2–5 PERSONAS EN VOZ ($0: sin servidor multimedia)
 //
 // Cada pareja de participantes tiene UN RTCPeerConnection que lleva su audio,
 // su cámara (si la enciende) y su pantalla (si comparte). Cámara y pantalla
@@ -11,40 +11,66 @@
 //   · Una vez negociado, cualquiera puede renegociar (p. ej. al compartir
 //     pantalla o encender la cámara) con el patrón "negociación perfecta"
 //     (W3C): el id menor es el "educado" y cede ante una colisión.
-// Los candidatos ICE que llegan antes de la descripción remota se guardan en
-// `pendingCandidates` y se aplican justo después de `setRemoteDescription`.
+// Solo una OFERTA puede abrir un enlace nuevo: los candidatos ICE o las
+// respuestas que llegan tarde de alguien que ya salió se descartan (antes
+// recreaban un enlace "zombi" que acababa en «Sin audio — red restringida»).
+//
+// Redes móviles (Wi-Fi ↔ 4G): si ICE pasa a `disconnected` o `failed` se
+// reinicia (`restartIce`) con espera creciente, máx. 2 veces, antes de dar el
+// enlace por perdido. Cámara y pantalla llevan un tope de bitrate para no
+// ahogar la subida de un teléfono.
 // ============================================================================
 
-import type { RtcSignalPayload } from "@/types/collab";
+import type { LinkState, RtcSignalPayload } from "@/types/collab";
 
-/** Estado del enlace de audio con un participante (visible en la barra). */
-export type LinkState = "connecting" | "connected" | "failed";
+export type { LinkState };
 
-/** Tiempo máximo en «comprobando» antes de dar el enlace por restringido. */
-const ICE_STUCK_MS = 15000;
+/** Tiempo máximo en «comprobando» antes de tratar el enlace como caído. */
+const ICE_STUCK_MS = 12000;
+/** `disconnected` suele recuperarse solo (cambio breve de red): se espera un poco. */
+const DISCONNECT_GRACE_MS = 2500;
+/** Reinicios de ICE antes de marcar el enlace en rojo. */
+const MAX_ICE_RESTARTS = 2;
+/** Espera antes de cada reinicio (1 s, 2 s): no se bombardea una red inestable. */
+const RESTART_BACKOFF_MS = 1000;
+/** El peer educado espera un poco más para que la oferta del otro llegue primero. */
+const POLITE_RESTART_DELAY_MS = 1200;
+
+/** Topes de subida por enlace (bits/s). */
+const SCREEN_MAX_BITRATE = 900_000;
+const SCREEN_MAX_FRAMERATE = 15;
+const CAMERA_MAX_BITRATE = 350_000;
 
 /** STUN público por defecto; TURN opcional con variables NEXT_PUBLIC_TURN_*. */
 export function buildRtcConfig(): RTCConfiguration {
   const iceServers: RTCIceServer[] = [
-    { urls: "stun:stun.l.google.com:19302" },
-    { urls: "stun:stun1.l.google.com:19302" },
+    { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
   ];
   // Acceso estático: Next.js solo sustituye `process.env.NEXT_PUBLIC_X` literal.
-  const turnUrl = process.env.NEXT_PUBLIC_TURN_URL?.trim();
+  const turnUrls = parseTurnUrls(process.env.NEXT_PUBLIC_TURN_URL);
   const turnUsername = process.env.NEXT_PUBLIC_TURN_USERNAME?.trim();
   const turnCredential = process.env.NEXT_PUBLIC_TURN_CREDENTIAL?.trim();
-  if (turnUrl) {
-    const urls = turnUrl
-      .split(",")
-      .map((u) => u.trim())
-      .filter(Boolean);
+  if (turnUrls.length > 0) {
     iceServers.push(
       turnUsername && turnCredential
-        ? { urls, username: turnUsername, credential: turnCredential }
-        : { urls }
+        ? { urls: turnUrls, username: turnUsername, credential: turnCredential }
+        : { urls: turnUrls }
     );
   }
   return { iceServers };
+}
+
+/**
+ * `NEXT_PUBLIC_TURN_URL` admite varias URL separadas por comas (p. ej.
+ * `turn:x:3478?transport=udp, turns:x:443?transport=tcp`). Se quitan
+ * comillas y espacios, y se descartan las que no son `turn:`/`turns:`/`stun:`.
+ */
+export function parseTurnUrls(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((url) => url.trim().replace(/^["']|["']$/g, ""))
+    .filter((url) => /^(turns?|stun):/i.test(url));
 }
 
 export const RTC_CONFIG: RTCConfiguration = buildRtcConfig();
@@ -59,9 +85,13 @@ interface PeerLink {
   /** Ya hubo una negociación completa (desde aquí cualquiera puede renegociar). */
   negotiated: boolean;
   micSender: RTCRtpSender | null;
+  /** Emisores de vídeo: se conservan al apagar para reutilizar su transceptor. */
   cameraSender: RTCRtpSender | null;
   screenSender: RTCRtpSender | null;
-  stuckTimer: ReturnType<typeof setTimeout> | null;
+  /** Temporizador único de recuperación (espera, reinicio o atasco de ICE). */
+  recoveryTimer: ReturnType<typeof setTimeout> | null;
+  /** Reinicios de ICE hechos desde la última conexión buena. */
+  iceRestarts: number;
   /** Candidatos ICE que llegaron antes de la descripción remota. */
   pendingCandidates: RTCIceCandidateInit[];
 }
@@ -77,6 +107,8 @@ export interface PeerMeshOptions {
   onRemoteVideo: (peerId: string, streamId: string | null, stream: MediaStream | null) => void;
   /** Estado real del enlace (`null` = enlace cerrado). */
   onLinkState?: (peerId: string, state: LinkState | null) => void;
+  /** ¿Se acepta una oferta de este participante? (p. ej. sigue dentro de la voz). */
+  acceptPeer?: (peerId: string) => boolean;
 }
 
 export class PeerMesh {
@@ -111,6 +143,8 @@ export class PeerMesh {
 
   setScreenStream(stream: MediaStream | null): void {
     this.screenTrack = stream?.getVideoTracks()[0] ?? null;
+    // Texto y líneas nítidos antes que fluidez (pantallas con código o planos).
+    if (this.screenTrack && "contentHint" in this.screenTrack) this.screenTrack.contentHint = "detail";
     for (const link of this.links.values()) this.syncScreenSender(link);
   }
 
@@ -131,34 +165,82 @@ export class PeerMesh {
 
   private syncScreenSender(link: PeerLink): void {
     link.screenSender = this.syncVideoSender(link, link.screenSender, this.screenTrack, this.screenOut);
+    this.tuneVideoSenders(link);
   }
 
   private syncCameraSender(link: PeerLink): void {
     link.cameraSender = this.syncVideoSender(link, link.cameraSender, this.cameraTrack, this.cameraOut);
+    this.tuneVideoSenders(link);
   }
 
-  /** Añade, cambia (replaceTrack) o quita una pista de vídeo de un enlace. */
+  /**
+   * Añade, cambia o quita una pista de vídeo de un enlace. Al quitarla se
+   * conserva el emisor: al volver a compartir se reutiliza su transceptor
+   * (renegociación limpia, sin acumular líneas en el SDP).
+   */
   private syncVideoSender(
     link: PeerLink,
     sender: RTCRtpSender | null,
     track: MediaStreamTrack | null,
     outStream: MediaStream
   ): RTCRtpSender | null {
+    const { pc } = link;
     if (track) {
-      if (sender) {
+      const transceiver = sender ? pc.getTransceivers().find((t) => t.sender === sender) : undefined;
+      if (sender && transceiver && transceiver.direction !== "stopped") {
         void sender.replaceTrack(track).catch(() => undefined);
+        // Volver a "enviar" dispara la renegociación (onnegotiationneeded).
+        if (transceiver.direction !== "sendrecv") transceiver.direction = "sendrecv";
         return sender;
       }
-      return link.pc.addTrack(track, outStream);
+      return pc.addTrack(track, outStream);
     }
-    if (sender) {
+    if (sender?.track) {
       try {
-        link.pc.removeTrack(sender);
+        pc.removeTrack(sender);
       } catch {
         /* conexión cerrada */
       }
     }
-    return null;
+    return sender;
+  }
+
+  /** Aplica el tope de bitrate (y fps de pantalla) a los emisores de vídeo activos. */
+  private tuneVideoSenders(link: PeerLink): void {
+    if (link.cameraSender?.track) tuneSender(link.cameraSender, CAMERA_MAX_BITRATE);
+    if (link.screenSender?.track) tuneSender(link.screenSender, SCREEN_MAX_BITRATE, SCREEN_MAX_FRAMERATE);
+  }
+
+  private emit(peerId: string, state: LinkState | null): void {
+    this.options.onLinkState?.(peerId, state);
+  }
+
+  private clearRecovery(link: PeerLink): void {
+    if (link.recoveryTimer) clearTimeout(link.recoveryTimer);
+    link.recoveryTimer = null;
+  }
+
+  /** Enlace caído: reinicia ICE con espera creciente; tras 2 intentos, rojo. */
+  private recover(peerId: string, link: PeerLink): void {
+    this.clearRecovery(link);
+    if (this.links.get(peerId) !== link) return;
+    if (link.iceRestarts >= MAX_ICE_RESTARTS) {
+      this.emit(peerId, "failed");
+      return;
+    }
+    link.iceRestarts += 1;
+    this.emit(peerId, "reconnecting");
+    const delay =
+      RESTART_BACKOFF_MS * 2 ** (link.iceRestarts - 1) + (link.polite ? POLITE_RESTART_DELAY_MS : 0);
+    link.recoveryTimer = setTimeout(() => {
+      link.recoveryTimer = null;
+      if (this.links.get(peerId) !== link) return;
+      const ice = link.pc.iceConnectionState;
+      if (ice === "connected" || ice === "completed" || ice === "closed") return;
+      link.pc.restartIce();
+      // Si el reinicio tampoco conecta, se intenta de nuevo (o se marca en rojo).
+      link.recoveryTimer = setTimeout(() => this.recover(peerId, link), ICE_STUCK_MS);
+    }, delay);
   }
 
   /** Crea (si falta) la conexión con `peerId` y le adjunta micrófono, cámara y pantalla. */
@@ -179,11 +261,14 @@ export class PeerMesh {
       micSender: null,
       cameraSender: null,
       screenSender: null,
-      stuckTimer: null,
+      recoveryTimer: null,
+      iceRestarts: 0,
       pendingCandidates: [],
     };
     this.links.set(peerId, link);
-    this.options.onLinkState?.(peerId, "connecting");
+    this.emit(peerId, "connecting");
+    // Si la primera oferta se pierde (o nunca llega respuesta), el reinicio la reenvía.
+    link.recoveryTimer = setTimeout(() => this.recover(peerId, link), ICE_STUCK_MS);
 
     pc.onnegotiationneeded = async () => {
       // Anti-glare: la primera oferta solo la envía el peer con el id mayor.
@@ -211,22 +296,25 @@ export class PeerMesh {
     };
 
     pc.oniceconnectionstatechange = () => {
+      if (this.links.get(peerId) !== link) return;
       const ice = pc.iceConnectionState;
-      if (link.stuckTimer) clearTimeout(link.stuckTimer);
-      link.stuckTimer = null;
       if (ice === "connected" || ice === "completed") {
-        this.options.onLinkState?.(peerId, "connected");
+        this.clearRecovery(link);
+        link.iceRestarts = 0;
+        this.emit(peerId, "connected");
+        this.tuneVideoSenders(link);
       } else if (ice === "failed") {
-        this.options.onLinkState?.(peerId, "failed");
-        pc.restartIce();
-      } else {
-        this.options.onLinkState?.(peerId, "connecting");
-        if (ice === "checking" || ice === "disconnected") {
-          link.stuckTimer = setTimeout(
-            () => this.options.onLinkState?.(peerId, "failed"),
-            ICE_STUCK_MS
-          );
-        }
+        this.recover(peerId, link);
+      } else if (ice === "disconnected") {
+        this.clearRecovery(link);
+        this.emit(peerId, "reconnecting");
+        link.recoveryTimer = setTimeout(() => this.recover(peerId, link), DISCONNECT_GRACE_MS);
+      } else if (ice === "checking" || ice === "new") {
+        // Durante un reinicio ya hay un temporizador de atasco en marcha.
+        if (link.iceRestarts > 0) return;
+        this.clearRecovery(link);
+        this.emit(peerId, "connecting");
+        link.recoveryTimer = setTimeout(() => this.recover(peerId, link), ICE_STUCK_MS);
       }
     };
 
@@ -272,8 +360,15 @@ export class PeerMesh {
   /** Procesa una señal (oferta, respuesta o candidato ICE) dirigida a ti. */
   async handleSignal(signal: RtcSignalPayload): Promise<void> {
     if (this.closed || signal.to !== this.options.selfId || typeof signal.from !== "string") return;
-    const link = this.ensurePeer(signal.from);
-    if (!link) return;
+    let link = this.links.get(signal.from);
+    if (!link) {
+      // Solo una OFERTA abre un enlace: un candidato o una respuesta sin
+      // enlace es un resto de una llamada que ya terminó.
+      if (signal.description?.type !== "offer") return;
+      if (this.options.acceptPeer && !this.options.acceptPeer(signal.from)) return;
+      link = this.ensurePeer(signal.from) ?? undefined;
+      if (!link) return;
+    }
     const { pc } = link;
 
     try {
@@ -300,6 +395,8 @@ export class PeerMesh {
             });
           }
         }
+        // Con la negociación hecha ya existen las codificaciones: se aplica el tope.
+        this.tuneVideoSenders(link);
       } else if (signal.candidate) {
         if (!pc.remoteDescription) {
           link.pendingCandidates.push(signal.candidate);
@@ -316,12 +413,7 @@ export class PeerMesh {
     }
   }
 
-  /** `true` si hay un enlace abierto con `peerId`. */
-  hasPeer(peerId: string): boolean {
-    return this.links.has(peerId);
-  }
-
-  /** Cierra la conexión con un participante que salió. */
+  /** Cierra la conexión con un participante que salió (o dejó la voz). */
   removePeer(peerId: string): void {
     const link = this.links.get(peerId);
     if (!link) return;
@@ -329,12 +421,12 @@ export class PeerMesh {
     this.closeLink(link);
     this.options.onRemoteAudio(peerId, null);
     this.options.onRemoteVideo(peerId, null, null);
-    this.options.onLinkState?.(peerId, null);
+    this.emit(peerId, null);
   }
 
   private closeLink(link: PeerLink): void {
-    if (link.stuckTimer) clearTimeout(link.stuckTimer);
-    link.stuckTimer = null;
+    this.clearRecovery(link);
+    link.pendingCandidates.length = 0;
     link.pc.onnegotiationneeded = null;
     link.pc.onicecandidate = null;
     link.pc.oniceconnectionstatechange = null;
@@ -351,7 +443,7 @@ export class PeerMesh {
       this.closeLink(link);
       this.options.onRemoteAudio(peerId, null);
       this.options.onRemoteVideo(peerId, null, null);
-      this.options.onLinkState?.(peerId, null);
+      this.emit(peerId, null);
     }
     this.links.clear();
     this.micTrack = null;
@@ -359,4 +451,28 @@ export class PeerMesh {
     this.screenTrack = null;
     this.cameraTrack = null;
   }
+}
+
+/**
+ * Tope de subida de un emisor. Antes de negociar algunos navegadores aún no
+ * tienen codificaciones: se vuelve a aplicar tras cada negociación.
+ */
+function tuneSender(sender: RTCRtpSender, maxBitrate: number, maxFramerate?: number): void {
+  let params: RTCRtpSendParameters;
+  try {
+    params = sender.getParameters();
+  } catch {
+    return;
+  }
+  const encodings = params.encodings;
+  if (!encodings || encodings.length === 0) return;
+  const tuned = encodings.every(
+    (e) => e.maxBitrate === maxBitrate && (maxFramerate === undefined || e.maxFramerate === maxFramerate)
+  );
+  if (tuned) return;
+  for (const encoding of encodings) {
+    encoding.maxBitrate = maxBitrate;
+    if (maxFramerate !== undefined) encoding.maxFramerate = maxFramerate;
+  }
+  void sender.setParameters(params).catch(() => undefined);
 }

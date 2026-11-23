@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import {
   CircleAlert,
   CloudCheck,
@@ -35,12 +36,7 @@ import { useCloudStore } from "@/store/useCloudStore";
 import { retryFileUpload } from "@/hooks/useCloudSync";
 import { takePendingFile } from "@/lib/canvas/quickAdd";
 import { requestFileDownload } from "@/lib/downloadWithPermission";
-import {
-  Model3DPreview,
-  isPreviewable3D,
-  type ModelDimensions,
-} from "@/components/nodes/Model3DPreview";
-import { Print3DModal, isPrintable3D } from "@/components/nodes/Print3DModal";
+import { isPreviewable3D, isPrintable3D, type ModelDimensions } from "@/lib/3d/fileKinds";
 import {
   isIdentityScale,
   normalizeScale,
@@ -48,6 +44,26 @@ import {
   scaleKey,
   type ModelScale,
 } from "@/lib/3d/modelScale";
+
+// Visor 3D (Three.js) e «Imprimir en 3D» (laminador) se descargan aparte:
+// solo cuando una tarjeta tiene una pieza o se abre el diálogo de impresión.
+const Model3DPreview = dynamic(
+  () => import("@/components/nodes/Model3DPreview").then((m) => m.Model3DPreview),
+  {
+    ssr: false,
+    loading: () => (
+      <div
+        role="status"
+        aria-label="Cargando visor 3D"
+        className="h-44 rounded-xl border border-andros-border bg-andros-canvas animate-pulse motion-reduce:animate-none"
+      />
+    ),
+  }
+);
+const Print3DModal = dynamic(
+  () => import("@/components/nodes/Print3DModal").then((m) => m.Print3DModal),
+  { ssr: false }
+);
 
 /** Medidas (ya escaladas) redondeadas a centésimas de mm, como se guardan en el nodo. */
 function roundedDimensions(dims: ModelDimensions): ModelDimensions {

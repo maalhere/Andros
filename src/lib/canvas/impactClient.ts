@@ -35,7 +35,8 @@ const autoTimers = new Map<string, ReturnType<typeof setTimeout>>();
 /** El aviso de «sin consultas gratis» de las revisiones automáticas sale una vez por sesión. */
 let quotaWarned = false;
 
-function snapshotOf(nodeId: string): string | null {
+/** Texto comparable de una tarjeta (para `commitWithImpact` con edición en vivo). */
+export function snapshotOf(nodeId: string): string | null {
   const node = useWorkspaceStore.getState().nodes.find((n) => n.id === nodeId);
   return node ? impactSnapshot(node) : null;
 }
@@ -47,9 +48,11 @@ function newAlertId(): string {
 /**
  * Aplica una edición confirmada (`apply`) y decide, sin red, si merece
  * revisión de impacto. Úsalo SOLO al guardar/salir del editor, nunca por tecla.
+ * `beforeSnapshot`: estado al EMPEZAR a editar (el texto ya viajó en vivo
+ * mientras se escribía, así que el store ya no guarda el «antes»).
  */
-export function commitWithImpact(nodeId: string, apply: () => void): void {
-  const before = snapshotOf(nodeId);
+export function commitWithImpact(nodeId: string, apply: () => void, beforeSnapshot?: string | null): void {
+  const before = beforeSnapshot !== undefined ? beforeSnapshot : snapshotOf(nodeId);
   apply();
   const after = snapshotOf(nodeId);
   if (before === null || after === null || before === after) return;

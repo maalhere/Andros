@@ -9,6 +9,7 @@ import { NodeArchetype } from "@/types/workspace";
 import { EngineeringNode } from "@/components/shared/EngineeringNode";
 import { EmptyWorkspaceStarter, useStarterVisible } from "@/components/shared/EmptyWorkspaceStarter";
 import { useStarterStore } from "@/store/useStarterStore";
+import { useCollabStore } from "@/store/useCollabStore";
 import { ImpactAlertsBanner } from "@/components/shared/ImpactAlertsBanner";
 
 const FILTER_TABS: { id: "all" | NodeArchetype; label: string }[] = [
@@ -36,6 +37,8 @@ export const TacticalCardStack: React.FC = () => {
   const starterVisible = useStarterVisible();
   const reopenStarter = useStarterStore((s) => s.reopen);
   const starterDismissed = useStarterStore((s) => s.dismissed);
+  // Sala completa (7.º en el espacio): tarjetas de solo lectura (el desplazamiento sigue).
+  const readOnly = useCollabStore((s) => s.capacity.readOnly);
 
   const filteredNodes =
     mobileCategoryFilter === "all"
@@ -116,7 +119,7 @@ export const TacticalCardStack: React.FC = () => {
       <ImpactAlertsBanner variant="stack" />
 
       {/* Pila de Tarjetas de Ingeniería */}
-      <div className="flex flex-col gap-3">
+      <div className={`flex flex-col gap-3 ${readOnly ? "pointer-events-none" : ""}`}>
         {nodes.length === 0 && starterVisible ? (
           <EmptyWorkspaceStarter variant="stack" />
         ) : filteredNodes.length === 0 ? (

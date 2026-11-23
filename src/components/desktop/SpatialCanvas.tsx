@@ -2,7 +2,7 @@
 
 import { SNAP_GRID_SIZE, useSettingsStore, type CableStyle } from "@/store/useSettingsStore";
 
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Check, Trash2, X } from "lucide-react";
 import {
   clampCanvasScale,
@@ -20,6 +20,7 @@ import {
 import { EngineeringNode } from "@/components/shared/EngineeringNode";
 import { ScreenShareLayer } from "@/components/nodes/ScreenShareNode";
 import { CollabCursorsLayer } from "@/components/collab/CollabCursorsLayer";
+import { useCollabStore } from "@/store/useCollabStore";
 import { collectUpstreamContext } from "@/lib/canvas/contextGraph";
 import {
   Bounds,
@@ -428,8 +429,10 @@ export const SpatialCanvas: React.FC = () => {
   const nodeSizesRef = useRef<Record<string, Size>>({});
   const viewAnimationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const isConnectTool = activeTool === "connect";
-  const isDrawTool = activeTool === "draw";
+  // Sala completa (7.º en el espacio): lienzo en modo lectura (paneo y zoom sí).
+  const readOnly = useCollabStore((s) => s.capacity.readOnly);
+  const isConnectTool = activeTool === "connect" && !readOnly;
+  const isDrawTool = activeTool === "draw" && !readOnly;
   const nodeIdsKey = nodes.map((n) => n.id).join("|");
 
   useEffect(() => {
@@ -823,6 +826,22 @@ export const SpatialCanvas: React.FC = () => {
     };
     e.currentTarget.setPointerCapture(e.pointerId);
   };
+
+  // Manejadores ESTABLES para las tarjetas memorizadas (React.memo): la
+  // referencia nunca cambia y siempre llaman a la versión más reciente.
+  const nodeHandlers = useRef({ node: handleNodePointerDown, port: handlePortPointerDown });
+  useLayoutEffect(() => {
+    nodeHandlers.current = { node: handleNodePointerDown, port: handlePortPointerDown };
+  });
+  const onNodePointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>, node: EngineeringNodeData) => nodeHandlers.current.node(e, node),
+    []
+  );
+  const onPortPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLButtonElement>, node: EngineeringNodeData, port: PortPosition) =>
+      nodeHandlers.current.port(e, node, port),
+    []
+  );
 
   // --------------------------------------------------------------------------
   // Paneo (botón central o dedo con el Lápiz) y tinta libre
@@ -1363,15 +1382,15 @@ export const SpatialCanvas: React.FC = () => {
         </svg>
 
         {/* Nodos Interactivos (con el Lápiz activo quedan bloqueados para dibujar encima) */}
-        <div className={isDrawTool ? "pointer-events-none" : "pointer-events-auto"}>
+        <div className={isDrawTool || readOnly ? "pointer-events-none" : "pointer-events-auto"}>
           {nodes.map((node) => (
             <EngineeringNode
               key={node.id}
               node={node}
               variant="canvas"
               isDragging={draggingNodeId === node.id}
-              onPointerDownCanvas={handleNodePointerDown}
-              onPortPointerDown={handlePortPointerDown}
+              onPointerDownCanvas={onNodePointerDown}
+              onPortPointerDown={onPortPointerDown}
               showPorts={Boolean(connectingFrom) || isConnectTool}
               highlightedPort={liveTarget?.nodeId === node.id ? liveTarget.port : null}
               originPort={

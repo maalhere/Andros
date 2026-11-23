@@ -8,7 +8,8 @@ import { sendCollabCursor } from "@/lib/collab/useCollabRoom";
 
 // ============================================================================
 // ANDROS — CURSORES EN VIVO DEL EQUIPO (dentro de la capa transformable)
-//   · Envía tu cursor en coordenadas del LIENZO (~16 fps, con la última posición).
+//   · Envía tu cursor en coordenadas del LIENZO (~25 fps, con la última posición);
+//     el receptor lo suaviza con una transición de 75 ms (fluido como Figma).
 //   · Pinta el puntero de cada compañero que está en tu mismo espacio, con su
 //     nombre y color; el tamaño se compensa para no crecer con el zoom.
 // ============================================================================
@@ -57,11 +58,12 @@ export const CollabCursorsLayer: React.FC<CollabCursorsLayerProps> = ({ scale })
             return (
               <div
                 key={cursor.peerId}
-                className="absolute left-0 top-0"
+                className={`absolute left-0 top-0 will-change-transform ${
+                  reduced ? "" : "transition-transform duration-75 ease-linear motion-reduce:transition-none"
+                }`}
                 style={{
                   transform: `translate3d(${cursor.x}px, ${cursor.y}px, 0) scale(${1 / scale})`,
                   transformOrigin: "0 0",
-                  transition: reduced ? undefined : "transform 90ms linear",
                 }}
               >
                 <svg width="18" height="20" viewBox="0 0 18 20" className="drop-shadow-sm">

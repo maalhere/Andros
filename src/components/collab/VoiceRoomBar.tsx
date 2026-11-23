@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronUp,
+  Eye,
   HeadphoneOff,
   Headphones,
   Loader2,
@@ -46,8 +47,12 @@ import {
   useMediaDevicesStore,
   type MediaDeviceOption,
 } from "@/lib/collab/mediaDevices";
-import type { LinkState } from "@/lib/collab/peerMesh";
-import type { CollabPresence } from "@/types/collab";
+import {
+  MAX_SPACE_PARTICIPANTS,
+  MAX_VOICE_PARTICIPANTS,
+  type CollabPresence,
+  type LinkState,
+} from "@/types/collab";
 
 // ============================================================================
 // ANDROS — CANAL DE VOZ ESTILO DISCORD (compacto, Dual-Engine)
@@ -98,6 +103,7 @@ export const CollabRoomButton: React.FC = () => {
   const isLocal = status === "local";
   const voiceCount = voicePeers.length + (inCall && !isLocal ? 1 : 0);
   const names = voicePeers.map((p) => p.name);
+  const voiceFull = !inCall && voicePeers.length >= MAX_VOICE_PARTICIPANTS;
 
   const handleClick = () => {
     if (!inCall) {
@@ -114,7 +120,9 @@ export const CollabRoomButton: React.FC = () => {
       : ["En voz", String(voiceCount), true]
     : voicePeers.length === 0
       ? ["Voz", "Vacío", false]
-      : ["En voz", String(voicePeers.length), true];
+      : voiceFull
+        ? ["Voz llena", `${MAX_VOICE_PARTICIPANTS}/${MAX_VOICE_PARTICIPANTS}`, true]
+        : ["En voz", String(voicePeers.length), true];
 
   const ariaLabel = inCall
     ? `Estás en el canal de voz${voiceCount > 1 ? ` con ${namesList(names)}` : ""}. ${
@@ -122,7 +130,9 @@ export const CollabRoomButton: React.FC = () => {
       } controles`
     : voicePeers.length === 0
       ? "Unirse al canal de voz del espacio (vacío)"
-      : `Unirse al canal de voz: ${namesList(names)} ${voicePeers.length === 1 ? "está" : "están"} dentro`;
+      : voiceFull
+        ? `Canal de voz lleno (${MAX_VOICE_PARTICIPANTS}/${MAX_VOICE_PARTICIPANTS}): ${namesList(names)}`
+        : `Unirse al canal de voz: ${namesList(names)} ${voicePeers.length === 1 ? "está" : "están"} dentro`;
 
   const title = inCall
     ? "Controles de la voz"
@@ -234,11 +244,13 @@ interface AvatarProps {
 const LINK_TEXT: Record<LinkState, string> = {
   connecting: "Conectando audio…",
   connected: "Audio conectado",
+  reconnecting: "Reconectando (cambio de red)…",
   failed: "Sin audio — red restringida",
 };
 const LINK_DOT: Record<LinkState, string> = {
   connecting: "bg-andros-warning animate-pulse motion-reduce:animate-none",
   connected: "bg-andros-success",
+  reconnecting: "bg-andros-warning animate-pulse motion-reduce:animate-none",
   failed: "bg-andros-danger",
 };
 
@@ -489,6 +501,7 @@ export const VoiceRoomBar: React.FC<{ isMobile: boolean }> = ({ isMobile }) => {
   const invite = useCollabStore((s) => s.invite);
   const guest = useCollabStore((s) => s.guest);
   const panelOpen = useCollabStore((s) => s.panelOpen);
+  const readOnly = useCollabStore((s) => s.capacity.readOnly);
   const userName = useCloudStore((s) => s.user?.name);
   const cloudWorkspaceId = useCloudStore((s) => s.workspaceId);
   const hasTabs = useTabsBarVisible();
@@ -499,6 +512,30 @@ export const VoiceRoomBar: React.FC<{ isMobile: boolean }> = ({ isMobile }) => {
 
   // Fuera de la voz no hay barra: el canal se ve en la barra superior.
   if (!inCall) {
+    // 7.º en el espacio: aviso limpio de solo lectura (sin Realtime saliente ni WebRTC).
+    if (readOnly) {
+      return (
+        <section
+          aria-label="Sala completa"
+          role="status"
+          className={`${placement} flex items-start gap-2.5 p-3 rounded-2xl bg-andros-card border border-andros-border shadow-hud-light dark:shadow-hud-dark`}
+        >
+          <Eye className="w-4 h-4 mt-0.5 shrink-0 text-andros-warning" aria-hidden="true" />
+          <div className="min-w-0">
+            <h2 className="text-sm font-semibold text-andros-primary">
+              Sala completa (
+              <span className="font-mono tabular-nums">
+                {MAX_SPACE_PARTICIPANTS}/{MAX_SPACE_PARTICIPANTS}
+              </span>
+              ) — viendo en modo lectura
+            </h2>
+            <p className="mt-0.5 text-xs text-andros-muted">
+              Ves los cambios en vivo. Podrás editar y entrar a la voz en cuanto se libere un lugar.
+            </p>
+          </div>
+        </section>
+      );
+    }
     // Enlace antiguo `?sala=`: se pulsa para unirse (el navegador pide el micrófono).
     if (!invite) return null;
     return (

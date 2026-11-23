@@ -1,7 +1,9 @@
 "use client";
 
 import React from "react";
+import dynamic from "next/dynamic";
 import { motion } from "framer-motion";
+import { useCollabStore } from "@/store/useCollabStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { celebrate } from "@/lib/effects/celebrate";
 import { deleteNodeWithUndo } from "@/lib/canvas/undoable";
@@ -14,6 +16,7 @@ import {
   FileBox,
   Link2,
   NotebookPen,
+  Pencil,
   Sigma,
   Square,
   Terminal,
@@ -29,10 +32,24 @@ import {
 import { SKETCH_TEXT_MAX_HEIGHT, useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { FileNodeView } from "@/components/nodes/FileNodeView";
 import { ResourceLinkNodeView } from "@/components/nodes/ResourceLinkNode";
-import { CodeLabNodeView } from "@/components/nodes/CodeLabNode";
 import { AiChatNodeView } from "@/components/nodes/AiChatNode";
 import { CalcSheetEditor, NoteTextEditor } from "@/components/nodes/NodeEditors";
 import { NodeImpactBadge, ReviewImpactButton, useNodeAlertCount } from "@/components/nodes/ImpactControls";
+
+// CodeLab (intérprete de código, solo Modo Experto) se descarga al aparecer su primera tarjeta.
+const CodeLabNodeView = dynamic(
+  () => import("@/components/nodes/CodeLabNode").then((m) => m.CodeLabNodeView),
+  {
+    ssr: false,
+    loading: () => (
+      <div
+        role="status"
+        aria-label="Cargando CodeLab"
+        className="my-3 h-32 rounded-xl border border-andros-border bg-andros-canvas animate-pulse motion-reduce:animate-none"
+      />
+    ),
+  }
+);
 
 interface EngineeringNodeProps {
   node: EngineeringNodeData;
@@ -97,7 +114,7 @@ const SketchNotePreview: React.FC<{ node: SketchNoteEngineeringNode }> = ({
         <p className="text-xs leading-relaxed text-andros-muted">
           Cuaderno vacío: todavía no tiene texto, lista de verificación ni trazos.
         </p>
-        <NoteTextEditor nodeId={node.id} data={data} />
+        <NoteTextEditor key="note-editor" nodeId={node.id} data={data} />
       </div>
     );
   }
@@ -317,7 +334,30 @@ const NodeConnectionList: React.FC<{ nodeId: string }> = ({ nodeId }) => {
 // Contenedor polimórfico del nodo
 // ----------------------------------------------------------------------------
 
-export const EngineeringNode: React.FC<EngineeringNodeProps> = ({
+/** «Editando: Nombre» — otra persona escribe ahora mismo en esta tarjeta. */
+const RemoteEditorBadge: React.FC<{ nodeId: string }> = ({ nodeId }) => {
+  const editor = useCollabStore((s) => s.remoteEditors[nodeId]);
+  if (!editor) return null;
+  return (
+    <p
+      className="mt-2.5 -mb-0.5 flex items-center gap-1.5 text-[11px] text-andros-muted"
+      title={`${editor.name} está escribiendo en esta tarjeta`}
+    >
+      <span className="w-2 h-2 shrink-0 rounded-full" style={{ backgroundColor: editor.color }} aria-hidden="true" />
+      <Pencil className="w-3 h-3 shrink-0 text-andros-accent-ink" aria-hidden="true" />
+      <span className="truncate">
+        Editando: <span className="font-medium text-andros-primary">{editor.name}</span>
+      </span>
+    </p>
+  );
+};
+
+/**
+ * Las tarjetas son el componente más repetido del lienzo: con `React.memo`
+ * solo se vuelve a pintar la que cambió (arrastrar una nota ya no repinta las
+ * demás). El lienzo le pasa manejadores estables.
+ */
+export const EngineeringNode = React.memo(function EngineeringNode({
   node,
   variant,
   isDragging = false,
@@ -326,8 +366,9 @@ export const EngineeringNode: React.FC<EngineeringNodeProps> = ({
   showPorts = false,
   highlightedPort = null,
   originPort = null,
-}) => {
-  const selectedNodeId = useWorkspaceStore((s) => s.selectedNodeId);
+}: EngineeringNodeProps) {
+  // Booleano por tarjeta: cambiar la selección solo repinta la anterior y la nueva.
+  const isSelected = useWorkspaceStore((s) => s.selectedNodeId === node.id);
   const selectNode = useWorkspaceStore((s) => s.selectNode);
   const startConnecting = useWorkspaceStore((s) => s.startConnecting);
   const setActiveMobileSheet = useWorkspaceStore((s) => s.setActiveMobileSheet);
@@ -338,7 +379,6 @@ export const EngineeringNode: React.FC<EngineeringNodeProps> = ({
       ).length
   );
 
-  const isSelected = selectedNodeId === node.id;
   // Descuadre detectado tras un cambio en una tarjeta conectada.
   const hasAlert = useNodeAlertCount(node.id) > 0;
   const animations = useSettingsStore((s) => s.animations);
@@ -425,8 +465,11 @@ export const EngineeringNode: React.FC<EngineeringNodeProps> = ({
           ? {
               left: `${node.position.x}px`,
               top: `${node.position.y}px`,
-              // El arrastre debe seguir al cursor sin retardo de animación.
-              transitionProperty: "border-color, box-shadow",
+              // Tu propio arrastre sigue al cursor sin retardo; los movimientos que
+              // llegan de la sala (~25 fps) se suavizan 75 ms para verse fluidos.
+              transitionProperty: isDragging || !full ? "border-color, box-shadow" : "border-color, box-shadow, left, top",
+              transitionDuration: isDragging || !full ? undefined : "180ms, 180ms, 75ms, 75ms",
+              transitionTimingFunction: isDragging || !full ? undefined : "var(--ease-spring), var(--ease-spring), linear, linear",
             }
           : undefined
       }
@@ -471,6 +514,9 @@ export const EngineeringNode: React.FC<EngineeringNodeProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Quién escribe ahora mismo en esta tarjeta (colaboración en vivo) */}
+      <RemoteEditorBadge nodeId={node.id} />
 
       {/* Aviso «Revisar cambio» (detector anti-malentendidos) */}
       <NodeImpactBadge nodeId={node.id} />
@@ -578,4 +624,4 @@ export const EngineeringNode: React.FC<EngineeringNodeProps> = ({
         })}
     </motion.div>
   );
-};
+});

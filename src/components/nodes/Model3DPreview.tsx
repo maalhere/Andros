@@ -5,6 +5,7 @@ import { CircleAlert, Crosshair, LoaderCircle, Rotate3d } from "lucide-react";
 import type { Material, Object3D } from "three";
 import { useSubmitGuard } from "@/hooks/useSubmitGuard";
 import { IDENTITY_SCALE, isIdentityScale, scaleDimensions, type ModelScale } from "@/lib/3d/modelScale";
+import { formatMm, type ModelDimensions } from "@/lib/3d/fileKinds";
 import {
   AutoSupportsToggle,
   ModelScalePanel,
@@ -22,24 +23,6 @@ import {
 // - El archivo original nunca se modifica: la escala vive en el nodo.
 // - Three.js se descarga únicamente cuando hay una pieza 3D que mostrar.
 // ============================================================================
-
-/** Dimensiones envolventes reales de la pieza, en milímetros. */
-export interface ModelDimensions {
-  widthMm: number;
-  depthMm: number;
-  heightMm: number;
-}
-
-const PREVIEWABLE_EXTENSIONS = ["stl", "obj", "3mf"];
-
-export function isPreviewable3D(extension: string): boolean {
-  return PREVIEWABLE_EXTENSIONS.includes(extension.toLowerCase());
-}
-
-/** 120 → "120.0" · 35.2 → "35.20" (más decimales en piezas pequeñas). */
-export function formatMm(value: number): string {
-  return value >= 100 ? value.toFixed(1) : value.toFixed(2);
-}
 
 /**
  * Carga bajo demanda. La pieza se descarga y se dibuja sola únicamente si:

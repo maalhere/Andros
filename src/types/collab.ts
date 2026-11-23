@@ -7,6 +7,15 @@
 import type { CanvasStroke, EngineeringNodeData, NodeConnection } from "./workspace";
 import type { ImpactAlertEntry } from "@/lib/canvas/impact";
 
+/**
+ * Tope duro por espacio: con 6 la edición en vivo sigue siendo coordinable y
+ * la malla WebRTC no satura la subida de nadie. Quien llega 7.º ve el lienzo
+ * en modo lectura (sin emitir por Realtime ni abrir WebRTC).
+ */
+export const MAX_SPACE_PARTICIPANTS = 6;
+/** Tope del canal de voz/vídeo (malla P2P: cada persona sube N−1 flujos). */
+export const MAX_VOICE_PARTICIPANTS = 5;
+
 /** Estado de la sala para la barra de voz. */
 export type CollabRoomStatus =
   | "idle" // No has entrado a ninguna sala.
@@ -35,7 +44,12 @@ export interface CollabPresence {
   sharing: boolean;
   /** `true` si ve el lienzo de otro como invitado (no es dueño del espacio). */
   guest: boolean;
+  /** Cuándo entró a su espacio actual (orden estable para el tope de 6). */
   joinedAt: number;
+  /** Cuándo entró a la voz (orden estable para el tope de 5); `null` fuera de voz. */
+  callJoinedAt: number | null;
+  /** Tarjeta (nota o celda) que está escribiendo ahora mismo. */
+  editingNodeId: string | null;
   /**
    * `true` si está DENTRO del canal de voz (WebRTC activo). Con `false` solo
    * está en el espacio (presencia pasiva: sin micrófono ni conexiones).
@@ -49,6 +63,29 @@ export interface CollabPresence {
   cameraStreamId: string | null;
   /** `MediaStream.id` con el que viaja su pantalla compartida. */
   screenStreamId: string | null;
+}
+
+/**
+ * Estado del enlace WebRTC con un participante (visible en la barra de voz).
+ * `reconnecting` = la red cambió (Wi-Fi ↔ datos) y se está reiniciando ICE.
+ */
+export type LinkState = "connecting" | "connected" | "reconnecting" | "failed";
+
+/** Persona que está escribiendo en una tarjeta («Editando: Nombre»). */
+export interface RemoteEditor {
+  peerId: string;
+  name: string;
+  color: string;
+}
+
+/** Tu lugar en el espacio según el tope de participantes. */
+export interface CollabCapacity {
+  /** Personas en tu espacio (tú incluido). */
+  spaceCount: number;
+  /** Personas dentro de la voz de la sala (tú incluido si estás dentro). */
+  voiceCount: number;
+  /** Llegaste después del 6.º: ves el lienzo en modo lectura. */
+  readOnly: boolean;
 }
 
 /** Cursor remoto en coordenadas del lienzo. */

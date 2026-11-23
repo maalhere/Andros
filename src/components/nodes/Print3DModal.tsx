@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import { getCloudFileLink } from "@/hooks/useCloudSync";
 import { useCloudStore } from "@/store/useCloudStore";
-import { formatMm, type ModelDimensions } from "@/components/nodes/Model3DPreview";
+import { formatMm, type ModelDimensions } from "@/lib/3d/fileKinds";
 import { isSliceable, loadTriangleSoup, triangleBounds } from "@/lib/slicer/meshLoader";
 import {
   ADV3_BED_MM,
@@ -66,12 +66,6 @@ import { AutoSupportsToggle, PreparedStlButton, type SupportStatus } from "@/com
 //   · Sin Wi-Fi: descarga del .gx (USB / FlashPrint) con instrucciones de 2 pasos.
 //   · Bambu Lab, Prusa y Cura como destinos secundarios (abren su programa).
 // ============================================================================
-
-const PRINTABLE_EXTENSIONS = ["stl", "obj", "3mf", "step", "stp", "gcode"];
-
-export function isPrintable3D(extension: string): boolean {
-  return PRINTABLE_EXTENSIONS.includes(extension.toLowerCase());
-}
 
 type Destination = "adv3" | "bambu" | "prusa" | "cura";
 

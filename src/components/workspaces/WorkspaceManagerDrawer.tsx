@@ -36,11 +36,9 @@ import {
 } from "@/hooks/useCloudSync";
 import { useSocialStore } from "@/store/useSocialStore";
 import { SOCIAL_SETUP_HINT } from "@/lib/social/repository";
-import {
-  applyImportedProject,
-  downloadWorkspaceZip,
-  readWorkspaceZip,
-} from "@/lib/export/workspaceZip";
+
+/** JSZip (~100 KB) solo se descarga al exportar o importar un paquete .zip. */
+const loadWorkspaceZip = () => import("@/lib/export/workspaceZip");
 
 // ============================================================================
 // ANDROS — GESTOR DE ESPACIOS DE TRABAJO
@@ -128,6 +126,7 @@ export const WorkspaceManagerDrawer: React.FC = () => {
     setZipBusy("export");
     setMessage(null);
     try {
+      const { downloadWorkspaceZip } = await loadWorkspaceZip();
       const result = await downloadWorkspaceZip();
       if (!result.downloaded) {
         setMessage({ kind: "info", text: `Descarga cancelada: no se guardó ${result.fileName}.` });
@@ -156,6 +155,7 @@ export const WorkspaceManagerDrawer: React.FC = () => {
     setZipBusy("import");
     setMessage(null);
     try {
+      const { applyImportedProject, readWorkspaceZip } = await loadWorkspaceZip();
       const project = await readWorkspaceZip(file);
       const where = await applyImportedProject(project);
       const missing = project.missingFiles.length

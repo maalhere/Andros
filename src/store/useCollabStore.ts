@@ -1,10 +1,13 @@
 import { create } from "zustand";
 import type {
+  CollabCapacity,
   CollabCursor,
   CollabGuestSession,
   CollabInvite,
   CollabPresence,
   CollabRoomStatus,
+  LinkState,
+  RemoteEditor,
   ScreenShareNodeData,
 } from "@/types/collab";
 
@@ -82,7 +85,7 @@ interface CollabState {
   /** Audio remoto por participante (se reproduce en VoiceRoomBar). */
   remoteAudio: Record<string, MediaStream>;
   /** Estado real del enlace WebRTC de audio con cada participante. */
-  linkStates: Record<string, "connecting" | "connected" | "failed">;
+  linkStates: Record<string, LinkState>;
   /** El navegador bloqueó la reproducción automática del audio remoto. */
   audioBlocked: boolean;
 
@@ -93,6 +96,12 @@ interface CollabState {
 
   invite: CollabInvite | null;
   guest: CollabGuestSession | null;
+  /** Tu lugar en el espacio (tope de 6) y en la voz (tope de 5). */
+  capacity: CollabCapacity;
+  /** Tarjeta que TÚ estás escribiendo (se anuncia en Presence). */
+  editingNodeId: string | null;
+  /** Quién está escribiendo en cada tarjeta de tu espacio (id del nodo → persona). */
+  remoteEditors: Record<string, RemoteEditor>;
   /** Barra de la sala desplegada (se puede plegar sin salir de la llamada). */
   panelOpen: boolean;
 
@@ -110,7 +119,7 @@ interface CollabState {
   setCursor: (cursor: CollabCursor) => void;
   removeCursor: (peerId: string) => void;
   setRemoteAudio: (peerId: string, stream: MediaStream | null) => void;
-  setLinkState: (peerId: string, state: "connecting" | "connected" | "failed" | null) => void;
+  setLinkState: (peerId: string, state: LinkState | null) => void;
   setAudioBlocked: (blocked: boolean) => void;
 
   upsertScreenShare: (share: ScreenShareNodeData, stream?: MediaStream | null) => void;
@@ -124,10 +133,24 @@ interface CollabState {
   setInvite: (invite: CollabInvite | null) => void;
   setGuest: (guest: CollabGuestSession | null) => void;
   setPanelOpen: (open: boolean) => void;
+  setCapacity: (capacity: CollabCapacity) => void;
+  /** Empieza (`nodeId`) o termina (`null`) de escribir en una tarjeta. */
+  setEditingNodeId: (nodeId: string | null) => void;
+  /** Termina de escribir en `nodeId` solo si sigue siendo la tarjeta activa. */
+  clearEditingNodeId: (nodeId: string) => void;
+  setRemoteEditors: (editors: Record<string, RemoteEditor>) => void;
   /** Vacía todo lo de la LLAMADA (sigues en el espacio con presencia pasiva). */
   resetCall: () => void;
   /** Vacía todo lo de la sala (al cerrar sesión, cambiar de sala o desmontar). */
   resetRoom: () => void;
+}
+
+const EMPTY_CAPACITY: CollabCapacity = { spaceCount: 0, voiceCount: 0, readOnly: false };
+
+function sameEditors(a: Record<string, RemoteEditor>, b: Record<string, RemoteEditor>): boolean {
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  return keys.every((k) => b[k] && b[k].peerId === a[k].peerId && b[k].name === a[k].name && b[k].color === a[k].color);
 }
 
 const initialPeerId = createPeerId();
@@ -165,6 +188,9 @@ export const useCollabStore = create<CollabState>((set) => ({
   invite: null,
   guest: null,
   panelOpen: true,
+  capacity: EMPTY_CAPACITY,
+  editingNodeId: null,
+  remoteEditors: {},
 
   setStatus: (status, errorMessage) =>
     set((state) => ({
@@ -213,6 +239,7 @@ export const useCollabStore = create<CollabState>((set) => ({
     }),
   setRemoteAudio: (peerId, stream) =>
     set((state) => {
+      if ((state.remoteAudio[peerId] ?? null) === stream) return {};
       const remoteAudio = { ...state.remoteAudio };
       if (stream) remoteAudio[peerId] = stream;
       else delete remoteAudio[peerId];
@@ -269,6 +296,20 @@ export const useCollabStore = create<CollabState>((set) => ({
   setInvite: (invite) => set({ invite }),
   setGuest: (guest) => set({ guest }),
   setPanelOpen: (panelOpen) => set({ panelOpen }),
+  setCapacity: (capacity) =>
+    set((state) =>
+      state.capacity.spaceCount === capacity.spaceCount &&
+      state.capacity.voiceCount === capacity.voiceCount &&
+      state.capacity.readOnly === capacity.readOnly
+        ? {}
+        : { capacity }
+    ),
+  setEditingNodeId: (editingNodeId) =>
+    set((state) => (state.editingNodeId === editingNodeId ? {} : { editingNodeId })),
+  clearEditingNodeId: (nodeId) =>
+    set((state) => (state.editingNodeId === nodeId ? { editingNodeId: null } : {})),
+  setRemoteEditors: (remoteEditors) =>
+    set((state) => (sameEditors(state.remoteEditors, remoteEditors) ? {} : { remoteEditors })),
   resetCall: () =>
     set({
       inCall: false,
@@ -311,5 +352,7 @@ export const useCollabStore = create<CollabState>((set) => ({
       screenShares: [],
       screenStreams: {},
       guest: null,
+      capacity: EMPTY_CAPACITY,
+      remoteEditors: {},
     }),
 }));

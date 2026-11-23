@@ -1,11 +1,12 @@
 "use client";
 
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Check, Pencil } from "lucide-react";
 import { useWorkspaceStore, parseAiTextContent, textBlocksToHtml } from "@/store/useWorkspaceStore";
+import { useCollabStore } from "@/store/useCollabStore";
 import { noteDataToText } from "@/lib/templates/blueprint";
 import { SHEET_MAX_COLUMNS, SHEET_MAX_ROWS, SHEET_COLUMN_LETTERS, setSheetCell } from "@/lib/canvas/sheet";
-import { commitWithImpact } from "@/lib/canvas/impactClient";
+import { commitWithImpact, snapshotOf } from "@/lib/canvas/impactClient";
 import type { CalcLatexPayload, SketchNotePayload } from "@/types/workspace";
 
 // ============================================================================
@@ -18,13 +19,70 @@ import type { CalcLatexPayload, SketchNotePayload } from "@/types/workspace";
 //   · Cálculo: cada celda es un campo; al escribir un número (o una fórmula
 //     como =SUM(B2:B6)) toda la hoja se recalcula al instante.
 // Los campos llevan `data-no-drag` / son <input>, así que no arrastran el nodo.
+//
+// Colaboración en vivo: mientras escribes, el texto se aplica al lienzo cada
+// ~150 ms (viaja por Broadcast a los demás) y el guardado en la nube ocurre en
+// segundo plano sin bloquear la escritura. Además se anuncia en Presence qué
+// tarjeta editas, para que los demás vean «Editando: Nombre» y no se pisen.
+// La revisión de impacto sigue siendo SOLO al confirmar (Guardar / salir).
 // ============================================================================
 
 const MAX_NOTE_CHARS = 8000;
+/** Retardo del envío en vivo mientras se escribe. */
+const LIVE_SYNC_MS = 150;
+
+/** Envío en vivo con debounce; el temporizador se libera al desmontar. */
+function useLiveSync() {
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    []
+  );
+  const cancel = () => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+  };
+  const schedule = (run: () => void) => {
+    cancel();
+    timer.current = setTimeout(() => {
+      timer.current = null;
+      run();
+    }, LIVE_SYNC_MS);
+  };
+  return { schedule, cancel };
+}
+
+/** Anuncia en la sala que estás escribiendo en `nodeId` mientras `active`. */
+function useEditingPresence(nodeId: string, active: boolean): void {
+  useEffect(() => {
+    if (!active) return;
+    useCollabStore.getState().setEditingNodeId(nodeId);
+    return () => useCollabStore.getState().clearEditingNodeId(nodeId);
+  }, [nodeId, active]);
+}
+
+type NoteText = Pick<SketchNotePayload, "textBlocks" | "checklistItems" | "richTextHtml">;
+
+function noteTextFrom(text: string): NoteText {
+  const { textBlocks, checklistItems } = parseAiTextContent(text);
+  return { textBlocks, checklistItems, richTextHtml: textBlocksToHtml(textBlocks) };
+}
 
 export const NoteTextEditor: React.FC<{ nodeId: string; data: SketchNotePayload }> = ({ nodeId, data }) => {
   const updateNodePayload = useWorkspaceStore((s) => s.updateNodePayload);
   const [draft, setDraft] = useState<string | null>(null);
+  /** Edición en curso: texto original (para «Cancelar») y foto para el detector de impacto. */
+  const session = useRef<{ before: string | null; original: NoteText; dirty: boolean } | null>(null);
+  const live = useLiveSync();
+  useEditingPresence(nodeId, draft !== null);
+
+  const finish = () => {
+    live.cancel();
+    session.current = null;
+    setDraft(null);
+  };
 
   if (draft === null) {
     return (
@@ -32,6 +90,15 @@ export const NoteTextEditor: React.FC<{ nodeId: string; data: SketchNotePayload 
         type="button"
         onClick={(e) => {
           e.stopPropagation();
+          session.current = {
+            before: snapshotOf(nodeId),
+            original: {
+              textBlocks: data.textBlocks,
+              checklistItems: data.checklistItems,
+              richTextHtml: data.richTextHtml,
+            },
+            dirty: false,
+          };
           setDraft(noteDataToText(data.textBlocks, data.checklistItems));
         }}
         className="min-h-11 md:min-h-8 px-3 rounded-xl border border-andros-border text-xs font-medium text-andros-primary hover:bg-andros-border/40 flex items-center gap-1.5 active:scale-[0.96] spring-micro"
@@ -42,13 +109,29 @@ export const NoteTextEditor: React.FC<{ nodeId: string; data: SketchNotePayload 
     );
   }
 
+  const handleChange = (value: string) => {
+    const next = value.slice(0, MAX_NOTE_CHARS);
+    setDraft(next);
+    // En vivo: los demás ven el texto mientras escribes (sin esperar a Guardar).
+    live.schedule(() => {
+      updateNodePayload(nodeId, noteTextFrom(next));
+      if (session.current) session.current.dirty = true;
+    });
+  };
+
   const save = () => {
-    const { textBlocks, checklistItems } = parseAiTextContent(draft);
+    const before = session.current ? session.current.before : undefined;
+    const text = draft;
+    finish();
     // Al GUARDAR (nunca por tecla) se decide si el cambio merece revisión de impacto.
-    commitWithImpact(nodeId, () =>
-      updateNodePayload(nodeId, { textBlocks, checklistItems, richTextHtml: textBlocksToHtml(textBlocks) })
-    );
-    setDraft(null);
+    commitWithImpact(nodeId, () => updateNodePayload(nodeId, noteTextFrom(text)), before);
+  };
+
+  const cancel = () => {
+    const current = session.current;
+    finish();
+    // Lo que ya viajó en vivo se deshace: vuelve el texto de antes de editar.
+    if (current?.dirty) updateNodePayload(nodeId, current.original);
   };
 
   return (
@@ -59,10 +142,10 @@ export const NoteTextEditor: React.FC<{ nodeId: string; data: SketchNotePayload 
       <textarea
         id={`note-edit-${nodeId}`}
         value={draft}
-        onChange={(e) => setDraft(e.target.value.slice(0, MAX_NOTE_CHARS))}
+        onChange={(e) => handleChange(e.target.value)}
         onKeyDown={(e) => {
           e.stopPropagation();
-          if (e.key === "Escape") setDraft(null);
+          if (e.key === "Escape") cancel();
           if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) save();
         }}
         rows={9}
@@ -79,7 +162,7 @@ export const NoteTextEditor: React.FC<{ nodeId: string; data: SketchNotePayload 
         </button>
         <button
           type="button"
-          onClick={() => setDraft(null)}
+          onClick={cancel}
           className="min-h-11 md:min-h-8 px-3 rounded-xl border border-andros-border text-xs font-medium text-andros-muted hover:text-andros-primary hover:bg-andros-border/40 active:scale-[0.96] spring-micro"
         >
           Cancelar
@@ -93,6 +176,24 @@ export const NoteTextEditor: React.FC<{ nodeId: string; data: SketchNotePayload 
 // Hoja de cálculo editable
 // ----------------------------------------------------------------------------
 
+/** Escribe una celda sobre la hoja MÁS RECIENTE del store (otra celda pudo cambiar). */
+function writeSheetCell(nodeId: string, address: string, text: string): boolean {
+  const store = useWorkspaceStore.getState();
+  const node = store.nodes.find((n) => n.id === nodeId);
+  if (node?.type !== "calc-latex-node") return false;
+  store.updateNodePayload(nodeId, { gridCells: setSheetCell(node.calcLatexData.gridCells, address, text) });
+  return true;
+}
+
+interface CellSession {
+  /** Foto de la tarjeta al entrar en la celda (para el detector de impacto). */
+  before: string | null;
+  /** Valor original: Escape lo restaura aunque ya haya viajado en vivo. */
+  originalRaw: string;
+  dirty: boolean;
+  cancelled: boolean;
+}
+
 const SheetCellInput: React.FC<{
   nodeId: string;
   address: string;
@@ -102,24 +203,25 @@ const SheetCellInput: React.FC<{
   cell: CalcLatexPayload["gridCells"][string] | undefined;
   placeholder?: string;
 }> = ({ nodeId, address, label, numeric, isHeader, cell, placeholder }) => {
-  const updateNodePayload = useWorkspaceStore((s) => s.updateNodePayload);
   const [draft, setDraft] = useState<string | null>(null);
-  const cancelled = useRef(false);
+  const session = useRef<CellSession | null>(null);
+  const live = useLiveSync();
+  useEditingPresence(nodeId, draft !== null);
 
   const commit = () => {
+    live.cancel();
+    const current = session.current;
     const text = draft;
+    session.current = null;
     setDraft(null);
-    if (cancelled.current || text === null || text === (cell?.raw ?? "")) {
-      cancelled.current = false;
+    if (!current || text === null) return;
+    if (current.cancelled) {
+      if (current.dirty) writeSheetCell(nodeId, address, current.originalRaw);
       return;
     }
-    // Se lee la hoja más reciente del store: otra celda pudo cambiar mientras tanto.
-    const node = useWorkspaceStore.getState().nodes.find((n) => n.id === nodeId);
-    if (node?.type !== "calc-latex-node") return;
+    if (!current.dirty && text === current.originalRaw) return;
     // Al salir de la celda (nunca por tecla) se decide si el cambio merece revisión de impacto.
-    commitWithImpact(nodeId, () =>
-      updateNodePayload(nodeId, { gridCells: setSheetCell(node.calcLatexData.gridCells, address, text) })
-    );
+    commitWithImpact(nodeId, () => writeSheetCell(nodeId, address, text), current.before);
   };
 
   const isFormula = cell?.raw.startsWith("=") ?? false;
@@ -132,16 +234,25 @@ const SheetCellInput: React.FC<{
       value={draft ?? cell?.computed ?? ""}
       placeholder={placeholder}
       onFocus={(e) => {
-        setDraft(cell?.raw ?? "");
+        const originalRaw = cell?.raw ?? "";
+        session.current = { before: snapshotOf(nodeId), originalRaw, dirty: false, cancelled: false };
+        setDraft(originalRaw);
         e.currentTarget.select();
       }}
-      onChange={(e) => setDraft(e.target.value)}
+      onChange={(e) => {
+        const next = e.target.value;
+        setDraft(next);
+        // En vivo: la hoja se recalcula y viaja a los demás mientras escribes.
+        live.schedule(() => {
+          if (writeSheetCell(nodeId, address, next) && session.current) session.current.dirty = true;
+        });
+      }}
       onBlur={commit}
       onKeyDown={(e) => {
         e.stopPropagation();
         if (e.key === "Enter") e.currentTarget.blur();
         if (e.key === "Escape") {
-          cancelled.current = true;
+          if (session.current) session.current.cancelled = true;
           e.currentTarget.blur();
         }
       }}

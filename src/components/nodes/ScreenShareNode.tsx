@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useEffect, useRef } from "react";
-import { Loader2, Maximize2, MonitorOff, MoveDiagonal2, X } from "lucide-react";
+import React, { useEffect, useRef, useState } from "react";
+import { Loader2, Maximize2, MonitorOff, MoveDiagonal2, Play, X } from "lucide-react";
 import {
   SCREEN_NODE_MIN_SIZE,
   useCollabStore,
@@ -36,18 +36,66 @@ export const ScreenShareNode: React.FC<ScreenShareNodeProps> = ({ share, stream,
     null
   );
   const reduced = useSettingsStore((s) => s.animations === "reduced");
+  /** El navegador pausó el vídeo (ahorro de energía, pestaña oculta, autoplay). */
+  const [paused, setPaused] = useState(false);
   const isLive = share.status === "live" && Boolean(stream);
   const isEnded = share.status === "ended";
 
+  // Reproducción garantizada: `play()` explícito al recibir el flujo y cada vez
+  // que la pista vuelve a traer imagen (renegociación o cambio de red).
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
     video.srcObject = stream;
-    if (stream) void video.play().catch(() => undefined);
+    if (!stream) {
+      return () => {
+        video.srcObject = null;
+      };
+    }
+    let disposed = false;
+    const tryPlay = () => {
+      if (disposed || !video.paused) return;
+      video.play().then(
+        () => {
+          if (!disposed) setPaused(false);
+        },
+        (error: unknown) => {
+          // AbortError = llegó otro flujo antes de terminar: no es una pausa real.
+          if (!disposed && !(error instanceof DOMException && error.name === "AbortError")) setPaused(true);
+        }
+      );
+    };
+    const onPlaying = () => setPaused(false);
+    const onPause = () => {
+      // Pausa ajena (no por cerrar el nodo): se reintenta y, si falla, se ofrece el botón.
+      if (!disposed && video.srcObject === stream) tryPlay();
+    };
+    const tracks = stream.getVideoTracks();
+    tracks.forEach((track) => track.addEventListener("unmute", tryPlay));
+    stream.addEventListener("addtrack", tryPlay);
+    video.addEventListener("loadedmetadata", tryPlay);
+    video.addEventListener("playing", onPlaying);
+    video.addEventListener("pause", onPause);
+    tryPlay();
     return () => {
+      disposed = true;
+      tracks.forEach((track) => track.removeEventListener("unmute", tryPlay));
+      stream.removeEventListener("addtrack", tryPlay);
+      video.removeEventListener("loadedmetadata", tryPlay);
+      video.removeEventListener("playing", onPlaying);
+      video.removeEventListener("pause", onPause);
       video.srcObject = null;
     };
   }, [stream]);
+
+  const resumePlayback = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.play().then(
+      () => setPaused(false),
+      () => setPaused(true)
+    );
+  };
 
   const patch = useCollabStore.getState().patchScreenShare;
 
@@ -244,7 +292,7 @@ export const ScreenShareNode: React.FC<ScreenShareNodeProps> = ({ share, stream,
           ref={videoRef}
           autoPlay
           playsInline
-          muted={share.isLocal}
+          muted
           aria-label={title}
           className={`w-full h-full object-contain ${isLive ? "" : "opacity-0"}`}
         />
@@ -268,6 +316,16 @@ export const ScreenShareNode: React.FC<ScreenShareNodeProps> = ({ share, stream,
               </p>
             )}
           </div>
+        )}
+        {isLive && paused && (
+          <button
+            type="button"
+            onClick={resumePlayback}
+            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-11 md:h-9 px-3 rounded-lg flex items-center gap-1.5 bg-black/70 text-white text-xs font-medium hover:bg-black/80 spring-micro active:scale-[0.96]"
+          >
+            <Play className="w-4 h-4" aria-hidden="true" />
+            Reanudar vídeo
+          </button>
         )}
         {isCanvas && (
           <button

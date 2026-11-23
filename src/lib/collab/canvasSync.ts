@@ -3,8 +3,11 @@
 //
 // Emisión: escucha `useWorkspaceStore` y, por cada nodo o cable que cambió
 // LOCALMENTE, emite `node:upsert` / `node:delete` / `edge:upsert` /
-// `edge:delete` con un `senderId` único. Los arrastres se limitan a ~16 fps
-// por nodo (siempre se envía la última posición).
+// `edge:delete` con un `senderId` único. Los arrastres se limitan a ~25 fps
+// por nodo (siempre se envía la última posición) y los receptores los suavizan
+// con una transición de 75 ms. El texto de notas y celdas viaja igual mientras
+// se escribe (cada ~150 ms, ver NodeEditors): el guardado en PostgreSQL va
+// aparte, en segundo plano (useCloudSync), y nunca bloquea la escritura.
 //
 // Recepción: aplica el cambio dentro de `runAsRemoteCollab`, así:
 //   · este mismo módulo NO lo re-emite (nunca hay eco ni bucle infinito), y
@@ -33,8 +36,8 @@ import { parseImportedConnection, parseImportedNode } from "@/hooks/useCloudSync
 import { sanitizeCanvasStrokes } from "@/lib/canvas/inkGeometry";
 import { isApplyingRemoteCollab, runAsRemoteCollab } from "./remoteFlag";
 
-/** Intervalo mínimo entre dos envíos del mismo nodo (~16 fps). */
-export const NODE_SEND_INTERVAL_MS = 60;
+/** Intervalo mínimo entre dos envíos del mismo nodo (~25 fps). */
+export const NODE_SEND_INTERVAL_MS = 40;
 /** Realtime limita cada mensaje: se queda holgado por debajo. */
 const MAX_EVENT_BYTES = 180_000;
 const MAX_SNAPSHOT_PART_BYTES = 120_000;

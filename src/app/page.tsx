@@ -1,17 +1,19 @@
 "use client";
 
 import React from "react";
+import dynamic from "next/dynamic";
 import { useDeviceLayout } from "@/hooks/useDeviceLayout";
 import { useCloudSync } from "@/hooks/useCloudSync";
 import { useSettingsSync } from "@/hooks/useSettingsSync";
+import { useOpenedOnce } from "@/hooks/useOpenedOnce";
 import { QualityOfLifeModal } from "@/components/settings/QualityOfLifeModal";
 import { AiKeysModal } from "@/components/settings/AiKeysModal";
 import { WorkspaceManagerDrawer } from "@/components/workspaces/WorkspaceManagerDrawer";
-import { ArenaModal } from "@/components/arena/ArenaModal";
-import { LibraryDrawer } from "@/components/library/LibraryDrawer";
 import { UpgradeModal } from "@/components/shared/UpgradeModal";
 import { TopStatusBar } from "@/components/shared/TopStatusBar";
-import { OracleModal } from "@/components/shared/OracleModal";
+import { useWorkspaceStore } from "@/store/useWorkspaceStore";
+import { useLibraryStore } from "@/store/useLibraryStore";
+import { useMarketStore } from "@/store/useMarketStore";
 import { SpatialCanvas } from "@/components/desktop/SpatialCanvas";
 import { FloatingHudDock } from "@/components/desktop/FloatingHudDock";
 import { TacticalCardStack } from "@/components/mobile/TacticalCardStack";
@@ -38,6 +40,21 @@ import { ShareWorkspaceModal } from "@/components/social/ShareWorkspaceModal";
 import { EmptyWorkspaceStarter } from "@/components/shared/EmptyWorkspaceStarter";
 import { ImpactAlertsBanner } from "@/components/shared/ImpactAlertsBanner";
 
+// Paneles pesados (Oráculo con Markdown + KaTeX, Biblioteca y Arena): fuera del
+// JavaScript inicial. Se descargan la primera vez que se abren.
+const OracleModal = dynamic(
+  () => import("@/components/shared/OracleModal").then((m) => m.OracleModal),
+  { ssr: false }
+);
+const LibraryDrawer = dynamic(
+  () => import("@/components/library/LibraryDrawer").then((m) => m.LibraryDrawer),
+  { ssr: false }
+);
+const ArenaModal = dynamic(
+  () => import("@/components/arena/ArenaModal").then((m) => m.ArenaModal),
+  { ssr: false }
+);
+
 export default function AndrosWorkspacePage() {
   const { isMobile, isMounted } = useDeviceLayout();
   // Login con Google + guardado automático en Supabase (no hace nada en modo local).
@@ -49,6 +66,9 @@ export default function AndrosWorkspacePage() {
   // @usuario y amistades (espacios compartidos).
   useSocialSync();
   const showLanding = useLandingStore((s) => s.phase !== "workspace");
+  const oracleOpen = useWorkspaceStore((s) => s.isOracleModalOpen);
+  const libraryMounted = useOpenedOnce(useLibraryStore((s) => s.open));
+  const arenaMounted = useOpenedOnce(useMarketStore((s) => s.arenaOpen));
   // ⌘K / Ctrl+K (paleta) en todas partes; atajos de letra solo en escritorio.
   useGlobalShortcuts(!isMobile);
 
@@ -81,8 +101,8 @@ export default function AndrosWorkspacePage() {
       <QualityOfLifeModal />
       <AiKeysModal />
       <WorkspaceManagerDrawer />
-      <ArenaModal />
-      <LibraryDrawer />
+      {arenaMounted && <ArenaModal />}
+      {libraryMounted && <LibraryDrawer />}
       <UpgradeModal />
       <FriendsModal />
       <ShareWorkspaceModal />
@@ -108,7 +128,7 @@ export default function AndrosWorkspacePage() {
       )}
 
       {/* Oráculo IA: Estudio a pantalla completa (chat + documento) en PC y móvil */}
-      <OracleModal />
+      {oracleOpen && <OracleModal />}
 
       {/* Esqueleto mientras se descarga el lienzo guardado en la nube */}
       <CloudLoadingSkeleton isMobile={isMobile} />

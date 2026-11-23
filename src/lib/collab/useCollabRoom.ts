@@ -41,20 +41,23 @@ import {
   resumeCloudAfterCollabGuest,
   suspendCloudForCollabGuest,
 } from "@/hooks/useCloudSync";
-import type {
-  AlertResolvePayload,
+import {
+  MAX_SPACE_PARTICIPANTS,
+  MAX_VOICE_PARTICIPANTS,
+  type AlertResolvePayload,
   AlertUpsertPayload,
-  CanvasRequestPayload,
-  CanvasSnapshotPayload,
-  CollabPresence,
-  CursorPayload,
-  EdgeDeletePayload,
-  EdgeUpsertPayload,
-  NodeDeletePayload,
-  NodeUpsertPayload,
-  RtcSignalPayload,
-  ScreenShareNodeData,
-  ScreenStopPayload,
+  type CanvasRequestPayload,
+  type CanvasSnapshotPayload,
+  type CollabPresence,
+  type CursorPayload,
+  type EdgeDeletePayload,
+  type EdgeUpsertPayload,
+  type NodeDeletePayload,
+  type NodeUpsertPayload,
+  type RemoteEditor,
+  type RtcSignalPayload,
+  type ScreenShareNodeData,
+  type ScreenStopPayload,
 } from "@/types/collab";
 import { PeerMesh } from "./peerMesh";
 import { VoiceActivityMonitor } from "./voiceActivity";
@@ -83,8 +86,8 @@ import {
   resolveCurrentRoom,
 } from "./room";
 
-/** ~16 fps para los cursores. */
-export const CURSOR_SEND_INTERVAL_MS = 60;
+/** ~25 fps para los cursores (el receptor los suaviza con una transición de 75 ms). */
+export const CURSOR_SEND_INTERVAL_MS = 40;
 /** Un cursor sin moverse durante este tiempo se oculta. */
 const CURSOR_STALE_MS = 6000;
 /** Un nodo de pantalla finalizado se retira solo tras este tiempo. */
@@ -94,12 +97,25 @@ const SNAPSHOT_MAX_ATTEMPTS = 5;
 /** Pausa entre partes del lienzo (respeta el límite de mensajes de Realtime). */
 const SNAPSHOT_PART_GAP_MS = 60;
 
-/** Cámara ligera: 640×360 a 24 fps (suficiente para 2–6 personas en malla). */
+/** Cámara ligera: 640×360 a 24 fps (suficiente para 2–5 personas en malla). */
 const CAMERA_CONSTRAINTS: MediaTrackConstraints = {
   width: { ideal: 640 },
   height: { ideal: 360 },
   frameRate: { ideal: 24 },
 };
+
+/**
+ * Pantalla compartida a 720p y 15 fps como máximo: legible y estable incluso
+ * por datos móviles (el bitrate se limita además en cada enlace).
+ */
+const SCREEN_CONSTRAINTS: MediaTrackConstraints = {
+  width: { ideal: 1280, max: 1280 },
+  height: { ideal: 720, max: 720 },
+  frameRate: { ideal: 15, max: 15 },
+};
+
+/** Agrupa los cambios de «escribiendo en…» (tabular por celdas no satura Presence). */
+const EDITING_PRESENCE_DELAY_MS = 150;
 
 export const LOCAL_MODE_MESSAGE = "Modo local — inicia sesión para colaborar en vivo";
 
@@ -161,6 +177,13 @@ const remoteVideos = new Map<string, Map<string, MediaStream>>();
 /** Último `callId` visto de cada participante en voz. */
 const peerCallIds = new Map<string, string>();
 
+/** Cuándo entraste a tu espacio actual (orden estable para el tope de 6). */
+let spaceJoinedAt = Date.now();
+let spaceJoinedFor: string | null = null;
+/** Cuándo entraste a la voz (orden estable para el tope de 5). */
+let callJoinedAt: number | null = null;
+let editingRetrackTimer: ReturnType<typeof setTimeout> | null = null;
+
 let cursorTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingCursor: { x: number; y: number } | null = null;
 let lastCursorAt = 0;
@@ -195,10 +218,21 @@ function selfDisplayName(): string {
   return user?.name?.trim() || "Participante";
 }
 
+/** Marca de entrada a tu espacio actual: se renueva solo al cambiar de espacio. */
+function selfSpaceJoinedAt(): number {
+  const workspaceId = liveWorkspaceId();
+  if (workspaceId !== spaceJoinedFor) {
+    spaceJoinedFor = workspaceId;
+    spaceJoinedAt = Date.now();
+  }
+  return spaceJoinedAt;
+}
+
 function presencePayload(): CollabPresence {
   const state = collab();
   const user = useCloudStore.getState().user;
   const streamIds = call?.mesh.outStreamIds() ?? null;
+  const joinedAt = selfSpaceJoinedAt();
   return {
     peerId: state.selfPeerId,
     userId: user?.id ?? "",
@@ -212,7 +246,9 @@ function presencePayload(): CollabPresence {
     hasMic: state.hasMic,
     sharing: state.sharing,
     guest: Boolean(state.guest),
-    joinedAt: Date.now(),
+    joinedAt,
+    callJoinedAt: call ? callJoinedAt : null,
+    editingNodeId: state.editingNodeId,
     inCall: Boolean(call),
     hasVideo: Boolean(call) && state.hasVideo,
     callId: call?.callId ?? null,
@@ -388,6 +424,12 @@ function sanitizePresence(raw: unknown, key: string): CollabPresence | null {
     sharing: Boolean(p.sharing),
     guest: Boolean(p.guest),
     joinedAt: Number(p.joinedAt) || 0,
+    callJoinedAt: Number.isFinite(p.callJoinedAt) ? Number(p.callJoinedAt) : null,
+    // Ids de tarjeta: cualquier texto corto (plantillas e importaciones usan otros formatos).
+    editingNodeId:
+      typeof p.editingNodeId === "string" && p.editingNodeId.length > 0 && p.editingNodeId.length <= 160
+        ? p.editingNodeId
+        : null,
     // Clientes anteriores (sin `inCall`) siempre estaban dentro de la llamada.
     inCall: typeof p.inCall === "boolean" ? p.inCall : true,
     hasVideo: Boolean(p.hasVideo),
@@ -397,25 +439,83 @@ function sanitizePresence(raw: unknown, key: string): CollabPresence | null {
   };
 }
 
-/** Abre o cierra enlaces WebRTC según quién está DENTRO de la voz. */
-function syncCallLinks(peers: Record<string, CollabPresence>): void {
+// ----------------------------------------------------------------------------
+// Tope de participantes: 6 por espacio y 5 en voz (orden de llegada estable)
+// ----------------------------------------------------------------------------
+
+/** Orden de llegada determinista: todos calculan el mismo resultado. */
+function arrivalOrder(entries: { peerId: string; at: number }[]): string[] {
+  return entries
+    .sort((a, b) => a.at - b.at || (a.peerId < b.peerId ? -1 : a.peerId > b.peerId ? 1 : 0))
+    .map((entry) => entry.peerId);
+}
+
+/** Participantes con lugar en la voz (los 5 primeros en entrar), tú incluido. */
+function voiceSlots(peers: Record<string, CollabPresence>): Set<string> {
+  const entries = Object.values(peers)
+    .filter((peer) => peer.inCall)
+    .map((peer) => ({ peerId: peer.peerId, at: peer.callJoinedAt ?? peer.joinedAt }));
+  if (call && callJoinedAt !== null) entries.push({ peerId: collab().selfPeerId, at: callJoinedAt });
+  return new Set(arrivalOrder(entries).slice(0, MAX_VOICE_PARTICIPANTS));
+}
+
+/** Calcula tu lugar en el espacio (lectura si llegaste 7.º) y quién escribe dónde. */
+function syncCapacity(peers: Record<string, CollabPresence>, slots: Set<string>): void {
+  const state = collab();
+  const workspaceId = liveWorkspaceId();
+  const inSpace = Object.values(peers).filter((peer) => workspaceId && peer.workspaceId === workspaceId);
+  const order = arrivalOrder([
+    { peerId: state.selfPeerId, at: selfSpaceJoinedAt() },
+    ...inSpace.map((peer) => ({ peerId: peer.peerId, at: peer.joinedAt })),
+  ]);
+  const readOnly = Boolean(workspaceId) && order.indexOf(state.selfPeerId) >= MAX_SPACE_PARTICIPANTS;
+  const wasReadOnly = state.capacity.readOnly;
+  state.setCapacity({
+    spaceCount: Math.min(order.length, MAX_SPACE_PARTICIPANTS),
+    voiceCount: Object.values(peers).filter((peer) => peer.inCall && slots.has(peer.peerId)).length + (call ? 1 : 0),
+    readOnly,
+  });
+  if (wasReadOnly && !readOnly) toast("Se liberó un lugar: ya puedes editar el espacio en vivo.", "success");
+
+  // «Editando: Nombre» en cada tarjeta (solo de quien tiene lugar en tu espacio).
+  const active = new Set(order.slice(0, MAX_SPACE_PARTICIPANTS));
+  const editors: Record<string, RemoteEditor> = {};
+  for (const peer of inSpace) {
+    if (!peer.editingNodeId || !active.has(peer.peerId) || editors[peer.editingNodeId]) continue;
+    editors[peer.editingNodeId] = { peerId: peer.peerId, name: peer.name, color: peer.color };
+  }
+  state.setRemoteEditors(editors);
+}
+
+/** Abre o cierra enlaces WebRTC según quién está DENTRO de la voz (y con lugar). */
+function syncCallLinks(peers: Record<string, CollabPresence>, slots: Set<string>): void {
   if (!call) return;
   const { mesh, voice } = call;
   for (const id of mesh.peerIds()) {
     const peer = peers[id];
     const knownCallId = peerCallIds.get(id);
     const rejoined = Boolean(peer?.callId && knownCallId && peer.callId !== knownCallId);
-    if (!peer || !peer.inCall || rejoined) {
+    // Salió del espacio o de la voz: su enlace, su temporizador ICE y su
+    // aviso de «Sin audio» se borran AL INSTANTE.
+    if (!peer || !peer.inCall || rejoined || !slots.has(id)) {
       mesh.removePeer(id);
       voice.unwatch(id);
       peerCallIds.delete(id);
     }
   }
   for (const peer of Object.values(peers)) {
-    if (!peer.inCall) continue;
+    if (!peer.inCall || !slots.has(peer.peerId)) continue;
     if (peer.callId) peerCallIds.set(peer.peerId, peer.callId);
     mesh.ensurePeer(peer.peerId);
   }
+}
+
+/** Dos personas entraron a la vez y quedaste 6.º en voz: sales de la voz (no del espacio). */
+function dropFromFullVoice(): void {
+  teardownCall();
+  collab().resetCall();
+  retrackPresence();
+  toast(`Canal de voz lleno (${MAX_VOICE_PARTICIPANTS}/${MAX_VOICE_PARTICIPANTS}). Sigues en el espacio.`, "error");
 }
 
 function handlePresenceSync(): void {
@@ -431,18 +531,23 @@ function handlePresenceSync(): void {
 
   collab().setPeers(peers);
   for (const id of [...peerCallIds.keys()]) if (!peers[id]) peerCallIds.delete(id);
-  syncCallLinks(peers);
+  const slots = voiceSlots(peers);
+  syncCapacity(peers, slots);
+  if (call && !slots.has(selfId)) {
+    dropFromFullVoice();
+    return;
+  }
+  syncCallLinks(peers, slots);
 
   // Pantallas: la presencia es la fuente de verdad de quién comparte (y
-  // solo llegan por WebRTC si TÚ también estás dentro de la voz).
-  if (call) {
-    for (const peer of Object.values(peers)) {
-      if (peer.sharing && peer.inCall) ensureRemoteShare(peer);
-    }
+  // solo llegan por WebRTC si TÚ también estás dentro de la voz, con lugar).
+  const receivesScreen = (peer: CollabPresence | undefined): peer is CollabPresence =>
+    Boolean(call && peer?.sharing && peer.inCall && slots.has(peer.peerId));
+  for (const peer of Object.values(peers)) {
+    if (receivesScreen(peer)) ensureRemoteShare(peer);
   }
   for (const share of collab().screenShares) {
-    const peer = peers[share.peerId];
-    if (!share.isLocal && !(call && peer?.sharing && peer.inCall)) endRemoteShare(share.id);
+    if (!share.isLocal && !receivesScreen(peers[share.peerId])) endRemoteShare(share.id);
   }
   for (const id of new Set([...Object.keys(peers), ...remoteVideos.keys()])) routeRemoteVideos(id);
 
@@ -524,6 +629,8 @@ function disconnectPresence(): void {
   if (cursorTimer) clearTimeout(cursorTimer);
   cursorTimer = null;
   pendingCursor = null;
+  if (editingRetrackTimer) clearTimeout(editingRetrackTimer);
+  editingRetrackTimer = null;
 
   if (!current) return;
   current.stopCanvasSync?.();
@@ -654,9 +761,9 @@ function connectPresence(target?: { roomId: string; label: string }): void {
             selfId,
             getUserId: selfUserId,
             getWorkspaceId: liveWorkspaceId,
-            // Sin nadie más en el espacio no se envía nada (ahorra mensajes).
+            // Sin nadie más en el espacio (o en modo lectura) no se envía nada.
             send: (event, payload) => {
-              if (hasPeers()) send(event, payload);
+              if (hasPeers() && !collab().capacity.readOnly) send(event, payload);
             },
           });
         }
@@ -946,6 +1053,7 @@ function teardownCall(): void {
   stopStream(screenStream);
   screenStream = null;
   mutedBeforeDeafen = false;
+  callJoinedAt = null;
   remoteVideos.clear();
   peerCallIds.clear();
   for (const timer of endedShareTimers.values()) clearTimeout(timer);
@@ -1015,6 +1123,18 @@ export async function joinCollabRoom(): Promise<void> {
     return;
   }
 
+  // Topes: en modo lectura no se abre WebRTC; con 5 en voz no se entra.
+  const capacityState = collab();
+  if (capacityState.capacity.readOnly) {
+    toast(`Sala completa (${MAX_SPACE_PARTICIPANTS}/${MAX_SPACE_PARTICIPANTS}): la voz se habilita cuando se libere un lugar.`, "error");
+    return;
+  }
+  const voiceTaken = Object.values(capacityState.peers).filter((peer) => peer.inCall).length;
+  if (voiceTaken >= MAX_VOICE_PARTICIPANTS) {
+    toast(`Canal de voz lleno (${MAX_VOICE_PARTICIPANTS}/${MAX_VOICE_PARTICIPANTS}). Sigues en el espacio con el lienzo en vivo.`, "error");
+    return;
+  }
+
   collab().setCall({ callConnecting: true });
 
   // Micrófono elegido (si se niega, entras igual para escuchar).
@@ -1044,11 +1164,17 @@ export async function joinCollabRoom(): Promise<void> {
     },
     onRemoteVideo: handleRemoteVideo,
     onLinkState: (peerId, linkState) => collab().setLinkState(peerId, linkState),
+    // Solo se acepta una oferta de quien sigue dentro de la voz (o aún no aparece en Presence).
+    acceptPeer: (peerId) => {
+      const peer = collab().peers[peerId];
+      return !peer || peer.inCall;
+    },
   });
   mesh.setMicStream(mic);
   if (screenStream) mesh.setScreenStream(screenStream);
 
   call = { mesh, voice, callId: randomId() };
+  callJoinedAt = Date.now();
   collab().setCall({ inCall: true, callConnecting: false });
 
   // Primero se anuncia { inCall: true } (con acuse del servidor) y DESPUÉS se
@@ -1145,7 +1271,7 @@ export async function startCollabScreenShare(): Promise<void> {
   const token = joinToken;
   let stream: MediaStream;
   try {
-    stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+    stream = await navigator.mediaDevices.getDisplayMedia({ video: SCREEN_CONSTRAINTS, audio: false });
   } catch (error) {
     // Cancelar el selector del navegador no es un error.
     if (!(error instanceof DOMException && error.name === "NotAllowedError")) {
@@ -1159,6 +1285,8 @@ export async function startCollabScreenShare(): Promise<void> {
   }
   screenStream = stream;
   const track = stream.getVideoTracks()[0];
+  // Algunos navegadores ignoran los topes en getDisplayMedia: se reaplican.
+  void track?.applyConstraints(SCREEN_CONSTRAINTS).catch(() => undefined);
   // «Dejar de compartir» desde la barra del propio navegador.
   if (track) track.onended = () => stopCollabScreenShare();
 
@@ -1217,9 +1345,9 @@ export async function copyWorkspaceLink(workspaceId?: string | null): Promise<vo
   );
 }
 
-/** Envía tu cursor (coordenadas del lienzo) a ~16 fps, siempre con la última posición. */
+/** Envía tu cursor (coordenadas del lienzo) a ~25 fps, siempre con la última posición. */
 export function sendCollabCursor(x: number, y: number): void {
-  if (!session?.subscribed || !hasPeers()) return;
+  if (!session?.subscribed || !hasPeers() || collab().capacity.readOnly) return;
   pendingCursor = { x: Math.round(x), y: Math.round(y) };
   if (cursorTimer) return;
   const flush = () => {
@@ -1277,6 +1405,16 @@ export function useCollabRoom(): void {
       else retrackPresence();
     });
 
+    // «Editando: Nombre»: se anuncia al empezar o dejar de escribir en una tarjeta.
+    const unsubscribeEditing = useCollabStore.subscribe((state, prev) => {
+      if (state.editingNodeId === prev.editingNodeId) return;
+      if (editingRetrackTimer) clearTimeout(editingRetrackTimer);
+      editingRetrackTimer = setTimeout(() => {
+        editingRetrackTimer = null;
+        retrackPresence();
+      }, EDITING_PRESENCE_DELAY_MS);
+    });
+
     ensurePresence();
 
     const handlePageHide = () => closeEverything();
@@ -1285,6 +1423,7 @@ export function useCollabRoom(): void {
     return () => {
       unsubscribeCloud();
       unsubscribeManager();
+      unsubscribeEditing();
       window.removeEventListener("pagehide", handlePageHide);
       closeEverything();
     };
