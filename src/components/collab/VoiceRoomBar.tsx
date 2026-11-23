@@ -13,6 +13,7 @@ import {
   MonitorOff,
   MonitorUp,
   PhoneOff,
+  Volume2,
   X,
 } from "lucide-react";
 import { useCollabStore } from "@/store/useCollabStore";
@@ -24,11 +25,15 @@ import {
   copyCollabInviteLink,
   joinCollabRoom,
   leaveCollabRoom,
+  playRemoteAudio,
+  registerRemoteAudioElement,
+  resumeCollabAudio,
   startCollabScreenShare,
   stopCollabScreenShare,
   toggleCollabDeafen,
   toggleCollabMute,
 } from "@/lib/collab/useCollabRoom";
+import type { LinkState } from "@/lib/collab/peerMesh";
 import type { CollabPresence } from "@/types/collab";
 
 // ============================================================================
@@ -124,21 +129,28 @@ export const CollabRoomButton: React.FC = () => {
 // Audio remoto (se silencia al ensordecer)
 // ----------------------------------------------------------------------------
 
+/**
+ * <audio> real dentro del DOM (nada de `new Audio()` suelto: el recolector o
+ * Safari lo detienen). `srcObject` + `play()` explícito; si el navegador
+ * bloquea el autoplay, la barra muestra «Activar sonido».
+ */
 const RemoteAudio: React.FC<{ stream: MediaStream; muted: boolean }> = ({ stream, muted }) => {
   const ref = useRef<HTMLAudioElement>(null);
 
   useEffect(() => {
     const element = ref.current;
     if (!element) return;
+    const unregister = registerRemoteAudioElement(element);
     element.srcObject = stream;
-    void element.play().catch(() => undefined);
+    void playRemoteAudio(element);
     return () => {
+      unregister();
       element.pause();
       element.srcObject = null;
     };
   }, [stream]);
 
-  return <audio ref={ref} autoPlay muted={muted} className="hidden" />;
+  return <audio ref={ref} autoPlay playsInline muted={muted} className="absolute h-0 w-0 opacity-0 pointer-events-none" />;
 };
 
 // ----------------------------------------------------------------------------
@@ -153,17 +165,32 @@ interface AvatarProps {
   deafened: boolean;
   sharing: boolean;
   detail: string;
+  /** Estado del enlace de audio (solo para otros participantes). */
+  link?: LinkState;
 }
 
-const PeerAvatar: React.FC<AvatarProps> = ({ name, color, speaking, muted, deafened, sharing, detail }) => {
+const LINK_TEXT: Record<LinkState, string> = {
+  connecting: "Conectando audio…",
+  connected: "Audio conectado",
+  failed: "Sin audio — red restringida",
+};
+const LINK_DOT: Record<LinkState, string> = {
+  connecting: "bg-andros-warning animate-pulse motion-reduce:animate-none",
+  connected: "bg-andros-success",
+  failed: "bg-andros-danger",
+};
+
+const PeerAvatar: React.FC<AvatarProps> = ({ name, color, speaking, muted, deafened, sharing, detail, link }) => {
+  const linkText = link ? LINK_TEXT[link] : null;
   const states = [
     speaking ? "hablando" : null,
     deafened ? "ensordecido" : muted ? "micrófono silenciado" : null,
     sharing ? "comparte pantalla" : null,
+    linkText,
   ].filter(Boolean);
 
   return (
-    <li className="relative shrink-0" title={`${name} · ${detail}`}>
+    <li className="relative shrink-0" title={`${name} · ${detail}${linkText ? ` · ${linkText}` : ""}`}>
       <span
         className={`flex items-center justify-center w-9 h-9 rounded-full text-[11px] font-semibold text-white transition-shadow duration-150 ${
           speaking
@@ -185,6 +212,14 @@ const PeerAvatar: React.FC<AvatarProps> = ({ name, color, speaking, muted, deafe
           ) : (
             <MicOff className="w-2.5 h-2.5 text-andros-danger" />
           )}
+        </span>
+      )}
+      {link && (
+        <span
+          className="absolute -bottom-0.5 -left-0.5 flex items-center justify-center w-3.5 h-3.5 rounded-full bg-andros-card border border-andros-border"
+          aria-hidden="true"
+        >
+          <span className={`w-2 h-2 rounded-full ${LINK_DOT[link]}`} />
         </span>
       )}
       {sharing && (
@@ -227,6 +262,8 @@ export const VoiceRoomBar: React.FC<{ isMobile: boolean }> = ({ isMobile }) => {
   const peers = useCollabStore((s) => s.peers);
   const speaking = useCollabStore((s) => s.speaking);
   const remoteAudio = useCollabStore((s) => s.remoteAudio);
+  const linkStates = useCollabStore((s) => s.linkStates);
+  const audioBlocked = useCollabStore((s) => s.audioBlocked);
   const invite = useCollabStore((s) => s.invite);
   const guest = useCollabStore((s) => s.guest);
   const panelOpen = useCollabStore((s) => s.panelOpen);
@@ -348,6 +385,18 @@ export const VoiceRoomBar: React.FC<{ isMobile: boolean }> = ({ isMobile }) => {
         </button>
       </div>
 
+      {/* El navegador bloqueó el audio automático: un clic lo reactiva */}
+      {audioBlocked && !isLocal && (
+        <button
+          type="button"
+          onClick={() => void resumeCollabAudio()}
+          className="mx-1.5 mt-1 w-[calc(100%-0.75rem)] h-11 md:h-9 rounded-lg bg-andros-accent-fill text-white text-xs font-medium flex items-center justify-center gap-1.5 active:scale-[0.96] spring-micro"
+        >
+          <Volume2 className="w-4 h-4" aria-hidden="true" />
+          Activar sonido
+        </button>
+      )}
+
       {panelOpen && (
         <>
           {/* Mensajes de estado */}
@@ -392,6 +441,7 @@ export const VoiceRoomBar: React.FC<{ isMobile: boolean }> = ({ isMobile }) => {
                 deafened={peer.deafened}
                 sharing={peer.sharing}
                 detail={peer.guest ? `invitado ${peerDetail(peer)}` : peerDetail(peer)}
+                link={linkStates[peer.peerId] ?? "connecting"}
               />
             ))}
             {!isLocal && peerList.length === 0 && status === "connected" && (
@@ -400,6 +450,16 @@ export const VoiceRoomBar: React.FC<{ isMobile: boolean }> = ({ isMobile }) => {
               </li>
             )}
           </ul>
+          {peerList.some((peer) => linkStates[peer.peerId] === "failed") && (
+            <p className="mx-1.5 mb-1 text-xs text-andros-warning" role="status">
+              Sin audio con{" "}
+              {peerList
+                .filter((peer) => linkStates[peer.peerId] === "failed")
+                .map((peer) => peer.name)
+                .join(", ")}{" "}
+              — red restringida (puede requerir un servidor TURN).
+            </p>
+          )}
         </>
       )}
 

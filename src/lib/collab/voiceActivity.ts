@@ -102,6 +102,13 @@ export class VoiceActivityMonitor {
     }
   }
 
+  /** Reanuda el AudioContext si el navegador lo dejó suspendido. */
+  async resume(): Promise<void> {
+    if (this.context && this.context.state === "suspended") {
+      await this.context.resume().catch(() => undefined);
+    }
+  }
+
   /** Libera todo (analizadores, temporizador y AudioContext). */
   dispose(): void {
     for (const id of [...this.entries.keys()]) this.unwatch(id);

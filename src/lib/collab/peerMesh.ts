@@ -3,24 +3,62 @@
 //
 // Cada pareja de participantes tiene UN RTCPeerConnection que lleva su audio
 // y, si alguien comparte, su pantalla. La señalización viaja por Supabase
-// Broadcast. Se usa el patrón "negociación perfecta" (W3C) para que dos
-// ofertas simultáneas no rompan la conexión: el peer con el id menor es el
-// "educado" y cede.
+// Broadcast. Para que dos ofertas simultáneas no rompan la conexión:
+//   · La PRIMERA oferta la envía solo el peer con el id MAYOR (regla
+//     determinista anti-glare); el menor solo responde.
+//   · Una vez negociado, cualquiera puede renegociar (p. ej. al compartir
+//     pantalla) con el patrón "negociación perfecta" (W3C): el id menor es el
+//     "educado" y cede ante una colisión.
+// Los candidatos ICE que llegan antes de la descripción remota se guardan en
+// `pendingCandidates` y se aplican justo después de `setRemoteDescription`.
 // ============================================================================
 
 import type { RtcSignalPayload } from "@/types/collab";
 
-export const RTC_CONFIG: RTCConfiguration = {
-  iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-};
+/** Estado del enlace de audio con un participante (visible en la barra). */
+export type LinkState = "connecting" | "connected" | "failed";
+
+/** Tiempo máximo en «comprobando» antes de dar el enlace por restringido. */
+const ICE_STUCK_MS = 15000;
+
+/** STUN público por defecto; TURN opcional con variables NEXT_PUBLIC_TURN_*. */
+export function buildRtcConfig(): RTCConfiguration {
+  const iceServers: RTCIceServer[] = [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
+  ];
+  // Acceso estático: Next.js solo sustituye `process.env.NEXT_PUBLIC_X` literal.
+  const turnUrl = process.env.NEXT_PUBLIC_TURN_URL?.trim();
+  const turnUsername = process.env.NEXT_PUBLIC_TURN_USERNAME?.trim();
+  const turnCredential = process.env.NEXT_PUBLIC_TURN_CREDENTIAL?.trim();
+  if (turnUrl) {
+    const urls = turnUrl
+      .split(",")
+      .map((u) => u.trim())
+      .filter(Boolean);
+    iceServers.push(
+      turnUsername && turnCredential
+        ? { urls, username: turnUsername, credential: turnCredential }
+        : { urls }
+    );
+  }
+  return { iceServers };
+}
+
+export const RTC_CONFIG: RTCConfiguration = buildRtcConfig();
 
 interface PeerLink {
   pc: RTCPeerConnection;
   polite: boolean;
   makingOffer: boolean;
   ignoreOffer: boolean;
+  /** Yo envío la primera oferta (mi id es mayor que el del otro). */
+  initiator: boolean;
+  /** Ya hubo una negociación completa (desde aquí cualquiera puede renegociar). */
+  negotiated: boolean;
   micSender: RTCRtpSender | null;
   screenSender: RTCRtpSender | null;
+  stuckTimer: ReturnType<typeof setTimeout> | null;
   /** Candidatos ICE que llegaron antes de la descripción remota. */
   pendingCandidates: RTCIceCandidateInit[];
 }
@@ -30,6 +68,8 @@ export interface PeerMeshOptions {
   sendSignal: (payload: RtcSignalPayload) => void;
   onRemoteAudio: (peerId: string, stream: MediaStream | null) => void;
   onRemoteScreen: (peerId: string, stream: MediaStream | null) => void;
+  /** Estado real del enlace (`null` = enlace cerrado). */
+  onLinkState?: (peerId: string, state: LinkState | null) => void;
 }
 
 export class PeerMesh {
@@ -60,16 +100,11 @@ export class PeerMesh {
   }
 
   private syncMicSender(link: PeerLink): void {
-    if (this.micTrack && this.micStream) {
-      if (link.micSender) void link.micSender.replaceTrack(this.micTrack).catch(() => undefined);
-      else link.micSender = link.pc.addTrack(this.micTrack, this.micStream);
-    } else if (link.micSender) {
-      try {
-        link.pc.removeTrack(link.micSender);
-      } catch {
-        /* conexión cerrada */
-      }
-      link.micSender = null;
+    if (link.micSender) {
+      // El emisor de audio es fijo: solo se cambia (o quita) su pista.
+      void link.micSender.replaceTrack(this.micTrack).catch(() => undefined);
+    } else if (this.micTrack && this.micStream) {
+      link.micSender = link.pc.addTrack(this.micTrack, this.micStream);
     }
   }
 
@@ -97,18 +132,25 @@ export class PeerMesh {
     if (existing) return existing;
 
     const pc = new RTCPeerConnection(RTC_CONFIG);
+    const initiator = this.options.selfId > peerId;
     const link: PeerLink = {
       pc,
-      polite: this.options.selfId < peerId,
+      polite: !initiator,
       makingOffer: false,
       ignoreOffer: false,
+      initiator,
+      negotiated: false,
       micSender: null,
       screenSender: null,
+      stuckTimer: null,
       pendingCandidates: [],
     };
     this.links.set(peerId, link);
+    this.options.onLinkState?.(peerId, "connecting");
 
     pc.onnegotiationneeded = async () => {
+      // Anti-glare: la primera oferta solo la envía el peer con el id mayor.
+      if (!link.initiator && !link.negotiated) return;
       try {
         link.makingOffer = true;
         await pc.setLocalDescription();
@@ -132,12 +174,39 @@ export class PeerMesh {
     };
 
     pc.oniceconnectionstatechange = () => {
-      if (pc.iceConnectionState === "failed") pc.restartIce();
+      const ice = pc.iceConnectionState;
+      if (link.stuckTimer) clearTimeout(link.stuckTimer);
+      link.stuckTimer = null;
+      if (ice === "connected" || ice === "completed") {
+        this.options.onLinkState?.(peerId, "connected");
+      } else if (ice === "failed") {
+        this.options.onLinkState?.(peerId, "failed");
+        pc.restartIce();
+      } else {
+        this.options.onLinkState?.(peerId, "connecting");
+        if (ice === "checking" || ice === "disconnected") {
+          link.stuckTimer = setTimeout(
+            () => this.options.onLinkState?.(peerId, "failed"),
+            ICE_STUCK_MS
+          );
+        }
+      }
     };
 
-    pc.ontrack = ({ track, streams }) => {
+    pc.ontrack = ({ track, streams, transceiver }) => {
       const stream = streams[0] ?? new MediaStream([track]);
       if (track.kind === "audio") {
+        // Quien responde aún no tiene emisor de audio: se enlaza al transceptor
+        // recibido y se le pone el micrófono ANTES de crear la respuesta.
+        if (!link.micSender) {
+          link.micSender = transceiver.sender;
+          try {
+            transceiver.direction = "sendrecv";
+          } catch {
+            /* transceptor detenido */
+          }
+          this.syncMicSender(link);
+        }
         this.options.onRemoteAudio(peerId, stream);
       } else if (track.kind === "video") {
         // La pantalla siempre llega en su propio flujo, separado del micrófono.
@@ -145,7 +214,17 @@ export class PeerMesh {
       }
     };
 
-    this.syncMicSender(link);
+    // Quien inicia crea SIEMPRE el audio (con o sin micrófono) para poder
+    // escuchar; la pista local ya va dentro antes de `createOffer`.
+    if (initiator) {
+      const transceiver = pc.addTransceiver(this.micTrack ?? "audio", {
+        direction: "sendrecv",
+        streams: this.micStream ? [this.micStream] : [],
+      });
+      link.micSender = transceiver.sender;
+    } else {
+      this.syncMicSender(link);
+    }
     this.syncScreenSender(link);
     return link;
   }
@@ -166,6 +245,8 @@ export class PeerMesh {
         if (link.ignoreOffer) return;
 
         await pc.setRemoteDescription(description);
+        link.negotiated = true;
+        // Candidatos que llegaron antes de la descripción remota.
         for (const candidate of link.pendingCandidates.splice(0)) {
           await pc.addIceCandidate(candidate).catch(() => undefined);
         }
@@ -203,9 +284,12 @@ export class PeerMesh {
     this.closeLink(link);
     this.options.onRemoteAudio(peerId, null);
     this.options.onRemoteScreen(peerId, null);
+    this.options.onLinkState?.(peerId, null);
   }
 
   private closeLink(link: PeerLink): void {
+    if (link.stuckTimer) clearTimeout(link.stuckTimer);
+    link.stuckTimer = null;
     link.pc.onnegotiationneeded = null;
     link.pc.onicecandidate = null;
     link.pc.oniceconnectionstatechange = null;
@@ -222,6 +306,7 @@ export class PeerMesh {
       this.closeLink(link);
       this.options.onRemoteAudio(peerId, null);
       this.options.onRemoteScreen(peerId, null);
+      this.options.onLinkState?.(peerId, null);
     }
     this.links.clear();
     this.micTrack = null;

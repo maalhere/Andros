@@ -65,6 +65,10 @@ interface CollabState {
   cursors: Record<string, CollabCursor>;
   /** Audio remoto por participante (se reproduce en VoiceRoomBar). */
   remoteAudio: Record<string, MediaStream>;
+  /** Estado real del enlace WebRTC de audio con cada participante. */
+  linkStates: Record<string, "connecting" | "connected" | "failed">;
+  /** El navegador bloqueó la reproducción automática del audio remoto. */
+  audioBlocked: boolean;
 
   /** Nodos efímeros de pantalla compartida (no se guardan en la nube). */
   screenShares: ScreenShareNodeData[];
@@ -84,6 +88,8 @@ interface CollabState {
   setCursor: (cursor: CollabCursor) => void;
   removeCursor: (peerId: string) => void;
   setRemoteAudio: (peerId: string, stream: MediaStream | null) => void;
+  setLinkState: (peerId: string, state: "connecting" | "connected" | "failed" | null) => void;
+  setAudioBlocked: (blocked: boolean) => void;
 
   upsertScreenShare: (share: ScreenShareNodeData, stream?: MediaStream | null) => void;
   setScreenStream: (shareId: string, stream: MediaStream | null) => void;
@@ -119,6 +125,8 @@ export const useCollabStore = create<CollabState>((set) => ({
   speaking: {},
   cursors: {},
   remoteAudio: {},
+  linkStates: {},
+  audioBlocked: false,
 
   screenShares: [],
   screenStreams: {},
@@ -168,6 +176,15 @@ export const useCollabStore = create<CollabState>((set) => ({
       else delete remoteAudio[peerId];
       return { remoteAudio };
     }),
+  setLinkState: (peerId, linkState) =>
+    set((state) => {
+      if ((state.linkStates[peerId] ?? null) === linkState) return {};
+      const linkStates = { ...state.linkStates };
+      if (linkState) linkStates[peerId] = linkState;
+      else delete linkStates[peerId];
+      return { linkStates };
+    }),
+  setAudioBlocked: (audioBlocked) => set((state) => (state.audioBlocked === audioBlocked ? {} : { audioBlocked })),
 
   upsertScreenShare: (share, stream) =>
     set((state) => {
@@ -224,6 +241,8 @@ export const useCollabStore = create<CollabState>((set) => ({
       speaking: {},
       cursors: {},
       remoteAudio: {},
+      linkStates: {},
+      audioBlocked: false,
       screenShares: [],
       screenStreams: {},
       guest: null,

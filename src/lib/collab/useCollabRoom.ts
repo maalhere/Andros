@@ -5,7 +5,8 @@
 // compartida y edición simultánea del lienzo, con $0 de infraestructura:
 //   · Supabase Realtime Presence  → quién está en la sala y qué espacio ve.
 //   · Supabase Realtime Broadcast → cursores, cambios del lienzo y señales.
-//   · WebRTC nativo (malla 2–6)   → audio y pantalla, con STUN público.
+//   · WebRTC nativo (malla 2–6)   → audio y pantalla, con STUN público
+//                                   (+ TURN opcional vía NEXT_PUBLIC_TURN_*).
 //
 // `useCollabRoom()` se monta UNA vez (page.tsx). Las acciones (`joinCollabRoom`,
 // `leaveCollabRoom`, …) se pueden llamar desde cualquier componente.
@@ -358,6 +359,47 @@ function acceptSnapshot(payload: CanvasSnapshotPayload): void {
 }
 
 // ----------------------------------------------------------------------------
+// Audio remoto: reproducción garantizada
+// ----------------------------------------------------------------------------
+
+/** Elementos <audio> reales del DOM (los registra VoiceRoomBar). */
+const remoteAudioElements = new Set<HTMLAudioElement>();
+
+export function registerRemoteAudioElement(element: HTMLAudioElement): () => void {
+  remoteAudioElements.add(element);
+  return () => {
+    remoteAudioElements.delete(element);
+  };
+}
+
+/** Intenta reproducir un <audio>; si el navegador lo bloquea, avisa a la barra. */
+export async function playRemoteAudio(element: HTMLAudioElement): Promise<void> {
+  try {
+    await element.play();
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "NotAllowedError") {
+      collab().setAudioBlocked(true);
+    } else if (!(error instanceof DOMException && error.name === "AbortError")) {
+      console.warn("[Andros · sala] No se pudo reproducir el audio remoto.", error);
+    }
+  }
+}
+
+/** «Activar sonido»: con un clic reanuda todos los <audio> y el AudioContext. */
+export async function resumeCollabAudio(): Promise<void> {
+  await session?.voice.resume();
+  const results = await Promise.all(
+    [...remoteAudioElements].map((element) =>
+      element.play().then(
+        () => true,
+        () => false
+      )
+    )
+  );
+  collab().setAudioBlocked(results.some((ok) => !ok));
+}
+
+// ----------------------------------------------------------------------------
 // Entrar / salir
 // ----------------------------------------------------------------------------
 
@@ -457,6 +499,7 @@ export async function joinCollabRoom(): Promise<void> {
       else session?.voice.unwatch(peerId);
     },
     onRemoteScreen: handleRemoteScreen,
+    onLinkState: (peerId, linkState) => collab().setLinkState(peerId, linkState),
   });
   mesh.setMicStream(mic);
   if (screenStream) mesh.setScreenStream(screenStream);
