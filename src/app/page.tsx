@@ -27,6 +27,9 @@ import { WorkspaceTabsBar } from "@/components/workspaces/WorkspaceTabsBar";
 import { ShortcutsGuideModal } from "@/components/shared/ShortcutsGuideModal";
 import { CloudLoadingSkeleton } from "@/components/shared/CloudLoadingSkeleton";
 import { SITE_DESCRIPTION, SITE_TAGLINE, LEGAL_LINKS } from "@/lib/site";
+import { useCollabRoom } from "@/lib/collab/useCollabRoom";
+import { VoiceRoomBar } from "@/components/collab/VoiceRoomBar";
+import { ScreenShareDock } from "@/components/nodes/ScreenShareNode";
 
 export default function AndrosWorkspacePage() {
   const { isMobile, isMounted } = useDeviceLayout();
@@ -34,6 +37,8 @@ export default function AndrosWorkspacePage() {
   useCloudSync();
   // Ajustes de comodidad: localStorage + perfil de Supabase.
   useSettingsSync();
+  // Sala en vivo: voz, presencia, cursores, pantalla compartida y edición simultánea.
+  useCollabRoom();
   const showLanding = useLandingStore((s) => s.phase !== "workspace");
   // ⌘K / Ctrl+K (paleta) en todas partes; atajos de letra solo en escritorio.
   useGlobalShortcuts(!isMobile);
@@ -62,6 +67,7 @@ export default function AndrosWorkspacePage() {
     <div className="relative w-full min-h-screen overflow-hidden">
       <WorkspaceTabsBar isMobile={isMobile} />
       <TopStatusBar isMobile={isMobile} />
+      <VoiceRoomBar isMobile={isMobile} />
       <QualityOfLifeModal />
       <AiKeysModal />
       <WorkspaceManagerDrawer />
@@ -75,6 +81,7 @@ export default function AndrosWorkspacePage() {
           <TacticalCardStack />
           <ThumbZoneBar />
           <MobileBottomSheet />
+          <ScreenShareDock />
         </>
       ) : (
         /* MODO COMPUTADORA (>= 768px): Spatial Infinite Canvas Mode */

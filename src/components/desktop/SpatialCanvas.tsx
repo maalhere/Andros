@@ -18,6 +18,8 @@ import {
   PortPosition,
 } from "@/types/workspace";
 import { EngineeringNode } from "@/components/shared/EngineeringNode";
+import { ScreenShareLayer } from "@/components/nodes/ScreenShareNode";
+import { CollabCursorsLayer } from "@/components/collab/CollabCursorsLayer";
 import { collectUpstreamContext } from "@/lib/canvas/contextGraph";
 import {
   Bounds,
@@ -1379,6 +1381,9 @@ export const SpatialCanvas: React.FC = () => {
           ))}
         </div>
 
+        {/* Pantallas compartidas de la sala en vivo (nodos efímeros, no se guardan) */}
+        <ScreenShareLayer scale={canvasTransform.scale} interactive={!isDrawTool} />
+
         {/* Tinta libre (Lápiz D): sobre los nodos, sin capturar clics */}
         <svg
           className="absolute left-0 top-0 pointer-events-none overflow-visible"
@@ -1400,6 +1405,9 @@ export const SpatialCanvas: React.FC = () => {
             />
           )}
         </svg>
+
+        {/* Cursores en vivo de los compañeros de la sala */}
+        <CollabCursorsLayer scale={canvasTransform.scale} />
 
         {/* Panel flotante del cable seleccionado */}
         {selectedPopover && (

@@ -43,6 +43,24 @@ export default function PrivacidadPage() {
           con el nombre que se muestra en ellas.
         </li>
       </ul>
+      <h3>Si entras a una sala en vivo (voz, pantalla y edición conjunta)</h3>
+      <ul>
+        <li>
+          <strong>Presencia</strong>: tu nombre, un color, el nombre del espacio que tienes abierto y
+          si tienes el micrófono silenciado o compartes pantalla. Solo lo ven las personas de esa
+          sala mientras estás dentro; no se guarda en la base de datos.
+        </li>
+        <li>
+          <strong>Voz y pantalla compartida</strong>: viajan directamente entre los navegadores de
+          los participantes (WebRTC). No pasan por nuestros servidores ni se graban. El micrófono y
+          la pantalla solo se activan si tú das permiso y se apagan al salir de la llamada.
+        </li>
+        <li>
+          <strong>Cursor y cambios del lienzo</strong>: la posición de tu puntero y los nodos que
+          editas se envían en tiempo real a la sala; solo el dueño del espacio los guarda en su
+          nube.
+        </li>
+      </ul>
       <p>No pedimos teléfono, dirección, datos de pago ni documentos de identidad.</p>
 
       <h2>3. Para qué los usamos</h2>
@@ -58,7 +76,14 @@ export default function PrivacidadPage() {
       <h2>4. Con quién se comparten (encargados del tratamiento)</h2>
       <ul>
         <li>
-          <strong>Supabase</strong>: autenticación, base de datos y almacenamiento de archivos.
+          <strong>Supabase</strong>: autenticación, base de datos, almacenamiento de archivos y el
+          canal en tiempo real (Realtime) que reparte la presencia, los cursores y los cambios de
+          las salas en vivo.
+        </li>
+        <li>
+          <strong>Participantes de una sala en vivo</strong>: para conectar la voz y la pantalla
+          directamente, los navegadores intercambian sus direcciones IP de red. Para descubrirlas se
+          consulta un servidor STUN público de Google, que solo ve tu dirección IP.
         </li>
         <li>
           <strong>Google</strong>: inicio de sesión (OAuth) y, si usas el Oráculo o los nodos IA

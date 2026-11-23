@@ -31,6 +31,8 @@ import {
   useWorkspaceStore,
 } from "@/store/useWorkspaceStore";
 import { useLandingStore } from "@/store/useLandingStore";
+import { useCollabStore } from "@/store/useCollabStore";
+import { shouldSkipAutosaveForRemote } from "@/lib/collab/remoteFlag";
 import { sanitizeCanvasStrokes } from "@/lib/canvas/inkGeometry";
 import { getDesktopBridge, type AndrosDesktopBridge } from "@/lib/printer/printerClient";
 import {
@@ -399,6 +401,13 @@ interface CloudEngine {
   flush: () => Promise<void>;
   /** Detiene la sincronización sin tocar el lienzo. */
   pause: () => void;
+  /**
+   * Sala en vivo (invitado): guarda lo pendiente y congela el autoguardado
+   * mientras ves el lienzo de otra cuenta, para no escribirlo en tu nube.
+   */
+  suspendForCollabGuest: () => Promise<void>;
+  /** Fin de la visita: vuelve a cargar tu propio espacio y reanuda el guardado. */
+  resumeAfterCollabGuest: () => Promise<void>;
   stop: () => void;
   /** Vuelve a intentar la subida fallida del archivo de un nodo. */
   retryUpload: (nodeId: string) => void;
@@ -444,6 +453,8 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
   let userId: string | null = null;
   let workspaceId: string | null = null;
   let ready = false;
+  /** `true` mientras el lienzo muestra el espacio de otra cuenta (sala en vivo). */
+  let collabGuest = false;
 
   let nodeSnapshot = new Map<string, string>();
   let connectionSnapshot = new Map<string, string>();
@@ -490,7 +501,7 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
   // --------------------------------------------------------------------------
 
   const runSync = async (): Promise<void> => {
-    if (!ready || !userId || !workspaceId || disposed) return;
+    if (!ready || !userId || !workspaceId || disposed || collabGuest) return;
     const ep = epoch;
     const ws = workspaceId;
     const uid = userId;
@@ -620,7 +631,7 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
   };
 
   const scheduleSync = () => {
-    if (!ready || disposed) return;
+    if (!ready || disposed || collabGuest) return;
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
       timer = null;
@@ -706,7 +717,7 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
   let uploadChain: Promise<void> = Promise.resolve();
 
   const queueUploads = () => {
-    if (!ready || disposed) return;
+    if (!ready || disposed || collabGuest) return;
     for (const node of useWorkspaceStore.getState().nodes) {
       if (node.type !== "file-node") continue;
       const file = node.fileData;
@@ -948,9 +959,16 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
   const openWorkspaceRaw = async (id: string, seed?: WorkspaceSeed): Promise<void> => {
     const uid = userId;
     if (!uid || disposed) return;
-    if (id === workspaceId && !seed) return;
+    // Si estabas de invitado en una sala, el lienzo en pantalla NO es tuyo:
+    // no se guarda; se termina la visita y se abre el espacio pedido.
+    const wasCollabGuest = collabGuest;
+    if (wasCollabGuest) {
+      collabGuest = false;
+      useCollabStore.getState().setGuest(null);
+    }
+    if (id === workspaceId && !seed && !wasCollabGuest) return;
     // Lo pendiente del espacio actual se guarda antes de salir de él.
-    if (ready) {
+    if (ready && !wasCollabGuest) {
       await uploadChain;
       await syncNow();
     }
@@ -1189,6 +1207,8 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
     ) {
       return;
     }
+    // Cambio recibido de otro equipo de tu misma cuenta: ese equipo ya lo guarda.
+    if (shouldSkipAutosaveForRemote()) return;
     queueUploads();
     scheduleSync();
   });
@@ -1206,6 +1226,26 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
     },
     pause: () => {
       resetSession();
+    },
+    suspendForCollabGuest: async () => {
+      if (collabGuest || disposed) return;
+      if (ready) {
+        await uploadChain;
+        await syncNow();
+      }
+      collabGuest = true;
+      if (timer) clearTimeout(timer);
+      timer = null;
+    },
+    resumeAfterCollabGuest: async () => {
+      if (!collabGuest || disposed) return;
+      collabGuest = false;
+      const uid = userId;
+      const ownWorkspace = workspaceId;
+      if (!uid) return;
+      resetSession();
+      userId = uid;
+      await loadWorkspace(uid, ownWorkspace ? { workspaceId: ownWorkspace } : {});
     },
     openWorkspace: async (id, seed) => {
       await guarded(() => openWorkspaceRaw(id, seed));
@@ -1369,6 +1409,13 @@ export const duplicateCloudWorkspace = async (id: string): Promise<void> =>
   activeEngine?.duplicateWorkspace(id);
 export const deleteCloudWorkspace = async (id: string): Promise<void> =>
   activeEngine?.deleteWorkspace(id);
+
+/** Sala en vivo: congela el autoguardado mientras ves el lienzo de otra cuenta. */
+export const suspendCloudForCollabGuest = async (): Promise<void> =>
+  activeEngine?.suspendForCollabGuest();
+/** Sala en vivo: vuelve a tu propio espacio y reanuda el autoguardado. */
+export const resumeCloudAfterCollabGuest = async (): Promise<void> =>
+  activeEngine?.resumeAfterCollabGuest();
 
 /** Reintenta subir a la nube el archivo de un nodo cuya subida falló. */
 export function retryFileUpload(nodeId: string): void {

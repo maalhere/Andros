@@ -12,6 +12,7 @@
 --   5. Seguridad RLS: cada usuario solo ve y edita lo suyo (auth.uid())
 --   6. Bucket de Storage `print-files` (privado) para archivos 3D y otros
 --   7. Andros Arena: arena_posts + arena_submissions (con RLS)
+--   8. Sala en vivo (Sprint 7): notas sobre Realtime y nodos efímeros
 -- ============================================================================
 
 create extension if not exists "pgcrypto";
@@ -143,6 +144,10 @@ create trigger workspace_nodes_set_updated_at
   before update on public.workspace_nodes
   for each row execute function public.set_updated_at();
 
+-- SPRINT 7: el nodo "screen-share-node" (pantalla compartida) es EFÍMERO de
+-- sesión: vive solo en memoria mientras dura la transmisión y NUNCA se guarda
+-- aquí, por eso NO se añade al check (así no quedan pantallas muertas en el
+-- lienzo al cerrar). Si algún cliente intentara guardarlo, el check lo rechaza.
 -- SPRINT 2: se agregó "ai-chat-node" (Conversación IA). Volver a ejecutar
 -- este archivo actualiza el check sin tocar los datos existentes.
 -- BLOQUE 3: se agregaron los nodos "resource-link-node" (Enlace / Fuente) y
@@ -452,3 +457,19 @@ drop policy if exists "arena_submissions_delete_own" on public.arena_submissions
 create policy "arena_submissions_delete_own" on public.arena_submissions
   for delete to authenticated
   using (applicant_id = (select auth.uid()));
+
+-- ============================================================================
+-- 8. SALA EN VIVO (Sprint 7): voz, pantalla compartida y edición conjunta
+--    No necesita tablas nuevas: usa Supabase Realtime (Presence + Broadcast)
+--    en el canal `andros-collab:<sala>` y WebRTC directo entre navegadores
+--    (STUN público stun:stun.l.google.com:19302) → $0 USD para 2–6 personas.
+--
+--    · Sala de carpeta: f-<id del dueño>-<hash de la carpeta>
+--    · Sala de espacio suelto: w-<id del workspace>
+--    · Nada de la sala se guarda: presencia, cursores, audio y pantallas son
+--      efímeros. Los cambios de nodos/cables los guarda SOLO el dueño del
+--      espacio con sus propias políticas RLS (los invitados no escriben aquí).
+--
+--    Requisito: Realtime activo en el proyecto (Project Settings → Realtime).
+--    Los canales Broadcast/Presence públicos no necesitan políticas extra.
+-- ============================================================================
