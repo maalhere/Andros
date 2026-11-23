@@ -41,6 +41,19 @@ import {
   type ModelDimensions,
 } from "@/components/nodes/Model3DPreview";
 import { Print3DModal, isPrintable3D } from "@/components/nodes/Print3DModal";
+import {
+  isIdentityScale,
+  normalizeScale,
+  scaleDimensions,
+  scaleKey,
+  type ModelScale,
+} from "@/lib/3d/modelScale";
+
+/** Medidas (ya escaladas) redondeadas a centésimas de mm, como se guardan en el nodo. */
+function roundedDimensions(dims: ModelDimensions): ModelDimensions {
+  const round = (v: number) => Math.round(v * 100) / 100;
+  return { widthMm: round(dims.widthMm), depthMm: round(dims.depthMm), heightMm: round(dims.heightMm) };
+}
 
 // ============================================================================
 // NODO TIPO 1 — ARCHIVO DESCARGABLE UNIVERSAL
@@ -220,6 +233,37 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
   const isCloudWorthy = canPrint3D || file.extension === "pdf";
   const isLocalOnly = file.downloadUrl.startsWith("blob:") && !file.storagePath;
   const dimensions = measured?.url === file.downloadUrl ? measured.dimensions : null;
+  const modelScale = normalizeScale(file.scale);
+  const supportsEnabled = file.autoSupports ?? false;
+
+  /**
+   * Guarda en el nodo las medidas YA escaladas: los CodeLab (model_x/y/z) y el
+   * chat IA conectados las leen del grafo y se actualizan al instante.
+   */
+  const storeScaledDimensions = (base: ModelDimensions, scale: ModelScale, patchScale: boolean) => {
+    const next = roundedDimensions(scaleDimensions(base, scale));
+    const prev = useWorkspaceStore.getState().nodes.find((n) => n.id === node.id);
+    const prevData = prev?.type === "file-node" ? prev.fileData : undefined;
+    const stored = prevData?.modelDimensionsMm;
+    const sameDims =
+      !!stored &&
+      stored.widthMm === next.widthMm &&
+      stored.depthMm === next.depthMm &&
+      stored.heightMm === next.heightMm;
+    const sameScale = scaleKey(normalizeScale(prevData?.scale)) === scaleKey(scale);
+    // Solo se versiona un cambio real: así el grafo no se re-renderiza en vano.
+    const contentVersion = (prevData?.contentVersion ?? 0) + 1;
+    if (patchScale) {
+      if (sameDims && sameScale) return;
+      updateNodePayload(node.id, {
+        scale: isIdentityScale(scale) ? undefined : scale,
+        ...(sameDims ? {} : { modelDimensionsMm: next }),
+        contentVersion,
+      });
+    } else if (!sameDims) {
+      updateNodePayload(node.id, { modelDimensionsMm: next, contentVersion });
+    }
+  };
 
   const openFilePicker = () => inputRef.current?.click();
 
@@ -261,6 +305,8 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
       storagePath: undefined,
       // Las dimensiones 3D se volverán a medir con la pieza nueva.
       modelDimensionsMm: undefined,
+      // Pieza nueva: vuelve al 100 %.
+      scale: undefined,
     });
 
     updateNodeMeta(node.id, {
@@ -350,6 +396,8 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
       lastModifiedMs: undefined,
       storagePath: undefined,
       modelDimensionsMm: undefined,
+      scale: undefined,
+      autoSupports: undefined,
     });
     updateNodeMeta(node.id, {
       codeTag: "FILE",
@@ -466,29 +514,25 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
               extension={file.extension}
               fileSizeBytes={file.fileSizeBytes}
               variant={variant}
+              pieceName={node.title || file.fileName}
+              scale={modelScale}
+              supportsEnabled={supportsEnabled}
+              onSupportsChange={(enabled) =>
+                updateNodePayload(node.id, { autoSupports: enabled || undefined })
+              }
               onDimensions={(dims) => {
                 setMeasured({ url: file.downloadUrl, dimensions: dims });
                 // Se guardan en el nodo (y en la nube) para que el Oráculo IA
-                // conozca el tamaño real de la pieza. Solo si cambiaron.
-                const round = (v: number) => Math.round(v * 100) / 100;
-                const next = {
-                  widthMm: round(dims.widthMm),
-                  depthMm: round(dims.depthMm),
-                  heightMm: round(dims.heightMm),
-                };
-                const prev = useWorkspaceStore
-                  .getState()
-                  .nodes.find((n) => n.id === node.id);
-                const stored =
-                  prev?.type === "file-node" ? prev.fileData.modelDimensionsMm : undefined;
-                if (
-                  !stored ||
-                  stored.widthMm !== next.widthMm ||
-                  stored.depthMm !== next.depthMm ||
-                  stored.heightMm !== next.heightMm
-                ) {
-                  updateNodePayload(node.id, { modelDimensionsMm: next });
-                }
+                // conozca el tamaño de la pieza con su escala. Solo si cambiaron.
+                const prev = useWorkspaceStore.getState().nodes.find((n) => n.id === node.id);
+                const storedScale = normalizeScale(
+                  prev?.type === "file-node" ? prev.fileData.scale : undefined
+                );
+                storeScaledDimensions(dims, storedScale, false);
+              }}
+              onScaleChange={(next) => {
+                if (dimensions) storeScaledDimensions(dimensions, next, true);
+                else updateNodePayload(node.id, { scale: isIdentityScale(next) ? undefined : next });
               }}
             />
           )}
@@ -674,6 +718,11 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
           downloadUrl={file.downloadUrl}
           storagePath={file.storagePath}
           dimensions={dimensions}
+          scale={modelScale}
+          supportsEnabled={supportsEnabled}
+          onSupportsChange={(enabled) =>
+            updateNodePayload(node.id, { autoSupports: enabled || undefined })
+          }
           onClose={() => setIsPrintOpen(false)}
         />
       )}

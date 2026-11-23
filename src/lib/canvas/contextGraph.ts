@@ -16,6 +16,7 @@ import type {
   NodeArchetype,
   NodeConnection,
 } from "@/types/workspace";
+import { formatScale, isIdentityScale } from "@/lib/3d/modelScale";
 
 /** Límite de texto por nodo y total, para no saturar el contexto del modelo. */
 const MAX_NODE_CHARS = 6000;
@@ -87,6 +88,10 @@ export function serializeNodeForContext(node: EngineeringNodeData): string {
           `Caja envolvente: ancho ${w.toFixed(2)} mm × profundidad ${d.toFixed(2)} mm × alto ${h.toFixed(2)} mm`,
           `Volumen de la caja envolvente: ${((w * d * h) / 1000).toFixed(2)} cm³ (el volumen real de la pieza es menor)`
         );
+        if (f.scale && !isIdentityScale(f.scale)) {
+          lines.push(`Escala aplicada en Andros: ${formatScale(f.scale)} (las medidas anteriores ya están escaladas)`);
+        }
+        if (f.autoSupports) lines.push("Soportes automáticos (45°) activados para imprimir.");
       } else if (MODEL_3D_EXTENSIONS.has(ext)) {
         lines.push("Dimensiones: aún no medidas (se miden al abrir el visor 3D del nodo).");
       }
@@ -279,7 +284,13 @@ export function findLinked3DModel(
   nodes: EngineeringNodeData[],
   connections: NodeConnection[],
   nodeId: string
-): { nodeId: string; name: string; dimensionsMm?: { widthMm: number; depthMm: number; heightMm: number } } | null {
+): {
+  nodeId: string;
+  name: string;
+  dimensionsMm?: { widthMm: number; depthMm: number; heightMm: number };
+  /** Sube con cada cambio de escala: fuerza a los CodeLab a releer las medidas. */
+  contentVersion?: number;
+} | null {
   const neighborIds = connections
     .filter((c) => c.fromNodeId === nodeId || c.toNodeId === nodeId)
     .map((c) => (c.fromNodeId === nodeId ? c.toNodeId : c.fromNodeId));
@@ -289,7 +300,14 @@ export function findLinked3DModel(
     if (!n || n.type !== "file-node" || !MODEL_3D_EXTENSIONS.has(n.fileData.extension.toLowerCase())) continue;
     const name = n.fileData.fileName || n.title;
     // Se prefiere una pieza ya medida por el visor 3D.
-    if (n.fileData.modelDimensionsMm) return { nodeId: n.id, name, dimensionsMm: n.fileData.modelDimensionsMm };
+    if (n.fileData.modelDimensionsMm) {
+      return {
+        nodeId: n.id,
+        name,
+        dimensionsMm: n.fileData.modelDimensionsMm,
+        contentVersion: n.fileData.contentVersion ?? 0,
+      };
+    }
     fallback ??= { nodeId: n.id, name };
   }
   return fallback;

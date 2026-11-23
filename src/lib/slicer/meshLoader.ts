@@ -54,34 +54,55 @@ export async function loadTriangleSoup(url: string, extension: string): Promise<
     root = new ThreeMFLoader().parse(await response.arrayBuffer());
   }
 
+  const soup = extractTriangleSoup(root, THREE, { disposeGeometry: true });
+  if (soup.length === 0) throw new Error("empty");
+  return soup;
+}
+
+/**
+ * Convierte todas las mallas de `root` en una sopa de triángulos.
+ *   - `relativeTo`: las coordenadas quedan en el sistema de ese objeto (p. ej.
+ *     el grupo que escala la pieza en el visor) en lugar del mundo.
+ *   - `disposeGeometry`: libera cada geometría tras copiarla.
+ */
+export function extractTriangleSoup(
+  root: import("three").Object3D,
+  THREE: typeof import("three"),
+  options: { relativeTo?: import("three").Object3D; disposeGeometry?: boolean } = {}
+): Float32Array {
   root.updateMatrixWorld(true);
+  const toLocal = new THREE.Matrix4();
+  if (options.relativeTo) {
+    options.relativeTo.updateMatrixWorld(true);
+    toLocal.copy(options.relativeTo.matrixWorld).invert();
+  }
 
   const chunks: Float32Array[] = [];
   let total = 0;
   const v = new THREE.Vector3();
+  const matrix = new THREE.Matrix4();
 
   root.traverse((child) => {
     const mesh = child as import("three").Mesh;
     if (!mesh.isMesh || !mesh.geometry) return;
     const position = mesh.geometry.getAttribute("position");
     if (!position) return;
+    matrix.multiplyMatrices(toLocal, mesh.matrixWorld);
     const index = mesh.geometry.getIndex();
     const count = index ? index.count : position.count;
     const triCount = Math.floor(count / 3);
     const out = new Float32Array(triCount * 9);
     for (let i = 0; i < triCount * 3; i += 1) {
       const vi = index ? index.getX(i) : i;
-      v.fromBufferAttribute(position, vi).applyMatrix4(mesh.matrixWorld);
+      v.fromBufferAttribute(position, vi).applyMatrix4(matrix);
       out[i * 3] = v.x;
       out[i * 3 + 1] = v.y;
       out[i * 3 + 2] = v.z;
     }
     chunks.push(out);
     total += out.length;
-    mesh.geometry.dispose();
+    if (options.disposeGeometry) mesh.geometry.dispose();
   });
-
-  if (total === 0) throw new Error("empty");
 
   const soup = new Float32Array(total);
   let offset = 0;

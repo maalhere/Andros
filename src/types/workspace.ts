@@ -184,6 +184,20 @@ export interface FileNodePayload {
    * razonar sobre el tamaño real sin volver a abrir el archivo.
    */
   modelDimensionsMm?: { widthMm: number; depthMm: number; heightMm: number };
+  /**
+   * Escala de la pieza 3D por eje [X, Y, Z] (1 = 100 %, de 0.1 a 5). Cuando
+   * existe, `modelDimensionsMm` ya guarda las medidas escaladas, que son las
+   * que reciben los CodeLab (model_x/y/z) y el chat IA conectados.
+   */
+  scale?: [number, number, number];
+  /** Soportes automáticos (45°) activados para imprimir y exportar el .stl. */
+  autoSupports?: boolean;
+  /**
+   * Versión del contenido geométrico de la pieza. Sube cada vez que cambian la
+   * escala o las medidas: los CodeLab y chats IA conectados la usan para saber
+   * que deben releer `model_x/y/z` y el contexto, aunque el redondeo coincida.
+   */
+  contentVersion?: number;
 }
 
 // ----------------------------------------------------------------------------

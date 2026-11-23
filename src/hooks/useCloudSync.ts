@@ -122,6 +122,8 @@ function cloudFilePayload(file: FileNodePayload): FileNodePayload {
       : {}),
     ...(file.storagePath ? { storagePath: file.storagePath } : {}),
     ...(file.modelDimensionsMm ? { modelDimensionsMm: file.modelDimensionsMm } : {}),
+    ...(file.scale ? { scale: file.scale } : {}),
+    ...(file.autoSupports ? { autoSupports: true } : {}),
   };
 }
 

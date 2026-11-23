@@ -47,6 +47,9 @@ import {
   sendPrintJob,
 } from "@/lib/printer/printerClient";
 import { requestFileDownload } from "@/lib/downloadWithPermission";
+import { useSubmitGuard } from "@/hooks/useSubmitGuard";
+import { formatScale, isIdentityScale, scaleKey, type ModelScale } from "@/lib/3d/modelScale";
+import { AutoSupportsToggle, PreparedStlButton, type SupportStatus } from "@/components/nodes/ModelPrepControls";
 
 // ============================================================================
 // IMPRIMIR EN 3D — TAN FÁCIL COMO IMPRIMIR UN DOCUMENTO
@@ -192,8 +195,32 @@ interface Print3DModalProps {
   extension: string;
   downloadUrl: string;
   storagePath?: string;
+  /** Medidas originales del archivo (al 100 %). */
   dimensions: ModelDimensions | null;
+  /** Escala guardada en el nodo (se aplica al laminar y al exportar). */
+  scale: ModelScale;
+  supportsEnabled: boolean;
+  onSupportsChange: (enabled: boolean) => void;
   onClose: () => void;
+}
+
+type SupportResultState =
+  | { key: string; phase: "ready"; soup: Float32Array; count: number; capped: boolean }
+  | { key: string; phase: "error" };
+
+/** Pieza escalada + apoyada en la cama, y sus soportes (si se piden). */
+async function preparePart(
+  soup: Float32Array,
+  scale: ModelScale,
+  withSupports: boolean,
+  cached: Float32Array | null,
+  signal?: AbortSignal
+): Promise<{ part: Float32Array; supports: Float32Array | null }> {
+  const { generateAutoSupports, scaleAndGroundSoup } = await import("@/lib/3d/autoSupports");
+  const part = scaleAndGroundSoup(soup, scale);
+  if (!withSupports) return { part, supports: null };
+  const supports = cached ?? (await generateAutoSupports(part, { signal })).soup;
+  return { part, supports };
 }
 
 function SettingsList({ settings }: { settings: { label: string; value: string }[] }) {
@@ -225,6 +252,9 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
   downloadUrl,
   storagePath,
   dimensions,
+  scale: userScale,
+  supportsEnabled,
+  onSupportsChange,
   onClose,
 }) => {
   const isSignedIn = useCloudStore((s) => s.user !== null);
@@ -281,17 +311,23 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
   const preset = QUALITY_PRESETS[quality];
 
   // --- Medidas y verificación de cabida ---------------------------------------
-  const size =
+  // La escala del nodo se aplica primero; el ajuste automático va encima.
+  const baseSize =
     mesh.phase === "ready"
       ? mesh.size
       : dimensions
         ? { x: dimensions.widthMm, y: dimensions.depthMm, z: dimensions.heightMm }
         : null;
+  const size = baseSize
+    ? { x: baseSize.x * userScale[0], y: baseSize.y * userScale[1], z: baseSize.z * userScale[2] }
+    : null;
   const biggest = size ? Math.max(size.x, size.y, size.z) : 0;
   const fits = size ? biggest <= ADV3_BED_MM + 0.05 : true;
   const fitPercent = size && biggest > 0 ? Math.floor((ADV3_BED_MM / biggest) * 1000) / 10 : 100;
-  const scale = !fits && autoScale ? fitPercent / 100 : 1;
-  const shown = size ? { x: size.x * scale, y: size.y * scale, z: size.z * scale } : null;
+  const fitScale = !fits && autoScale ? fitPercent / 100 : 1;
+  const effectiveScale: ModelScale = [userScale[0] * fitScale, userScale[1] * fitScale, userScale[2] * fitScale];
+  const [ex, ey, ez] = effectiveScale;
+  const shown = size ? { x: size.x * fitScale, y: size.y * fitScale, z: size.z * fitScale } : null;
   const sizeText = shown ? `${formatMm(shown.x)} × ${formatMm(shown.y)} × ${formatMm(shown.z)} mm` : null;
   const canAutoPrint = isGcode || (sliceable && mesh.phase === "ready" && (fits || autoScale));
   const busy = phase === "slicing" || phase === "sending";
@@ -321,6 +357,43 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
       cancelled = true;
     };
   }, [downloadUrl, ext, sliceable]);
+
+  // --- Soportes automáticos (con la escala efectiva) ---------------------------
+  const [supportResult, setSupportResult] = useState<SupportResultState | null>(null);
+  const supportKey = supportsEnabled && mesh.phase === "ready" ? `${ex},${ey},${ez}` : null;
+  const supportView = supportKey && supportResult?.key === supportKey ? supportResult : null;
+  const readySupports = supportView?.phase === "ready" ? supportView.soup : null;
+
+  useEffect(() => {
+    if (!supportKey || mesh.phase !== "ready") return;
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const { generateAutoSupports, scaleAndGroundSoup } = await import("@/lib/3d/autoSupports");
+        const part = scaleAndGroundSoup(mesh.soup, [ex, ey, ez]);
+        const result = await generateAutoSupports(part, { signal: controller.signal });
+        if (controller.signal.aborted) return;
+        setSupportResult({
+          key: supportKey,
+          phase: "ready",
+          soup: result.soup,
+          count: result.pillars.length,
+          capped: result.capped,
+        });
+      } catch {
+        if (!controller.signal.aborted) setSupportResult({ key: supportKey, phase: "error" });
+      }
+    })();
+    return () => controller.abort();
+  }, [supportKey, mesh, ex, ey, ez]);
+
+  const supportStatus: SupportStatus = !supportsEnabled
+    ? { phase: "off" }
+    : !supportView
+      ? { phase: "computing" }
+      : supportView.phase === "error"
+        ? { phase: "error" }
+        : { phase: "ready", count: supportView.count, capped: supportView.capped };
 
   // Enlace temporal de la nube (lo usan Bambu Studio / PrusaSlicer / Cura).
   useEffect(() => {
@@ -467,9 +540,14 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
     resetResult();
   };
 
+  const toggleSupports = (on: boolean) => {
+    onSupportsChange(on);
+    resetResult();
+  };
+
   // --- Preparar el trabajo (.gx laminado, o el .gcode tal cual) ----------------
   const ensureJob = async (): Promise<PrintJob> => {
-    const key = `${quality}|${scale}`;
+    const key = `${quality}|${scaleKey(effectiveScale)}|${supportsEnabled ? "soportes" : "sin"}`;
     if (jobRef.current?.key === key) return jobRef.current.job;
 
     let prepared: PrintJob;
@@ -483,9 +561,18 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
-      const result = await generateFlashForgeGx(mesh.soup, {
+      // Escala del nodo (+ ajuste a la cama) y soportes fusionados con la pieza.
+      const { part, supports } = await preparePart(
+        mesh.soup,
+        effectiveScale,
+        supportsEnabled,
+        readySupports,
+        controller.signal
+      );
+      const { mergeSoups } = await import("@/lib/3d/exportStl");
+      const result = await generateFlashForgeGx(mergeSoups(part, supports), {
         quality,
-        scale,
+        scale: 1,
         baseName,
         signal: controller.signal,
         onProgress: (f) => setProgress(f),
@@ -569,6 +656,21 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
       description: `Modelo original ${ext.toUpperCase()}, tal como se subió a Andros.`,
     });
   };
+
+  /** .stl binario con la escala aplicada y los soportes fusionados (previo permiso). */
+  const { pending: exportingStl, run: runStlExport } = useSubmitGuard();
+  const downloadPreparedStlFile = () =>
+    void runStlExport(async () => {
+      if (mesh.phase !== "ready") return;
+      const { supports } = await preparePart(mesh.soup, effectiveScale, supportsEnabled, readySupports);
+      const { downloadPreparedStl } = await import("@/lib/3d/exportStl");
+      await downloadPreparedStl({
+        soup: mesh.soup,
+        scale: effectiveScale,
+        supportsSoup: supports,
+        pieceName: pieceName || fileName,
+      });
+    });
 
   /** Instalador de la app de Windows (previo permiso). */
   const downloadDesktopApp = () => {
@@ -739,6 +841,11 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
                 <div className="text-xs text-andros-muted space-y-0.5">
                   <p className="truncate" title={fileName}>{fileName}</p>
                   <p className="text-andros-primary font-medium font-mono tabular-nums">{sizeText ?? "Medidas no disponibles"}</p>
+                  {!isIdentityScale(userScale) && (
+                    <p>
+                      Escala del nodo: <span className="font-mono tabular-nums">{formatScale(userScale)}</span>
+                    </p>
+                  )}
                   {job?.stats && phase !== "slicing" && (
                     <p>
                       ≈ {formatDuration(job.stats.printTimeSec)} · {job.stats.filamentGrams.toFixed(0)} g de PLA ·{" "}
@@ -940,6 +1047,25 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
                     )}
                   </Row>
                 )}
+
+                {sliceable && (
+                  <Row label="Soportes">
+                    <div className="space-y-1.5">
+                      <AutoSupportsToggle
+                        enabled={supportsEnabled}
+                        onChange={toggleSupports}
+                        status={supportStatus}
+                        variant="stack"
+                        disabled={busy || mesh.phase !== "ready"}
+                      />
+                      <p className="text-[11px] text-andros-muted">
+                        {isAdv3
+                          ? "Pilares desprendibles bajo los voladizos de más de 45°. Se incluyen en el .gx y en el .stl preparado."
+                          : `Se incluyen en el .stl preparado. ${dest.program} abre el archivo original: actívalos allí si no usas el .stl.`}
+                      </p>
+                    </div>
+                  </Row>
+                )}
               </div>
             </div>
 
@@ -1076,6 +1202,14 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
                 </ul>
               </section>
               <div className="flex flex-col gap-2">
+                {sliceable && (
+                  <PreparedStlButton
+                    onClick={downloadPreparedStlFile}
+                    pending={exportingStl}
+                    disabled={mesh.phase !== "ready"}
+                    className="min-h-[40px] px-3 rounded-xl border border-andros-border-active text-andros-primary text-xs font-medium flex items-center justify-center gap-2 hover:border-andros-accent spring-micro disabled:opacity-50"
+                  />
+                )}
                 {isAdv3 && (
                   <button
                     type="button"
@@ -1214,6 +1348,22 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
               <td>{sizeText ?? "No disponibles"}</td>
             </tr>
             <tr>
+              <th>Escala</th>
+              <td>{formatScale(effectiveScale)}</td>
+            </tr>
+            <tr>
+              <th>Soportes automáticos (45°)</th>
+              <td>
+                {!supportsEnabled
+                  ? "Desactivados"
+                  : supportStatus.phase === "ready"
+                    ? supportStatus.count === 0
+                      ? "Sin voladizos detectados"
+                      : `${supportStatus.count} pilares`
+                    : "Activados"}
+              </td>
+            </tr>
+            <tr>
               <th>Impresora</th>
               <td>{isAdv3 ? "FlashForge Adventurer 3 (150 × 150 × 150 mm)" : dest.label}</td>
             </tr>
@@ -1243,9 +1393,11 @@ export const Print3DModal: React.FC<Print3DModalProps> = ({
         <div className="aps-notes" />
 
         <p className="aps-footer">
-          {scale !== 1
-            ? `La pieza se imprime escalada al ${fitPercent.toFixed(1)} % para caber en la cama.`
-            : "Las dimensiones son las reales del archivo."}
+          {fitScale !== 1
+            ? `La pieza se ajusta al ${fitPercent.toFixed(1)} % adicional para caber en la cama.`
+            : !isIdentityScale(userScale)
+              ? `Las dimensiones incluyen la escala del nodo (${formatScale(userScale)}).`
+              : "Las dimensiones son las reales del archivo."}
         </p>
       </div>
     </>,

@@ -3,13 +3,23 @@
 import React, { useEffect, useRef, useState } from "react";
 import { CircleAlert, Crosshair, LoaderCircle, Rotate3d } from "lucide-react";
 import type { Material, Object3D } from "three";
+import { useSubmitGuard } from "@/hooks/useSubmitGuard";
+import { IDENTITY_SCALE, isIdentityScale, scaleDimensions, type ModelScale } from "@/lib/3d/modelScale";
+import {
+  AutoSupportsToggle,
+  ModelScalePanel,
+  PreparedStlButton,
+  type SupportStatus,
+} from "@/components/nodes/ModelPrepControls";
 
 // ============================================================================
-// VISOR 3D RÁPIDO (SOLO LECTURA)
+// VISOR 3D DEL NODO
 // Muestra piezas .stl, .obj y .3mf dentro de la tarjeta del nodo.
 // - Girar: arrastrar con el mouse o el dedo. Zoom: rueda o pellizco.
-// - El usuario NO puede escalar ni modificar la pieza: las medidas que se
-//   muestran son las reales del archivo y son solo informativas.
+// - Escala en tiempo real (% o mm por eje) sobre una cama de 150 × 150 mm.
+// - Soportes automáticos (45°) en verde translúcido y descarga del .stl
+//   preparado (escala aplicada + pilares fusionados).
+// - El archivo original nunca se modifica: la escala vive en el nodo.
 // - Three.js se descarga únicamente cuando hay una pieza 3D que mostrar.
 // ============================================================================
 
@@ -41,6 +51,9 @@ export function formatMm(value: number): string {
 const AUTO_LOAD_LOCAL_LIMIT_BYTES = 50 * 1024 * 1024;
 const AUTO_LOAD_CLOUD_LIMIT_BYTES = 15 * 1024 * 1024;
 
+/** Cama de la FlashForge Adventurer 3 (referencia visual en el visor). */
+const BED_MM = 150;
+
 /** Cola global: una sola pieza se descarga y procesa a la vez. */
 let loadChain: Promise<void> = Promise.resolve();
 
@@ -53,17 +66,41 @@ interface Model3DPreviewProps {
   extension: string;
   fileSizeBytes: number;
   variant: "canvas" | "stack";
-  /** Avisa las medidas reales cuando la pieza termina de cargar. */
+  /** Avisa las medidas ORIGINALES (al 100 %) cuando la pieza termina de cargar. */
   onDimensions?: (dimensions: ModelDimensions) => void;
+  /** Escala guardada en el nodo. */
+  scale?: ModelScale;
+  /** Sin esta función el visor es de solo lectura (sin controles de escala). */
+  onScaleChange?: (scale: ModelScale) => void;
+  supportsEnabled?: boolean;
+  onSupportsChange?: (enabled: boolean) => void;
+  /** Nombre de la pieza para el .stl preparado. */
+  pieceName?: string;
 }
 
 type LoadResult =
   | { key: string; phase: "ready"; dimensions: ModelDimensions }
   | { key: string; phase: "error"; message: string };
 
+type SupportResultState =
+  | { key: string; phase: "ready"; soup: Float32Array; count: number; capped: boolean }
+  | { key: string; phase: "error" };
+
+/** Lo que el componente puede pedirle a la escena Three.js ya montada. */
+interface ViewerApi {
+  applyScale: (scale: ModelScale) => void;
+  setSupports: (soup: Float32Array | null) => void;
+  /** Triángulos de la pieza original (sin escalar), calculados una sola vez. */
+  getSoup: () => Promise<Float32Array>;
+}
+
 function disposeMaterial(material: Material | Material[]) {
   if (Array.isArray(material)) material.forEach((m) => m.dispose());
   else material.dispose();
+}
+
+function cssColor(name: string, fallback: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
 }
 
 export const Model3DPreview: React.FC<Model3DPreviewProps> = ({
@@ -72,13 +109,25 @@ export const Model3DPreview: React.FC<Model3DPreviewProps> = ({
   fileSizeBytes,
   variant,
   onDimensions,
+  scale = IDENTITY_SCALE,
+  onScaleChange,
+  supportsEnabled = false,
+  onSupportsChange,
+  pieceName = "pieza",
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const recenterRef = useRef<() => void>(() => {});
+  const viewerRef = useRef<ViewerApi | null>(null);
   const onDimensionsRef = useRef(onDimensions);
   useEffect(() => {
     onDimensionsRef.current = onDimensions;
   }, [onDimensions]);
+
+  const [sx, sy, sz] = scale;
+  const scaleRef = useRef<ModelScale>([sx, sy, sz]);
+  useEffect(() => {
+    scaleRef.current = [sx, sy, sz];
+  }, [sx, sy, sz]);
 
   const ext = extension.toLowerCase();
   const key = `${ext}|${url}`;
@@ -109,7 +158,9 @@ export const Model3DPreview: React.FC<Model3DPreviewProps> = ({
   const wantsLoad = !isHeavy || manualKey === key;
   const shouldLoad = wantsLoad && hasBeenVisible;
   const current = result?.key === key ? result : null;
+  const isReady = current?.phase === "ready";
 
+  // --- Montaje de la escena ---------------------------------------------------
   useEffect(() => {
     const container = containerRef.current;
     if (!shouldLoad || !container || !url) return;
@@ -120,21 +171,19 @@ export const Model3DPreview: React.FC<Model3DPreviewProps> = ({
     const load = async () => {
       const THREE = await import("three");
       const { OrbitControls } = await import("three/examples/jsm/controls/OrbitControls.js");
+      const { createSupportMesh } = await import("@/lib/3d/autoSupports");
 
       const response = await fetch(url);
       if (!response.ok) throw new Error("download");
 
-      const accent =
-        getComputedStyle(document.documentElement).getPropertyValue("--accent-primary").trim() ||
-        "#C95A3B";
       const partMaterial = new THREE.MeshStandardMaterial({
-        color: new THREE.Color(accent),
+        color: new THREE.Color(cssColor("--accent-primary", "#C95A3B")),
         roughness: 0.6,
         metalness: 0.08,
         side: THREE.DoubleSide,
       });
 
-      // --- 1. Leer la geometría (nunca se modifica) -------------------------
+      // --- 1. Leer la geometría (el archivo nunca se modifica) --------------
       let model: Object3D;
       if (ext === "stl") {
         const { STLLoader } = await import("three/examples/jsm/loaders/STLLoader.js");
@@ -171,35 +220,37 @@ export const Model3DPreview: React.FC<Model3DPreviewProps> = ({
         return;
       }
 
-      // --- 2. Medidas envolventes reales ------------------------------------
-      const box = new THREE.Box3().setFromObject(model);
-      const size = box.getSize(new THREE.Vector3());
-      if (box.isEmpty() || !Number.isFinite(size.length()) || size.length() === 0) {
+      // --- 2. Medidas envolventes reales (exactas, vértice a vértice) -------
+      const box = new THREE.Box3().setFromObject(model, true);
+      const baseSize = box.getSize(new THREE.Vector3());
+      if (box.isEmpty() || !Number.isFinite(baseSize.length()) || baseSize.length() === 0) {
         disposeModel();
         throw new Error("empty");
       }
-      const center = box.getCenter(new THREE.Vector3());
-      const radius = size.length() / 2;
+      const baseCenter = box.getCenter(new THREE.Vector3());
+      const baseMinZ = box.min.z;
 
       // --- 3. Escena (eje Z hacia arriba, como en las impresoras 3D) --------
+      //   stage ─┬─ partGroup (escala + apoyo en Z = 0) ── model
+      //          ├─ soportes (ya calculados en el sistema de la escena)
+      //          └─ cama de 150 × 150 mm
       const scene = new THREE.Scene();
-      const holder = new THREE.Group();
-      holder.position.copy(center).multiplyScalar(-1);
-      holder.add(model);
-      scene.add(holder);
+      const stage = new THREE.Group();
+      const partGroup = new THREE.Group();
+      partGroup.add(model);
+      stage.add(partGroup);
+      scene.add(stage);
 
-      const gridSize = Math.max(size.x, size.y) * 1.6 || radius * 2;
-      const grid = new THREE.GridHelper(gridSize, 10, 0x8a8a8a, 0x8a8a8a);
+      const grid = new THREE.GridHelper(BED_MM, 15, 0x8a8a8a, 0x8a8a8a);
       grid.rotation.x = Math.PI / 2;
-      grid.position.z = -size.z / 2;
       grid.material.transparent = true;
       grid.material.opacity = 0.3;
-      scene.add(grid);
+      stage.add(grid);
 
       const width = Math.max(container.clientWidth, 1);
       const height = Math.max(container.clientHeight, 1);
 
-      const camera = new THREE.PerspectiveCamera(40, width / height, radius / 100, radius * 200);
+      const camera = new THREE.PerspectiveCamera(40, width / height, 0.1, 10000);
       camera.up.set(0, 0, 1);
       scene.add(camera);
       scene.add(new THREE.HemisphereLight(0xffffff, 0x555555, 1.3));
@@ -218,23 +269,74 @@ export const Model3DPreview: React.FC<Model3DPreviewProps> = ({
       controls.enableDamping = true;
       controls.dampingFactor = 0.1;
       controls.zoomSpeed = 0.7;
-      controls.minDistance = radius * 0.4;
-      controls.maxDistance = radius * 12;
 
       let needsRender = true;
+      let radius = baseSize.length() / 2;
+      const scaledSize = new THREE.Vector3();
+
+      /** Aplica la escala sin mover la cámara: se ve crecer la pieza sobre la cama. */
+      const applyScale = (next: ModelScale) => {
+        partGroup.scale.set(next[0], next[1], next[2]);
+        partGroup.position.set(-baseCenter.x * next[0], -baseCenter.y * next[1], -baseMinZ * next[2]);
+        scaledSize.set(baseSize.x * next[0], baseSize.y * next[1], baseSize.z * next[2]);
+        radius = scaledSize.length() / 2 || 1;
+
+        const target = new THREE.Vector3(0, 0, scaledSize.z / 2);
+        camera.position.add(target.clone().sub(controls.target));
+        controls.target.copy(target);
+        const reach = Math.max(radius, BED_MM / 2);
+        camera.near = Math.max(radius / 200, 0.01);
+        camera.far = reach * 400;
+        camera.updateProjectionMatrix();
+        controls.minDistance = radius * 0.4;
+        controls.maxDistance = reach * 12;
+        controls.update();
+        needsRender = true;
+      };
 
       /** Coloca la cámara para que la pieza completa quede centrada. */
       const recenter = () => {
         const verticalFov = (camera.fov * Math.PI) / 180;
         const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * camera.aspect);
         const distance = (radius / Math.sin(Math.min(verticalFov, horizontalFov) / 2)) * 1.1;
-        camera.position.set(1, -1.25, 0.85).normalize().multiplyScalar(distance);
-        controls.target.set(0, 0, 0);
+        controls.target.set(0, 0, scaledSize.z / 2);
+        camera.position
+          .set(1, -1.25, 0.85)
+          .normalize()
+          .multiplyScalar(distance)
+          .add(controls.target);
         controls.update();
         needsRender = true;
       };
+
+      applyScale(scaleRef.current);
       recenter();
       recenterRef.current = recenter;
+
+      // --- 4. Soportes ------------------------------------------------------
+      const supportColor = cssColor("--accent-success", "#4F6B58");
+      let supportMesh: ReturnType<typeof createSupportMesh> | null = null;
+      const setSupports = (soup: Float32Array | null) => {
+        if (supportMesh) {
+          stage.remove(supportMesh);
+          supportMesh.geometry.dispose();
+          supportMesh.material.dispose();
+          supportMesh = null;
+        }
+        if (soup && soup.length > 0) {
+          supportMesh = createSupportMesh(THREE, soup, supportColor);
+          stage.add(supportMesh);
+        }
+        needsRender = true;
+      };
+
+      let soupPromise: Promise<Float32Array> | null = null;
+      const getSoup = () => {
+        soupPromise ??= import("@/lib/slicer/meshLoader").then(({ extractTriangleSoup }) =>
+          extractTriangleSoup(model, THREE, { relativeTo: partGroup })
+        );
+        return soupPromise;
+      };
 
       const resizeObserver = new ResizeObserver(() => {
         const w = Math.max(container.clientWidth, 1);
@@ -258,11 +360,15 @@ export const Model3DPreview: React.FC<Model3DPreviewProps> = ({
       };
       tick();
 
+      viewerRef.current = { applyScale, setSupports, getSoup };
+
       cleanup = () => {
         cancelAnimationFrame(frame);
         resizeObserver.disconnect();
         controls.dispose();
         recenterRef.current = () => {};
+        viewerRef.current = null;
+        setSupports(null);
         disposeModel();
         grid.geometry.dispose();
         grid.material.dispose();
@@ -272,9 +378,9 @@ export const Model3DPreview: React.FC<Model3DPreviewProps> = ({
       };
 
       const dimensions: ModelDimensions = {
-        widthMm: size.x,
-        depthMm: size.y,
-        heightMm: size.z,
+        widthMm: baseSize.x,
+        depthMm: baseSize.y,
+        heightMm: baseSize.z,
       };
       setResult({ key, phase: "ready", dimensions });
       onDimensionsRef.current?.(dimensions);
@@ -305,8 +411,84 @@ export const Model3DPreview: React.FC<Model3DPreviewProps> = ({
     };
   }, [key, url, ext, shouldLoad]);
 
-  const dimensions = current?.phase === "ready" ? current.dimensions : null;
+  // --- Escala en vivo ---------------------------------------------------------
+  useEffect(() => {
+    if (isReady) viewerRef.current?.applyScale([sx, sy, sz]);
+  }, [isReady, sx, sy, sz]);
+
+  // --- Soportes automáticos (se recalculan al cambiar la escala) -------------
+  const [supportResult, setSupportResult] = useState<SupportResultState | null>(null);
+  const supportKey = isReady && supportsEnabled ? `${key}|${sx},${sy},${sz}` : null;
+  const supportView = supportKey && supportResult?.key === supportKey ? supportResult : null;
+
+  useEffect(() => {
+    const api = viewerRef.current;
+    // Mientras se recalcula no se muestran pilares de otra escala.
+    api?.setSupports(null);
+    if (!supportKey || !api) return;
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const { generateAutoSupports, scaleAndGroundSoup } = await import("@/lib/3d/autoSupports");
+          const grounded = scaleAndGroundSoup(await api.getSoup(), [sx, sy, sz]);
+          const supports = await generateAutoSupports(grounded, { signal: controller.signal });
+          if (controller.signal.aborted) return;
+          api.setSupports(supports.soup);
+          setSupportResult({
+            key: supportKey,
+            phase: "ready",
+            soup: supports.soup,
+            count: supports.pillars.length,
+            capped: supports.capped,
+          });
+        } catch {
+          if (!controller.signal.aborted) setSupportResult({ key: supportKey, phase: "error" });
+        }
+      })();
+    }, 200);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [supportKey, sx, sy, sz]);
+
+  const supportStatus: SupportStatus = !supportsEnabled
+    ? { phase: "off" }
+    : !supportView
+      ? { phase: "computing" }
+      : supportView.phase === "error"
+        ? { phase: "error" }
+        : { phase: "ready", count: supportView.count, capped: supportView.capped };
+
+  // --- Descarga del .stl preparado ---------------------------------------------
+  const { pending: exporting, run: runExport } = useSubmitGuard();
+  const exportStl = () =>
+    void runExport(async () => {
+      const api = viewerRef.current;
+      if (!api) return;
+      const currentScale: ModelScale = [sx, sy, sz];
+      const soup = await api.getSoup();
+      let supportsSoup: Float32Array | null = null;
+      if (supportsEnabled) {
+        if (supportView?.phase === "ready") {
+          supportsSoup = supportView.soup;
+        } else {
+          const { generateAutoSupports, scaleAndGroundSoup } = await import("@/lib/3d/autoSupports");
+          supportsSoup = (await generateAutoSupports(scaleAndGroundSoup(soup, currentScale))).soup;
+        }
+      }
+      const { downloadPreparedStl } = await import("@/lib/3d/exportStl");
+      await downloadPreparedStl({ soup, scale: currentScale, supportsSoup, pieceName });
+    });
+
+  const baseDimensions = current?.phase === "ready" ? current.dimensions : null;
+  const shownDimensions = baseDimensions ? scaleDimensions(baseDimensions, scale) : null;
+  const scaled = !isIdentityScale(scale);
   const viewerHeight = variant === "stack" ? "h-56" : "h-44";
+  const touch = variant === "stack" ? "min-h-[44px]" : "min-h-[34px]";
 
   if (!wantsLoad) {
     return (
@@ -364,20 +546,24 @@ export const Model3DPreview: React.FC<Model3DPreviewProps> = ({
         )}
       </div>
 
-      {dimensions && (
+      {shownDimensions && (
         <div
           className="rounded-xl bg-andros-canvas border border-andros-border px-3 py-2"
-          title="Medidas reales del archivo. No se pueden modificar aquí."
+          title={
+            scaled
+              ? "Medidas con la escala aplicada. El archivo original no se modifica."
+              : "Medidas reales del archivo."
+          }
         >
           <div className="flex items-center justify-between text-[10px] text-andros-muted">
-            <span>Medidas reales de la pieza</span>
-            <span>Solo lectura</span>
+            <span>{scaled ? "Medidas a escala" : "Medidas reales de la pieza"}</span>
+            <span>Cama 150 × 150 mm</span>
           </div>
           <div className="mt-1.5 grid grid-cols-3 gap-2 text-center font-mono tabular-nums">
             {[
-              { label: "Ancho", value: dimensions.widthMm },
-              { label: "Profundidad", value: dimensions.depthMm },
-              { label: "Alto", value: dimensions.heightMm },
+              { label: "Ancho", value: shownDimensions.widthMm },
+              { label: "Profundidad", value: shownDimensions.depthMm },
+              { label: "Alto", value: shownDimensions.heightMm },
             ].map((item) => (
               <div key={item.label}>
                 <p className="text-xs font-semibold text-andros-primary">
@@ -388,6 +574,27 @@ export const Model3DPreview: React.FC<Model3DPreviewProps> = ({
             ))}
           </div>
         </div>
+      )}
+
+      {baseDimensions && onScaleChange && (
+        <ModelScalePanel baseDims={baseDimensions} scale={scale} onChange={onScaleChange} variant={variant} />
+      )}
+
+      {baseDimensions && onSupportsChange && (
+        <AutoSupportsToggle
+          enabled={supportsEnabled}
+          onChange={onSupportsChange}
+          status={supportStatus}
+          variant={variant}
+        />
+      )}
+
+      {baseDimensions && onScaleChange && (
+        <PreparedStlButton
+          onClick={exportStl}
+          pending={exporting}
+          className={`w-full ${touch} px-3 rounded-xl border border-andros-border-active bg-andros-card text-xs font-semibold text-andros-primary flex items-center justify-center gap-2 hover:border-andros-accent active:scale-[0.98] spring-micro disabled:opacity-60`}
+        />
       )}
     </div>
   );
