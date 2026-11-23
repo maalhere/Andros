@@ -126,8 +126,11 @@ export default function PrivacidadPage() {
           tu @usuario y tu foto de perfil, y el contenido de los espacios que compartes con ellos.
         </li>
         <li>
-          <strong>Google</strong>: inicio de sesión (OAuth) y, si usas el Oráculo o los nodos IA
-          con Gemini, el texto de tu petición y el contexto del lienzo que la acompaña.
+          <strong>Google</strong>: inicio de sesión (OAuth) y, si usas el Oráculo, los nodos IA o el
+          generador de tableros («¿Qué evento o proyecto vas a organizar?») con Gemini, el texto de
+          tu petición y, en el Oráculo y los nodos IA, el contexto del lienzo que la acompaña. Las
+          plantillas que guardas desde «Guardar como plantilla» se quedan solo en el
+          almacenamiento local de tu navegador.
         </li>
         <li>
           <strong>OpenAI y Anthropic</strong>: solo si eliges esos modelos en un nodo IA con tu

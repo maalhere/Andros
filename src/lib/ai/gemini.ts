@@ -72,7 +72,13 @@ export interface GeminiCallOptions {
   budgetMs?: number;
   /** Temperatura (por defecto 0.4). */
   temperature?: number;
+  /** Tiempo máximo por modelo (ms). Por defecto 25 s; las tareas rápidas pasan antes al siguiente. */
+  attemptTimeoutMs?: number;
+  /** Razonamiento de los modelos Gemini 3: «minimal» para tareas de formato rápido (por defecto «low»). */
+  thinkingLevel?: ThinkingLevel;
 }
+
+export type ThinkingLevel = "minimal" | "low";
 
 const keyScope = (apiKey: string) => createHash("sha256").update(apiKey).digest("hex").slice(0, 12);
 
@@ -229,7 +235,7 @@ export async function callGemini(
     const remaining = deadline - Date.now();
     if (remaining < 4_000) break;
     try {
-      const raw = await callGeminiModel(model, apiKey, req, Math.min(ATTEMPT_TIMEOUT_MS, remaining), true, options.temperature);
+      const raw = await callGeminiModel(model, apiKey, req, Math.min(options.attemptTimeoutMs ?? ATTEMPT_TIMEOUT_MS, remaining), options.thinkingLevel ?? "low", options.temperature);
       coolingModels.delete(`${scope}:${model}`);
       return { raw, model };
     } catch (error) {
@@ -253,9 +259,9 @@ export async function callGemini(
 }
 
 /** Razonamiento acotado: sin esto los modelos Gemini 3 pueden tardar más de un minuto. */
-function thinkingConfigFor(model: string): Record<string, unknown> | undefined {
+function thinkingConfigFor(model: string, level: ThinkingLevel = "low"): Record<string, unknown> | undefined {
   if (model.startsWith("gemini-2.5")) return { thinkingBudget: 1024 };
-  if (/^gemini-[3-9]/.test(model)) return { thinkingLevel: "low" };
+  if (/^gemini-[3-9]/.test(model)) return { thinkingLevel: level };
   // Alias "-latest" y modelos antiguos: se deja el valor por defecto del modelo.
   return undefined;
 }
@@ -265,11 +271,11 @@ async function callGeminiModel(
   apiKey: string,
   req: ModelRequest,
   timeoutMs: number,
-  withThinking = true,
+  thinking: ThinkingLevel | false = "low",
   temperature = 0.4
 ): Promise<unknown> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
-  const thinkingConfig = withThinking ? thinkingConfigFor(model) : undefined;
+  const thinkingConfig = thinking ? thinkingConfigFor(model, thinking) : undefined;
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
@@ -295,7 +301,8 @@ async function callGeminiModel(
     const detail = await res.text().catch(() => "");
     // Modelo que no acepta la configuración de razonamiento: un reintento sin ella.
     if (res.status === 400 && thinkingConfig && /thinking/i.test(detail)) {
-      return callGeminiModel(model, apiKey, req, timeoutMs, false, temperature);
+      // Si pidió «minimal» y no lo admite, se prueba «low» antes de quitar el razonamiento.
+      return callGeminiModel(model, apiKey, req, timeoutMs, thinking === "minimal" ? "low" : false, temperature);
     }
     throw new GeminiHttpError(res.status, detail);
   }

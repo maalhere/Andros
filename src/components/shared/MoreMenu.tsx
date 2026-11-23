@@ -9,6 +9,7 @@ import {
   Gauge,
   Sparkle,
   FolderArchive,
+  LayoutTemplate,
   CircleHelp,
   GraduationCap,
   KeyRound,
@@ -33,6 +34,7 @@ import { selectIncomingCount, useSocialStore } from "@/store/useSocialStore";
 import { clearInkWithUndo, resetWorkspaceWithUndo } from "@/lib/canvas/undoable";
 import { LEGAL_LINKS } from "@/lib/site";
 import { openCookiePreferences } from "@/lib/consent";
+import { saveWorkspaceAsTemplate } from "@/lib/templates/applyBlueprint";
 
 // ============================================================================
 // ANDROS — MENÚ "⋯ MÁS OPCIONES" (barra superior)
@@ -143,9 +145,102 @@ const ClearWorkspaceDialog: React.FC<{ onClose: () => void }> = ({ onClose }) =>
   );
 };
 
+/** Pide el nombre y guarda las tarjetas de nota y cálculo del espacio como plantilla local. */
+const SaveTemplateDialog: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  const [name, setName] = useState("Mi plantilla");
+  const cardCount = useWorkspaceStore(
+    (s) => s.nodes.filter((n) => n.type === "sketch-note-node" || n.type === "calc-latex-node").length
+  );
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      e.stopPropagation();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [onClose]);
+
+  const save = () => {
+    if (!name.trim()) return;
+    if (saveWorkspaceAsTemplate(name.trim())) onClose();
+  };
+
+  return createPortal(
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      onClick={onClose}
+      className="fixed inset-0 z-[70] bg-black/50 backdrop-blur-xs flex items-end md:items-center justify-center p-3 md:p-6"
+    >
+      <motion.div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="save-template-title"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: 12 }}
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-sm rounded-3xl bg-andros-card border border-andros-border shadow-sheet-light dark:shadow-sheet-dark p-5"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <h2 id="save-template-title" className="text-base font-semibold text-andros-primary">
+            Guardar como plantilla
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Cerrar"
+            className="min-w-[44px] min-h-[44px] -mr-2.5 -mt-2 rounded-xl flex items-center justify-center text-andros-muted hover:text-andros-primary hover:bg-andros-border/40 spring-micro"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <p className="mt-1.5 text-xs leading-relaxed text-andros-muted">
+          Se guardan las <span className="tabular-nums">{cardCount}</span> tarjeta(s) de nota y cálculo con sus cables, en este
+          navegador. La próxima vez las aplicas en 1 clic desde un espacio vacío, sin gastar IA. Las tareas vuelven sin marcar.
+        </p>
+        <form
+          className="mt-4 space-y-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            save();
+          }}
+        >
+          <label htmlFor="save-template-name" className="block text-xs font-medium text-andros-primary">
+            Nombre de la plantilla
+          </label>
+          <input
+            id="save-template-name"
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            maxLength={80}
+            autoComplete="off"
+            className="w-full h-11 px-3 rounded-xl bg-andros-canvas border border-andros-border focus:border-andros-accent outline-none text-sm text-andros-primary"
+          />
+          <button
+            type="submit"
+            disabled={!name.trim() || cardCount === 0}
+            className="w-full h-11 rounded-xl bg-andros-accent-fill text-white text-sm font-semibold active:scale-[0.98] spring-micro disabled:opacity-40"
+          >
+            Guardar plantilla
+          </button>
+          <button type="button" onClick={onClose} className="w-full h-10 rounded-xl text-sm text-andros-muted hover:text-andros-primary spring-micro">
+            Cancelar
+          </button>
+        </form>
+      </motion.div>
+    </motion.div>,
+    document.body,
+  );
+};
+
 export const MoreMenu: React.FC = () => {
   const [open, setOpen] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const incomingRequests = useSocialStore(selectIncomingCount);
 
@@ -240,6 +335,12 @@ export const MoreMenu: React.FC = () => {
       onSelect: () => useOnboardingStore.getState().start(),
     },
     {
+      id: "save-template",
+      label: "Guardar como plantilla",
+      icon: <LayoutTemplate className="w-4 h-4" />,
+      onSelect: () => setSaveTemplateOpen(true),
+    },
+    {
       id: "clear",
       label: "Limpiar espacio de trabajo",
       icon: <Trash2 className="w-4 h-4" />,
@@ -330,7 +431,8 @@ export const MoreMenu: React.FC = () => {
       </AnimatePresence>
 
       <AnimatePresence>
-        {confirmClear && <ClearWorkspaceDialog onClose={() => setConfirmClear(false)} />}
+        {confirmClear && <ClearWorkspaceDialog key="clear" onClose={() => setConfirmClear(false)} />}
+        {saveTemplateOpen && <SaveTemplateDialog key="save-template" onClose={() => setSaveTemplateOpen(false)} />}
       </AnimatePresence>
     </div>
   );

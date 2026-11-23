@@ -31,6 +31,7 @@ import { FileNodeView } from "@/components/nodes/FileNodeView";
 import { ResourceLinkNodeView } from "@/components/nodes/ResourceLinkNode";
 import { CodeLabNodeView } from "@/components/nodes/CodeLabNode";
 import { AiChatNodeView } from "@/components/nodes/AiChatNode";
+import { CalcSheetEditor, NoteTextEditor } from "@/components/nodes/NodeEditors";
 
 interface EngineeringNodeProps {
   node: EngineeringNodeData;
@@ -91,9 +92,12 @@ const SketchNotePreview: React.FC<{ node: SketchNoteEngineeringNode }> = ({
 
   if (isEmpty) {
     return (
-      <p className="py-3 text-xs leading-relaxed text-andros-muted">
-        Cuaderno vacío: todavía no tiene texto, lista de verificación ni trazos.
-      </p>
+      <div className="py-3 space-y-2.5">
+        <p className="text-xs leading-relaxed text-andros-muted">
+          Cuaderno vacío: todavía no tiene texto, lista de verificación ni trazos.
+        </p>
+        <NoteTextEditor nodeId={node.id} data={data} />
+      </div>
     );
   }
 
@@ -162,6 +166,8 @@ const SketchNotePreview: React.FC<{ node: SketchNoteEngineeringNode }> = ({
         </div>
       )}
 
+      <NoteTextEditor nodeId={node.id} data={data} />
+
       {data.strokes.length > 0 && (
         <svg
           viewBox={`0 0 ${data.canvasSize.width} ${data.canvasSize.height}`}
@@ -216,66 +222,19 @@ const SketchNotePreview: React.FC<{ node: SketchNoteEngineeringNode }> = ({
 // Vista previa del Nodo Tipo 3 (Hoja de cálculo + LaTeX)
 // ----------------------------------------------------------------------------
 
-const COLUMN_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-
 const CalcLatexPreview: React.FC<{ node: CalcLatexEngineeringNode }> = ({
   node,
 }) => {
   const data = node.calcLatexData;
-  const cellCount = Object.keys(data.gridCells).length;
-
-  if (cellCount === 0 && data.latexEquations.length === 0) {
-    return (
-      <p className="py-3 text-xs leading-relaxed text-andros-muted">
-        {data.justificationText ||
-          "Hoja vacía: todavía no tiene celdas ni ecuaciones."}
-      </p>
-    );
-  }
-
-  const rows = Array.from(
-    { length: Math.min(data.gridSize.rows, 6) },
-    (_, index) => index + 1
-  );
-  const columns = COLUMN_LETTERS.slice(0, Math.min(data.gridSize.columns, 3)).split("");
 
   return (
     <div className="py-3 space-y-3">
-      {cellCount > 0 && (
-        <div className="rounded-xl border border-andros-border overflow-hidden">
-          <table className="w-full text-[11px] font-mono tabular-telemetry tabular-nums border-collapse">
-            <tbody>
-              {rows.map((row) => (
-                <tr key={row} className="border-b border-andros-border last:border-b-0">
-                  {columns.map((column, columnIndex) => {
-                    const cell = data.gridCells[`${column}${row}`];
-                    const isFormula = cell?.raw.startsWith("=") ?? false;
-                    return (
-                      <td
-                        key={column}
-                        title={isFormula ? cell?.raw : undefined}
-                        className={`px-2 py-1 truncate max-w-[120px] ${
-                          columnIndex === 0 ? "text-left" : "text-right"
-                        } ${
-                          row === 1
-                            ? "bg-andros-canvas text-andros-muted"
-                            : isFormula
-                              ? "text-andros-accent-ink font-semibold"
-                              : columnIndex === 0
-                                ? "text-andros-muted"
-                                : "text-andros-primary"
-                        }`}
-                      >
-                        {cell?.computed ?? ""}
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      {data.justificationText && (
+        <p className="text-xs leading-relaxed text-andros-muted">{data.justificationText}</p>
       )}
+
+      {/* La hoja siempre es editable: escribe un monto o una fórmula y todo se recalcula. */}
+      <CalcSheetEditor nodeId={node.id} data={data} />
 
       {data.latexEquations.length > 0 && (
         <div className="space-y-1.5">

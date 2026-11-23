@@ -7,6 +7,8 @@ import { useTabsBarVisible } from "@/store/useTabsStore";
 import { useIsExpert } from "@/store/useSettingsStore";
 import { NodeArchetype } from "@/types/workspace";
 import { EngineeringNode } from "@/components/shared/EngineeringNode";
+import { EmptyWorkspaceStarter, useStarterVisible } from "@/components/shared/EmptyWorkspaceStarter";
+import { useStarterStore } from "@/store/useStarterStore";
 
 const FILTER_TABS: { id: "all" | NodeArchetype; label: string }[] = [
   { id: "all", label: "Todos" },
@@ -30,6 +32,9 @@ export const TacticalCardStack: React.FC = () => {
   const selectedNodeId = useWorkspaceStore((s) => s.selectedNodeId);
   const selectNode = useWorkspaceStore((s) => s.selectNode);
   const hasTabs = useTabsBarVisible();
+  const starterVisible = useStarterVisible();
+  const reopenStarter = useStarterStore((s) => s.reopen);
+  const starterDismissed = useStarterStore((s) => s.dismissed);
 
   const filteredNodes =
     mobileCategoryFilter === "all"
@@ -108,7 +113,9 @@ export const TacticalCardStack: React.FC = () => {
 
       {/* Pila de Tarjetas de Ingeniería */}
       <div className="flex flex-col gap-3">
-        {filteredNodes.length === 0 ? (
+        {nodes.length === 0 && starterVisible ? (
+          <EmptyWorkspaceStarter variant="stack" />
+        ) : filteredNodes.length === 0 ? (
           <div className="rounded-2xl bg-andros-card border border-andros-border p-8 text-center space-y-2">
             <Layers className="w-6 h-6 text-andros-muted mx-auto" />
             <p className="text-xs text-andros-muted">
@@ -118,6 +125,15 @@ export const TacticalCardStack: React.FC = () => {
                   : "Tu espacio está vacío. Pulsa “Agregar” abajo y crea tu primera tarjeta para organizar tu evento o equipo."
                 : "No hay nada en esta categoría todavía."}
             </p>
+            {nodes.length === 0 && starterDismissed && (
+              <button
+                type="button"
+                onClick={reopenStarter}
+                className="min-h-11 px-3 text-xs font-medium text-andros-accent-ink underline underline-offset-2 active:scale-[0.96] spring-micro"
+              >
+                Ver plantillas y generador de tablero
+              </button>
+            )}
           </div>
         ) : (
           filteredNodes.map((node) => (

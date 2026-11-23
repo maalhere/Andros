@@ -35,7 +35,7 @@ import { useSocialSync } from "@/lib/social/useSocialSync";
 import { UsernameSetupModal } from "@/components/social/UsernameSetupModal";
 import { FriendsModal } from "@/components/social/FriendsModal";
 import { ShareWorkspaceModal } from "@/components/social/ShareWorkspaceModal";
-import { SimpleStartGuide } from "@/components/shared/SimpleStartGuide";
+import { EmptyWorkspaceStarter } from "@/components/shared/EmptyWorkspaceStarter";
 
 export default function AndrosWorkspacePage() {
   const { isMobile, isMounted } = useDeviceLayout();
@@ -100,7 +100,7 @@ export default function AndrosWorkspacePage() {
         <>
           <SpatialCanvas />
           <FloatingHudDock />
-          <SimpleStartGuide />
+          <EmptyWorkspaceStarter variant="canvas" />
         </>
       )}
 

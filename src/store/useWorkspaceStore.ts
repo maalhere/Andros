@@ -27,6 +27,7 @@ import {
   SpawnNodeInput,
   ThemeMode,
 } from "@/types/workspace";
+import { SHEET_MAX_ROWS } from "@/lib/canvas/sheet";
 
 // ============================================================================
 // 1. CONTRATO DEL STORE
@@ -107,6 +108,8 @@ interface WorkspaceState {
    * 1) archivos fuente y modelos 3D, 2) textos y análisis a la derecha de su
    * archivo, 3) enlaces, fuentes y cálculos. Devuelve cuántos nodos quedaron en cada zona.
    */
+  /** Inserta un tablero completo (nodos ya posicionados + cables) en una sola operación. */
+  aiInsertBoard: (nodes: EngineeringNodeData[], connections: NodeConnection[]) => void;
   aiApplyHumanLayout: (
     assignments?: { nodeId: string; zone: HumanLayoutZone }[]
   ) => HumanLayoutResult;
@@ -234,7 +237,7 @@ export interface AiTextBlockInput {
  * (`Date.now()` solo se repetiría y pisaría nodos).
  */
 let aiIdCounter = 0;
-function nextUniqueId(prefix: string): string {
+export function nextUniqueId(prefix: string): string {
   aiIdCounter += 1;
   return `${prefix}-${Date.now().toString(36)}-${aiIdCounter}-${Math.random()
     .toString(36)
@@ -637,7 +640,7 @@ export function parseAiTextContent(content: string): {
 }
 
 /** Versión HTML de los bloques (para exportar o renderizar con formato rico). */
-function textBlocksToHtml(blocks: NoteTextBlock[]): string {
+export function textBlocksToHtml(blocks: NoteTextBlock[]): string {
   let html = "";
   let inList = false;
   for (const block of blocks) {
@@ -724,7 +727,7 @@ function defaultHumanZone(node: EngineeringNodeData): HumanLayoutZone {
  * Altura estimada de un nodo ya renderizado. El store no ve el DOM, así que
  * se aproxima según el contenido para que el ordenamiento no encime tarjetas.
  */
-function estimateNodeHeight(node: EngineeringNodeData): number {
+export function estimateNodeHeight(node: EngineeringNodeData): number {
   const CHARS_PER_LINE = 46;
   const LINE = 18;
   let height = 32 + 46 + 38; // padding + cabecera + pie
@@ -760,7 +763,7 @@ function estimateNodeHeight(node: EngineeringNodeData): number {
       height += 24 + Math.ceil((data.justificationText.length || 40) / CHARS_PER_LINE) * LINE;
     } else {
       height += 24;
-      if (cells > 0) height += Math.min(data.gridSize.rows, 6) * 23 + 4;
+      if (cells > 0) height += Math.min(data.gridSize.rows, SHEET_MAX_ROWS) * 30 + 4;
       height += Math.min(data.latexEquations.length, 2) * 46;
     }
   } else if (node.type === "resource-link-node") {
@@ -1668,6 +1671,16 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }));
     return true;
   },
+
+  aiInsertBoard: (nodes, connections) =>
+    set((state) => ({
+      // Los nuevos van primero: en el teléfono la pila respeta este orden (prioridad).
+      nodes: [...nodes, ...state.nodes],
+      connections: [...state.connections, ...connections],
+      selectedNodeId: null,
+      selectedConnectionId: null,
+      connectingFrom: null,
+    })),
 
   aiApplyHumanLayout: (assignments) => {
     const { nodes, connections } = get();

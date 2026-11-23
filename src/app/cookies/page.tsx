@@ -43,6 +43,13 @@ export default function CookiesPage() {
               <td>Hasta que las borres</td>
             </tr>
             <tr>
+              <td>
+                Almacenamiento local: plantillas de tablero propias (<code>andros_custom_templates</code>)
+              </td>
+              <td>Reutilizar la estructura de un evento anterior sin gastar consultas de IA</td>
+              <td>Hasta que las borres</td>
+            </tr>
+            <tr>
               <td>Almacenamiento local: fuentes guardadas, caché de búsqueda y Arena sin cuenta</td>
               <td>Funcionar sin conexión y sin cuenta</td>
               <td>Hasta que lo borres</td>
