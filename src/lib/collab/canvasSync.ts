@@ -9,9 +9,16 @@
 // Recepción: aplica el cambio dentro de `runAsRemoteCollab`, así:
 //   · este mismo módulo NO lo re-emite (nunca hay eco ni bucle infinito), y
 //   · `useCloudSync` decide si lo guarda (solo el dueño del espacio).
+//
+// Alertas anti-malentendidos (`useImpactStore`): cada alta o baja LOCAL viaja
+// como `alert:upsert` / `alert:resolve` con el mismo `senderId`; las que llegan
+// se aplican con la misma marca remota, así que tampoco rebotan. Solo viven en
+// la sesión (no se guardan en la nube).
 // ============================================================================
 
 import type {
+  AlertResolvePayload,
+  AlertUpsertPayload,
   CanvasSnapshotPayload,
   EdgeDeletePayload,
   EdgeUpsertPayload,
@@ -20,6 +27,8 @@ import type {
 } from "@/types/collab";
 import type { EngineeringNodeData, NodeConnection } from "@/types/workspace";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
+import { useImpactStore } from "@/store/useImpactStore";
+import { sanitizeAlertEntry } from "@/lib/canvas/impact";
 import { parseImportedConnection, parseImportedNode } from "@/hooks/useCloudSync";
 import { sanitizeCanvasStrokes } from "@/lib/canvas/inkGeometry";
 import { isApplyingRemoteCollab, runAsRemoteCollab } from "./remoteFlag";
@@ -163,8 +172,29 @@ export function startCanvasSync(options: CanvasSyncOptions): () => void {
     }
   });
 
+  const unsubscribeAlerts = useImpactStore.subscribe((state, prev) => {
+    if (state.alerts === prev.alerts) return;
+    // Alerta que llegó de la sala: jamás se re-emite.
+    if (isApplyingRemoteCollab()) return;
+    const workspaceId = options.getWorkspaceId();
+    if (!workspaceId) return;
+    const before = new Map(prev.alerts.map((a) => [a.id, a]));
+    for (const alert of state.alerts) {
+      if (before.get(alert.id) !== alert) {
+        const payload: AlertUpsertPayload = { ...base(workspaceId), alert };
+        options.send("alert:upsert", payload);
+      }
+      before.delete(alert.id);
+    }
+    for (const id of before.keys()) {
+      const payload: AlertResolvePayload = { ...base(workspaceId), id };
+      options.send("alert:resolve", payload);
+    }
+  });
+
   return () => {
     unsubscribe();
+    unsubscribeAlerts();
     for (const timer of nodeTimers.values()) clearTimeout(timer);
     nodeTimers.clear();
     pendingNodes.clear();
@@ -277,6 +307,17 @@ export function applyRemoteEdgeDelete(payload: EdgeDeletePayload, selfUserId: st
       }),
     { persist: persistFor(payload.senderUserId, selfUserId) }
   );
+}
+
+export function applyRemoteAlertUpsert(payload: AlertUpsertPayload): void {
+  const alert = sanitizeAlertEntry(payload.alert);
+  if (!alert) return;
+  runAsRemoteCollab(() => useImpactStore.getState().upsertAlert(alert), { persist: false });
+}
+
+export function applyRemoteAlertResolve(payload: AlertResolvePayload): void {
+  if (typeof payload.id !== "string") return;
+  runAsRemoteCollab(() => useImpactStore.getState().resolveAlert(payload.id), { persist: false });
 }
 
 // ----------------------------------------------------------------------------

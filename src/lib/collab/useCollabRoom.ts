@@ -42,6 +42,8 @@ import {
   suspendCloudForCollabGuest,
 } from "@/hooks/useCloudSync";
 import type {
+  AlertResolvePayload,
+  AlertUpsertPayload,
   CanvasRequestPayload,
   CanvasSnapshotPayload,
   CollabPresence,
@@ -64,6 +66,8 @@ import {
 } from "./mediaDevices";
 import {
   SnapshotAssembler,
+  applyRemoteAlertResolve,
+  applyRemoteAlertUpsert,
   applyRemoteEdgeDelete,
   applyRemoteEdgeUpsert,
   applyRemoteNodeDelete,
@@ -621,6 +625,12 @@ function connectPresence(target?: { roomId: string; label: string }): void {
     })
     .on("broadcast", { event: "edge:delete" }, ({ payload }) => {
       if (forLiveWorkspace(payload)) applyRemoteEdgeDelete(payload as EdgeDeletePayload, selfUserId());
+    })
+    .on("broadcast", { event: "alert:upsert" }, ({ payload }) => {
+      if (forLiveWorkspace(payload)) applyRemoteAlertUpsert(payload as AlertUpsertPayload);
+    })
+    .on("broadcast", { event: "alert:resolve" }, ({ payload }) => {
+      if (forLiveWorkspace(payload)) applyRemoteAlertResolve(payload as AlertResolvePayload);
     })
     .on("broadcast", { event: "canvas:request" }, ({ payload }) => {
       void answerSnapshotRequest(payload as CanvasRequestPayload);

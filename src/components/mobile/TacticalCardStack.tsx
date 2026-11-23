@@ -9,6 +9,7 @@ import { NodeArchetype } from "@/types/workspace";
 import { EngineeringNode } from "@/components/shared/EngineeringNode";
 import { EmptyWorkspaceStarter, useStarterVisible } from "@/components/shared/EmptyWorkspaceStarter";
 import { useStarterStore } from "@/store/useStarterStore";
+import { ImpactAlertsBanner } from "@/components/shared/ImpactAlertsBanner";
 
 const FILTER_TABS: { id: "all" | NodeArchetype; label: string }[] = [
   { id: "all", label: "Todos" },
@@ -110,6 +111,9 @@ export const TacticalCardStack: React.FC = () => {
           })}
         </div>
       )}
+
+      {/* Descuadres entre tarjetas conectadas (detector anti-malentendidos) */}
+      <ImpactAlertsBanner variant="stack" />
 
       {/* Pila de Tarjetas de Ingeniería */}
       <div className="flex flex-col gap-3">

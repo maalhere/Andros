@@ -32,6 +32,7 @@ import { ResourceLinkNodeView } from "@/components/nodes/ResourceLinkNode";
 import { CodeLabNodeView } from "@/components/nodes/CodeLabNode";
 import { AiChatNodeView } from "@/components/nodes/AiChatNode";
 import { CalcSheetEditor, NoteTextEditor } from "@/components/nodes/NodeEditors";
+import { NodeImpactBadge, ReviewImpactButton, useNodeAlertCount } from "@/components/nodes/ImpactControls";
 
 interface EngineeringNodeProps {
   node: EngineeringNodeData;
@@ -338,6 +339,8 @@ export const EngineeringNode: React.FC<EngineeringNodeProps> = ({
   );
 
   const isSelected = selectedNodeId === node.id;
+  // Descuadre detectado tras un cambio en una tarjeta conectada.
+  const hasAlert = useNodeAlertCount(node.id) > 0;
   const animations = useSettingsStore((s) => s.animations);
   const full = animations === "full";
 
@@ -390,12 +393,16 @@ export const EngineeringNode: React.FC<EngineeringNodeProps> = ({
         } ${
           isSelected
             ? "border-andros-accent ring-2 ring-andros-accent/40 z-30"
-            : "border-andros-border z-10 hover:border-andros-border-active"
+            : hasAlert
+              ? "border-andros-warning/60 ring-2 ring-andros-warning/25 z-20"
+              : "border-andros-border z-10 hover:border-andros-border-active"
         }`
       : `w-full rounded-2xl bg-andros-card border shadow-card-light dark:shadow-card-dark p-4 spring-micro ${
           isSelected
             ? "border-andros-accent ring-1 ring-andros-accent/40"
-            : "border-andros-border"
+            : hasAlert
+              ? "border-andros-warning/60 ring-1 ring-andros-warning/25"
+              : "border-andros-border"
         }`;
 
   return (
@@ -465,6 +472,9 @@ export const EngineeringNode: React.FC<EngineeringNodeProps> = ({
         </div>
       </div>
 
+      {/* Aviso «Revisar cambio» (detector anti-malentendidos) */}
+      <NodeImpactBadge nodeId={node.id} />
+
       {/* Descripción opcional */}
       {node.summary && (
         <p className="pt-3 text-xs leading-relaxed text-andros-muted">
@@ -505,19 +515,25 @@ export const EngineeringNode: React.FC<EngineeringNodeProps> = ({
         </span>
 
         {variant === "stack" ? (
-          <button
-            type="button"
-            onClick={handleMobileConnect}
-            className="min-h-[44px] px-3.5 rounded-xl bg-andros-border/50 text-xs font-medium text-andros-primary flex items-center gap-1.5 spring-micro active:scale-95"
-          >
-            <Cable className="w-3.5 h-3.5 text-andros-accent-ink" />
-            <span>Conectar</span>
-          </button>
+          <div className="flex flex-wrap items-center justify-end gap-1.5">
+            {connectionCount > 0 && <ReviewImpactButton nodeId={node.id} variant="stack" />}
+            <button
+              type="button"
+              onClick={handleMobileConnect}
+              className="min-h-[44px] px-3.5 rounded-xl bg-andros-border/50 text-xs font-medium text-andros-primary flex items-center gap-1.5 spring-micro active:scale-95"
+            >
+              <Cable className="w-3.5 h-3.5 text-andros-accent-ink" />
+              <span>Conectar</span>
+            </button>
+          </div>
         ) : (
-          <span className="text-[10px] font-mono tabular-nums text-andros-muted flex items-center gap-1.5">
-            <Cable className="w-3 h-3" />
-            {connectionCount} {connectionCount === 1 ? "enlace" : "enlaces"}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-mono tabular-nums text-andros-muted flex items-center gap-1.5">
+              <Cable className="w-3 h-3" aria-hidden="true" />
+              {connectionCount} {connectionCount === 1 ? "enlace" : "enlaces"}
+            </span>
+            {connectionCount > 0 && <ReviewImpactButton nodeId={node.id} variant="canvas" />}
+          </div>
         )}
       </div>
 

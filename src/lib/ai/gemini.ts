@@ -258,6 +258,97 @@ export async function callGemini(
   );
 }
 
+/**
+ * Igual que `callGemini`, pero ESCALONADA para tareas cortas que deben
+ * responder en segundos: si un modelo no contesta en `hedgeAfterMs`, se lanza
+ * el siguiente en paralelo (máximo `maxInFlight` a la vez) y gana el primero
+ * que responda. Un fallo rápido (503/429/404) pasa al siguiente al instante.
+ * Así un modelo colgado no se come el tiempo de la respuesta.
+ */
+export async function callGeminiHedged(
+  apiKey: string,
+  req: ModelRequest,
+  options: GeminiCallOptions & { hedgeAfterMs?: number; maxInFlight?: number } = {}
+): Promise<{ raw: unknown; model: string }> {
+  const deadline = Date.now() + (options.budgetMs ?? 25_000);
+  const scope = keyScope(apiKey);
+  const queue = geminiCandidates(scope, options.preferredModel);
+  const errors: { model: string; error: unknown }[] = [];
+  const hedgeAfterMs = options.hedgeAfterMs ?? 3_000;
+  const maxInFlight = Math.max(1, options.maxInFlight ?? 2);
+  const attemptTimeoutMs = options.attemptTimeoutMs ?? ATTEMPT_TIMEOUT_MS;
+
+  return new Promise((resolve, reject) => {
+    let inFlight = 0;
+    let settled = false;
+    let hedgeTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const finishWithFailure = () => {
+      if (settled) return;
+      settled = true;
+      if (hedgeTimer) clearTimeout(hedgeTimer);
+      reject(
+        new ProviderFailure(
+          errors.length > 0
+            ? describeGeminiFailure(errors, options.userKey)
+            : { code: "overloaded", message: "Gemini no respondió a tiempo. Vuelve a intentarlo en unos segundos." }
+        )
+      );
+    };
+
+    const launchNext = () => {
+      if (settled) return;
+      if (hedgeTimer) clearTimeout(hedgeTimer);
+      hedgeTimer = null;
+      const remaining = deadline - Date.now();
+      const model = remaining >= 2_000 ? queue.shift() : undefined;
+      if (!model) {
+        if (inFlight === 0) finishWithFailure();
+        return;
+      }
+      inFlight += 1;
+      callGeminiModel(
+        model,
+        apiKey,
+        req,
+        Math.min(attemptTimeoutMs, remaining),
+        options.thinkingLevel ?? "low",
+        options.temperature
+      ).then(
+        (raw) => {
+          inFlight -= 1;
+          if (settled) return;
+          settled = true;
+          if (hedgeTimer) clearTimeout(hedgeTimer);
+          coolingModels.delete(`${scope}:${model}`);
+          resolve({ raw, model });
+        },
+        (error: unknown) => {
+          inFlight -= 1;
+          errors.push({ model, error });
+          console.warn(`[gemini] ${model} (escalonada) falló:`, error instanceof Error ? error.message.slice(0, 160) : error);
+          if (error instanceof GeminiHttpError && error.status === 404) {
+            retiredModels.set(`${scope}:${model}`, Date.now() + RETIRED_TTL_MS);
+          } else if (!isInvalidKeyError(error) && !isNetworkError(error)) {
+            coolingModels.set(`${scope}:${model}`, Date.now() + COOLDOWN_MS);
+          }
+          if (settled) return;
+          // Clave inválida o sin red: ningún otro modelo servirá.
+          if (isInvalidKeyError(error) || isNetworkError(error)) {
+            finishWithFailure();
+            return;
+          }
+          launchNext();
+        }
+      );
+      // Si este intento tarda, se escalona otro en paralelo.
+      if (inFlight < maxInFlight) hedgeTimer = setTimeout(launchNext, hedgeAfterMs);
+    };
+
+    launchNext();
+  });
+}
+
 /** Razonamiento acotado: sin esto los modelos Gemini 3 pueden tardar más de un minuto. */
 function thinkingConfigFor(model: string, level: ThinkingLevel = "low"): Record<string, unknown> | undefined {
   if (model.startsWith("gemini-2.5")) return { thinkingBudget: 1024 };

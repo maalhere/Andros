@@ -29,6 +29,12 @@ export interface Preferences {
   experienceMode: ExperienceMode;
   /** `true` cuando el usuario terminó o saltó el tutorial guiado de 5 pasos. */
   onboardingDone: boolean;
+  /**
+   * «Alertas automáticas» del detector anti-malentendidos: al guardar un dato
+   * importante en una tarjeta conectada, la IA revisa sola si otra quedó
+   * descuadrada. `null` = según el modo (activadas en Simple, manuales en Experto).
+   */
+  autoImpactAlerts: boolean | null;
 }
 
 export const DEFAULT_PREFERENCES: Preferences = {
@@ -40,6 +46,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   autosave: "instant",
   experienceMode: "simple",
   onboardingDone: false,
+  autoImpactAlerts: null,
 };
 
 /** Tamaño del imán de alineación (igual que la retícula del lienzo). */
@@ -65,6 +72,7 @@ export function sanitizePreferences(raw: unknown): Partial<Preferences> {
   if (r.autosave === "instant" || r.autosave === "moderate") out.autosave = r.autosave;
   if (r.experienceMode === "simple" || r.experienceMode === "expert") out.experienceMode = r.experienceMode;
   if (typeof r.onboardingDone === "boolean") out.onboardingDone = r.onboardingDone;
+  if (typeof r.autoImpactAlerts === "boolean" || r.autoImpactAlerts === null) out.autoImpactAlerts = r.autoImpactAlerts;
   return out;
 }
 
@@ -86,6 +94,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   autosave: DEFAULT_PREFERENCES.autosave,
   experienceMode: DEFAULT_PREFERENCES.experienceMode,
   onboardingDone: DEFAULT_PREFERENCES.onboardingDone,
+  autoImpactAlerts: DEFAULT_PREFERENCES.autoImpactAlerts,
   modalOpen: false,
   setExperienceMode: (experienceMode) => set({ experienceMode }),
   setModalOpen: (modalOpen) => set({ modalOpen }),
@@ -100,3 +109,11 @@ export const useSettingsStore = create<SettingsState>((set) => ({
 
 /** `true` en Modo Experto (3D, CodeLab y Biblioteca Científica visibles). */
 export const useIsExpert = (): boolean => useSettingsStore((s) => s.experienceMode === "expert");
+
+/** Alertas automáticas efectivas: el ajuste explícito, o activadas en Modo Simple. */
+export const resolveAutoImpactAlerts = (s: Pick<SettingsValues, "autoImpactAlerts" | "experienceMode">): boolean =>
+  s.autoImpactAlerts ?? s.experienceMode === "simple";
+
+export const useAutoImpactAlerts = (): boolean => useSettingsStore(resolveAutoImpactAlerts);
+
+export const autoImpactAlertsEnabled = (): boolean => resolveAutoImpactAlerts(useSettingsStore.getState());

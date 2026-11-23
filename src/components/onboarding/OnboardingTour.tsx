@@ -15,7 +15,7 @@ import {
 import { useLandingStore } from "@/store/useLandingStore";
 import { useCloudStore } from "@/store/useCloudStore";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
-import { useIsExpert } from "@/store/useSettingsStore";
+import { useIsExpert, useSettingsStore } from "@/store/useSettingsStore";
 
 // ============================================================================
 // ANDROS — TUTORIAL INTERACTIVO DE 5 PASOS (Spotlight)
@@ -25,8 +25,10 @@ import { useIsExpert } from "@/store/useSettingsStore";
 //   4. Conectar modelos de IA   → tarjeta centrada con mini-diagrama
 //   5. Piezas 3D, CodeLab       → tarjeta centrada
 // Siempre se puede saltar (Esc o «Saltar tutorial»).
-// Se lanza solo la primera vez que alguien entra a su lienzo vacío, y en
-// cualquier momento desde "⋯ → Ver tutorial".
+// En Modo Experto se lanza solo la primera vez que alguien entra a su lienzo
+// vacío. En Modo Simple NUNCA se lanza solo: el lienzo vacío muestra la
+// tarjeta de arranque en 1 frase (EmptyWorkspaceStarter) y el tutorial no
+// debe taparla. Siempre está en "? → Ver tutorial" y "⋯ → Ver tutorial".
 // ============================================================================
 
 interface TourStep {
@@ -240,16 +242,21 @@ export const OnboardingTour: React.FC<{ isMobile: boolean }> = ({ isMobile }) =>
     (hasUser && (cloudStatus === "saved" || cloudStatus === "saving")) ||
     (!hasUser && cloudStatus === "connecting" && phase === "workspace");
 
+  const expertMode = useIsExpert();
+
   useEffect(() => {
+    // Modo Simple: la tarjeta de arranque manda; el tutorial queda a un clic (? / ⋯).
+    if (!expertMode) return;
     if (phase !== "workspace" || !canvasSettled || nodeCount > 0 || open) return;
     const timer = window.setTimeout(() => {
       if (hasSeenOnboarding()) return;
+      if (useSettingsStore.getState().experienceMode !== "expert") return;
       if (useWorkspaceStore.getState().nodes.length > 0) return;
       if (useLandingStore.getState().phase !== "workspace") return;
       start();
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [phase, canvasSettled, nodeCount, open, start]);
+  }, [expertMode, phase, canvasSettled, nodeCount, open, start]);
 
   // ---- Teclado: ← → Enter / Esc, sin disparar los atajos del lienzo --------
   useEffect(() => {

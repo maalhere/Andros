@@ -30,6 +30,7 @@ export function collectPreferences(): Preferences {
     autosave: s.autosave,
     experienceMode: s.experienceMode,
     onboardingDone: s.onboardingDone,
+    autoImpactAlerts: s.autoImpactAlerts,
   };
 }
 

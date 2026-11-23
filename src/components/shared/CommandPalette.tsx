@@ -33,6 +33,7 @@ import {
   Terminal,
 } from "lucide-react";
 import { useCommandPaletteStore } from "@/store/useCommandPaletteStore";
+import { focusNodeOnScreen } from "@/lib/canvas/focusNode";
 import { NODE_ARCHETYPE_LABELS, useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { useLibraryStore } from "@/store/useLibraryStore";
 import { useMarketStore } from "@/store/useMarketStore";
@@ -84,31 +85,8 @@ const normalize = (s: string) =>
     .replace(/[̀-ͯ]/g, "")
     .toLowerCase();
 
-const NODE_W = 320;
-const NODE_H = 220;
-
 /** Centra la cámara del lienzo en el nodo (escritorio) o lo muestra (teléfono). */
-function jumpToNode(id: string) {
-  const ws = useWorkspaceStore.getState();
-  const node = ws.nodes.find((n) => n.id === id);
-  if (!node) return;
-  ws.selectNode(id);
-  if (window.innerWidth >= 768) {
-    const scale = Math.max(ws.canvasTransform.scale, 0.8);
-    ws.setCanvasTransform({
-      scale,
-      x: window.innerWidth / 2 - (node.position.x + NODE_W / 2) * scale,
-      y: window.innerHeight / 2 - (node.position.y + NODE_H / 2) * scale,
-    });
-  } else {
-    ws.setActiveMobileSheet("none");
-    requestAnimationFrame(() =>
-      document
-        .querySelector(`[data-node-id="${CSS.escape(id)}"]`)
-        ?.scrollIntoView({ behavior: "smooth", block: "center" })
-    );
-  }
-}
+const jumpToNode = focusNodeOnScreen;
 
 export const CommandPalette: React.FC = () => {
   const open = useCommandPaletteStore((s) => s.open);

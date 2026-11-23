@@ -5,6 +5,7 @@
 // ============================================================================
 
 import type { CanvasStroke, EngineeringNodeData, NodeConnection } from "./workspace";
+import type { ImpactAlertEntry } from "@/lib/canvas/impact";
 
 /** Estado de la sala para la barra de voz. */
 export type CollabRoomStatus =
@@ -124,6 +125,22 @@ export interface EdgeUpsertPayload {
 }
 
 export interface EdgeDeletePayload {
+  senderId: string;
+  senderUserId: string;
+  workspaceId: string;
+  id: string;
+}
+
+/** Alerta del detector anti-malentendidos (alta o cambio). */
+export interface AlertUpsertPayload {
+  senderId: string;
+  senderUserId: string;
+  workspaceId: string;
+  alert: ImpactAlertEntry;
+}
+
+/** Alerta marcada como resuelta (o sustituida por una revisión nueva). */
+export interface AlertResolvePayload {
   senderId: string;
   senderUserId: string;
   workspaceId: string;

@@ -128,7 +128,11 @@ export default function PrivacidadPage() {
         <li>
           <strong>Google</strong>: inicio de sesión (OAuth) y, si usas el Oráculo, los nodos IA o el
           generador de tableros («¿Qué evento o proyecto vas a organizar?») con Gemini, el texto de
-          tu petición y, en el Oráculo y los nodos IA, el contexto del lienzo que la acompaña. Las
+          tu petición y, en el Oráculo y los nodos IA, el contexto del lienzo que la acompaña. Si
+          usas «Revisar impacto» o las «Alertas automáticas» de descuadre, se envía el contenido de
+          la tarjeta editada (antes y después del cambio) y el de sus tarjetas conectadas; las
+          alertas resultantes solo se comparten por el canal en vivo con quienes están en tu
+          espacio y no se guardan en la nube. Las
           plantillas que guardas desde «Guardar como plantilla» se quedan solo en el
           almacenamiento local de tu navegador.
         </li>

@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Download, Eraser, Moon, RotateCcw, Settings, Sun, Trash2, X } from "lucide-react";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import {
+  useAutoImpactAlerts,
   useSettingsStore,
   type AnimationLevel,
   type AutosaveMode,
@@ -229,6 +230,7 @@ export const QualityOfLifeModal: React.FC = () => {
   const canvasBackground = useSettingsStore((s) => s.canvasBackground);
   const animations = useSettingsStore((s) => s.animations);
   const autosave = useSettingsStore((s) => s.autosave);
+  const autoImpactAlerts = useAutoImpactAlerts();
   const applyPreferences = useSettingsStore((s) => s.applyPreferences);
   const theme = useWorkspaceStore((s) => s.theme);
   const setTheme = useWorkspaceStore((s) => s.setTheme);
@@ -322,6 +324,20 @@ export const QualityOfLifeModal: React.FC = () => {
                   label="Ajuste a cuadrícula"
                   checked={snapToGrid}
                   onChange={(v) => applyPreferences({ snapToGrid: v })}
+                />
+              </div>
+            </Section>
+
+            <Section
+              title="Alertas de descuadre"
+              hint="Al guardar un dato importante (asistentes, montos, fechas) en una tarjeta conectada, la IA revisa si otra quedó descuadrada. Cada revisión usa 1 consulta; sin esto, usa «Revisar impacto» en la tarjeta."
+            >
+              <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-xl bg-andros-border/30">
+                <span className="text-xs text-andros-primary">Alertas automáticas</span>
+                <Switch
+                  label="Alertas automáticas de descuadre"
+                  checked={autoImpactAlerts}
+                  onChange={(v) => applyPreferences({ autoImpactAlerts: v })}
                 />
               </div>
             </Section>

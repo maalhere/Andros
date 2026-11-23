@@ -5,6 +5,7 @@ import { Check, Pencil } from "lucide-react";
 import { useWorkspaceStore, parseAiTextContent, textBlocksToHtml } from "@/store/useWorkspaceStore";
 import { noteDataToText } from "@/lib/templates/blueprint";
 import { SHEET_MAX_COLUMNS, SHEET_MAX_ROWS, SHEET_COLUMN_LETTERS, setSheetCell } from "@/lib/canvas/sheet";
+import { commitWithImpact } from "@/lib/canvas/impactClient";
 import type { CalcLatexPayload, SketchNotePayload } from "@/types/workspace";
 
 // ============================================================================
@@ -43,7 +44,10 @@ export const NoteTextEditor: React.FC<{ nodeId: string; data: SketchNotePayload 
 
   const save = () => {
     const { textBlocks, checklistItems } = parseAiTextContent(draft);
-    updateNodePayload(nodeId, { textBlocks, checklistItems, richTextHtml: textBlocksToHtml(textBlocks) });
+    // Al GUARDAR (nunca por tecla) se decide si el cambio merece revisión de impacto.
+    commitWithImpact(nodeId, () =>
+      updateNodePayload(nodeId, { textBlocks, checklistItems, richTextHtml: textBlocksToHtml(textBlocks) })
+    );
     setDraft(null);
   };
 
@@ -112,7 +116,10 @@ const SheetCellInput: React.FC<{
     // Se lee la hoja más reciente del store: otra celda pudo cambiar mientras tanto.
     const node = useWorkspaceStore.getState().nodes.find((n) => n.id === nodeId);
     if (node?.type !== "calc-latex-node") return;
-    updateNodePayload(nodeId, { gridCells: setSheetCell(node.calcLatexData.gridCells, address, text) });
+    // Al salir de la celda (nunca por tecla) se decide si el cambio merece revisión de impacto.
+    commitWithImpact(nodeId, () =>
+      updateNodePayload(nodeId, { gridCells: setSheetCell(node.calcLatexData.gridCells, address, text) })
+    );
   };
 
   const isFormula = cell?.raw.startsWith("=") ?? false;
@@ -138,7 +145,7 @@ const SheetCellInput: React.FC<{
           e.currentTarget.blur();
         }
       }}
-      className={`w-full min-w-0 h-11 md:h-8 px-2 bg-transparent outline-none focus:bg-andros-canvas focus:ring-1 focus:ring-inset focus:ring-andros-accent placeholder:text-andros-muted/60 text-[12px] ${
+      className={`w-full min-w-0 h-11 md:h-8 px-2 bg-transparent outline-none focus:bg-andros-canvas focus:ring-1 focus:ring-inset focus:ring-andros-accent placeholder:text-andros-muted text-[12px] ${
         numeric ? "text-right font-mono tabular-nums" : "text-left"
       } ${
         cell?.error

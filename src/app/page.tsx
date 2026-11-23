@@ -36,6 +36,7 @@ import { UsernameSetupModal } from "@/components/social/UsernameSetupModal";
 import { FriendsModal } from "@/components/social/FriendsModal";
 import { ShareWorkspaceModal } from "@/components/social/ShareWorkspaceModal";
 import { EmptyWorkspaceStarter } from "@/components/shared/EmptyWorkspaceStarter";
+import { ImpactAlertsBanner } from "@/components/shared/ImpactAlertsBanner";
 
 export default function AndrosWorkspacePage() {
   const { isMobile, isMounted } = useDeviceLayout();
@@ -101,6 +102,8 @@ export default function AndrosWorkspacePage() {
           <SpatialCanvas />
           <FloatingHudDock />
           <EmptyWorkspaceStarter variant="canvas" />
+          {/* Descuadres entre tarjetas conectadas (detector anti-malentendidos) */}
+          <ImpactAlertsBanner variant="floating" />
         </>
       )}
 
@@ -115,7 +118,7 @@ export default function AndrosWorkspacePage() {
       <Toaster />
       <ShortcutsGuideModal />
 
-      {/* Tutorial guiado de 5 pasos (1.ª vez en un lienzo vacío o desde ⋯ → Ver tutorial) */}
+      {/* Tutorial guiado de 5 pasos (en Modo Simple solo desde ? / ⋯ → Ver tutorial; en Experto, también la 1.ª vez en un lienzo vacío) */}
       <OnboardingTour isMobile={isMobile} />
 
       {/* Portada: entrada para quien no tiene sesión, o al pulsar el logo de Andros */}
