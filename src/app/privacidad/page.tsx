@@ -69,6 +69,73 @@ export default function PrivacidadPage() {
           <strong>Enlace del espacio</strong>: el enlace que copias solo contiene el identificador
           del espacio; únicamente lo abren las personas que son miembros.
         </li>
+        <li>
+          <strong>Enlace público «Vista Invitado»</strong> (opcional, solo lo activa el dueño del
+          espacio): genera una dirección <code>/ver/…</code> con un código aleatorio prácticamente imposible de
+          adivinar (<code>public_share_token</code>). Cualquier persona que tenga ese enlace puede
+          ver el tablero en <strong>solo lectura y sin cuenta</strong>: el nombre del espacio, el
+          texto de las tarjetas, las tablas, los enlaces, los nombres de los archivos adjuntos y
+          los campos y <strong>fotos de las fichas</strong>.
+          Nunca muestra correos, perfiles, quién es el dueño, los archivos en sí ni el historial
+          de los chats IA (solo su resumen). La página no se indexa en buscadores y no abre voz,
+          cámara ni el canal en tiempo real. Puedes <strong>revocarlo en cualquier momento</strong>{" "}
+          desde ⋯ → Compartir espacio: al desactivarlo deja de funcionar al instante, y «Generar
+          enlace nuevo» invalida el anterior para siempre. Borrar el espacio también lo elimina.
+        </li>
+      </ul>
+      <h3>Librería de fichas y fotos adjuntas</h3>
+      <ul>
+        <li>
+          <strong>Librería de fichas</strong>: los formatos que creas (título, categoría y nombres
+          de los campos, sin valores) se guardan en el almacenamiento local de tu navegador
+          (<code>andros_form_library</code>) y, si inicias sesión, en tu perfil de la nube
+          (<code>form_library</code>) para usarlos en tus otros dispositivos. Solo tú los ves.
+        </li>
+        <li>
+          <strong>Fichas del lienzo</strong>: los valores que escribes y las fotos que adjuntas se
+          guardan como parte del espacio (igual que el resto de tarjetas): en tu navegador en modo
+          local, o en la nube del espacio, a la que solo acceden su dueño y sus miembros, y en una
+          Vista Invitado si la activas.
+        </li>
+        <li>
+          <strong>Fotos</strong>: se comprimen en tu propio dispositivo (máximo 1280 px, WebP o
+          JPEG) antes de guardarse. No se envían a ningún servicio de IA ni se analizan.
+        </li>
+        <li>
+          <strong>«Llenar fichas con IA»</strong>: solo al pulsar el botón se envían a Google Gemini
+          el texto que pegas y los nombres de los campos de las fichas elegidas (nunca las fotos).
+          El servidor de Andros no guarda ese texto. Con la clave compartida del servidor se aplica
+          el límite diario de consultas gratis; con tu propia clave (BYOK) la petición se hace a tu
+          cuenta de Google.
+        </li>
+        <li>
+          <strong>Fichas de Fórmula</strong>: el cálculo con los datos de tus fichas conectadas se
+          hace por completo en tu navegador, sin IA. Solo si pulsas «Generar fórmula con IA» se
+          envían a Google Gemini la descripción que escribes y los nombres, claves y unidades de los
+          campos numéricos del tablero (nunca sus valores ni las fotos). El servidor de Andros no
+          guarda esa descripción; se aplican las mismas reglas de cuota y de clave propia (BYOK).
+        </li>
+      </ul>
+      <p>
+        <strong>Aviso de responsabilidad sobre datos sensibles.</strong> Andros es una herramienta
+        de organización general y no es un sistema certificado de historia clínica. Si usas la
+        clave compartida del servidor, evita escribir datos clínicos o personales identificables
+        (nombres completos, documentos, diagnósticos de personas reales): usa iniciales o datos de
+        ejemplo, o configura tu propia clave en Claves IA. Para un uso médico regulado, consulta
+        antes la normativa de protección de datos de salud de tu país y obtén asesoría legal; eres
+        responsable de contar con el consentimiento de las personas cuyos datos registres.
+      </p>
+      <h3>Exportar Plan del Día y lista de espera Pro</h3>
+      <ul>
+        <li>
+          <strong>Plan del Día</strong> (PDF y resumen para WhatsApp): se genera por completo en tu
+          navegador e incluye los campos de las fichas (y sus fotos en la versión imprimible). No se envía a nuestros servidores; tú decides dónde lo guardas o lo pegas.
+        </li>
+        <li>
+          <strong>Lista de espera de Andros Pro</strong>: el formulario no guarda nada; abre tu app
+          de correo con la solicitud lista para que la envíes tú a nuestro buzón de contacto. Solo
+          recibimos el correo que decidas enviar.
+        </li>
       </ul>
       <h3>Si abres un espacio en la nube o entras a su canal de voz</h3>
       <ul>
@@ -126,13 +193,20 @@ export default function PrivacidadPage() {
           tu @usuario y tu foto de perfil, y el contenido de los espacios que compartes con ellos.
         </li>
         <li>
+          <strong>Quien tenga un enlace de Vista Invitado que tú activaste</strong>: ve el contenido
+          de ese tablero en solo lectura, sin tus datos de cuenta, hasta que lo desactives.
+        </li>
+        <li>
           <strong>Google</strong>: inicio de sesión (OAuth) y, si usas el Oráculo, los nodos IA o el
           generador de tableros («¿Qué evento o proyecto vas a organizar?») con Gemini, el texto de
           tu petición y, en el Oráculo y los nodos IA, el contexto del lienzo que la acompaña. Si
           usas «Revisar impacto» o las «Alertas automáticas» de descuadre, se envía el contenido de
           la tarjeta editada (antes y después del cambio) y el de sus tarjetas conectadas; las
           alertas resultantes solo se comparten por el canal en vivo con quienes están en tu
-          espacio y no se guardan en la nube. Las
+          espacio y no se guardan en la nube. Si usas «Llenar fichas con IA», se envían el texto
+          que pegas y el esquema de las fichas elegidas (sin fotos). Si usas «Generar fórmula con
+          IA», se envían tu descripción y los nombres de los campos numéricos del tablero (sin sus
+          valores). Las
           plantillas que guardas desde «Guardar como plantilla» se quedan solo en el
           almacenamiento local de tu navegador.
         </li>
@@ -178,6 +252,10 @@ export default function PrivacidadPage() {
         <li>
           Quitar amistades, cancelar solicitudes, quitar miembros de tus espacios o salir de un
           espacio compartido desde ⋯ → Amigos y ⋯ → Compartir espacio.
+        </li>
+        <li>
+          Desactivar un enlace público «Vista Invitado» o generar uno nuevo (el anterior deja de
+          funcionar) desde ⋯ → Compartir espacio → Enlace público.
         </li>
         <li>Cerrar sesión y seguir usando Andros en modo local.</li>
       </ul>

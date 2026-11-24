@@ -8,6 +8,7 @@ import { useMarketStore } from "@/store/useMarketStore";
 import { useCommandPaletteStore } from "@/store/useCommandPaletteStore";
 import { useShortcutsGuideStore } from "@/store/useShortcutsGuideStore";
 import { useOnboardingStore } from "@/store/useOnboardingStore";
+import { isCanvasReadOnly } from "@/store/useCollabStore";
 import { closeActiveWorkspaceTab, focusWorkspaceTab } from "@/components/workspaces/WorkspaceTabsBar";
 
 // ============================================================================
@@ -78,7 +79,11 @@ export function useGlobalShortcuts(isDesktop: boolean) {
       if (e.metaKey || e.ctrlKey || e.altKey || isTypingTarget(e.target)) return;
       if (ws.isOracleModalOpen) return;
 
-      switch (e.key.toLowerCase()) {
+      // Solo lectura (sala llena 6/6): solo Seleccionar y la guía de atajos.
+      const key = e.key.toLowerCase();
+      if (isCanvasReadOnly() && key !== "v" && key !== "?") return;
+
+      switch (key) {
         case "v":
           ws.setActiveTool("pointer");
           break;

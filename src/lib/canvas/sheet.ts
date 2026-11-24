@@ -126,6 +126,31 @@ function columnName(col: number): string {
  * se muestra tal cual.
  */
 export function computeSheet(raw: Raw): Record<string, SpreadsheetCell> {
+  const values = evaluateSheet(raw);
+  const out: Record<string, SpreadsheetCell> = {};
+  for (const [address, cell] of Object.entries(values)) {
+    out[address] = {
+      raw: raw[address],
+      computed: typeof cell.value === "number" ? formatSheetNumber(cell.value) : String(cell.value),
+      ...(cell.error ? { error: cell.error } : {}),
+    };
+  }
+  return out;
+}
+
+/**
+ * Valores numéricos EXACTOS (sin redondear a 2 decimales) de las celdas que
+ * resultan en un número. Lo usan las Fichas de Fórmula conectadas a la hoja.
+ */
+export function sheetNumericValues(cells: Record<string, SpreadsheetCell>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [address, cell] of Object.entries(evaluateSheet(rawOfCells(cells)))) {
+    if (!cell.error && typeof cell.value === "number" && Number.isFinite(cell.value)) out[address] = cell.value;
+  }
+  return out;
+}
+
+function evaluateSheet(raw: Raw): Record<string, Computed> {
   const cache = new Map<string, Computed>();
   const visiting = new Set<string>();
 
@@ -265,16 +290,11 @@ export function computeSheet(raw: Raw): Record<string, SpreadsheetCell> {
     return result;
   };
 
-  const out: Record<string, SpreadsheetCell> = {};
+  const out: Record<string, Computed> = {};
   for (const address of Object.keys(raw)) {
     const text = raw[address];
-    if (text.trim() === "") continue;
-    const cell = evalCell(address);
-    out[address] = {
-      raw: text,
-      computed: typeof cell.value === "number" ? formatSheetNumber(cell.value) : String(cell.value),
-      ...(cell.error ? { error: cell.error } : {}),
-    };
+    if (typeof text !== "string" || text.trim() === "") continue;
+    out[address] = evalCell(address);
   }
   return out;
 }

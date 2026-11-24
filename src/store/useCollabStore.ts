@@ -356,3 +356,18 @@ export const useCollabStore = create<CollabState>((set) => ({
       remoteEditors: {},
     }),
 }));
+
+// ---------------------------------------------------------------------------
+// Modo solo lectura del lienzo
+//   · 7.º en un espacio lleno (6/6): ve el lienzo en vivo pero no lo modifica.
+//   · Vista Invitado (`/ver/<token>`): nunca monta este lienzo editable, pero
+//     cualquier vista compartida que lo reutilice pasa por el mismo selector.
+// ---------------------------------------------------------------------------
+
+/** `true` cuando el lienzo NO debe aceptar cambios locales (crear, dibujar, conectar, importar). */
+export const selectCanvasReadOnly = (s: CollabState): boolean => s.capacity.readOnly;
+
+export const useCanvasReadOnly = (): boolean => useCollabStore(selectCanvasReadOnly);
+
+/** Lectura puntual (atajos de teclado, paleta de comandos, acciones fuera de React). */
+export const isCanvasReadOnly = (): boolean => selectCanvasReadOnly(useCollabStore.getState());

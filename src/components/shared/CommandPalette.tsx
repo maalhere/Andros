@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   Bot,
+  ClipboardList,
   Cable,
   Code2,
   Gauge,
@@ -14,6 +15,7 @@ import {
   Users,
   Crown,
   FileBox,
+  FileText,
   CircleHelp,
   KeyRound,
   Library,
@@ -28,22 +30,26 @@ import {
   Settings,
   Sigma,
   Sparkles,
+  SquareFunction,
   Sun,
   Swords,
   Terminal,
 } from "lucide-react";
+import { useFormulaCreatorStore } from "@/store/useFormulaCreatorStore";
 import { useCommandPaletteStore } from "@/store/useCommandPaletteStore";
 import { focusNodeOnScreen } from "@/lib/canvas/focusNode";
 import { NODE_ARCHETYPE_LABELS, useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { useLibraryStore } from "@/store/useLibraryStore";
 import { useMarketStore } from "@/store/useMarketStore";
 import { useIsExpert, useSettingsStore } from "@/store/useSettingsStore";
-import { useCollabStore } from "@/store/useCollabStore";
+import { useCanvasReadOnly, useCollabStore } from "@/store/useCollabStore";
 import { useSocialStore } from "@/store/useSocialStore";
 import { joinCollabRoom } from "@/lib/collab/useCollabRoom";
 import { quickAdd } from "@/lib/canvas/quickAdd";
 import { useAiProvidersStore } from "@/store/useAiProvidersStore";
 import { useShortcutsGuideStore } from "@/store/useShortcutsGuideStore";
+import { usePlanExportStore } from "@/store/usePlanExportStore";
+import { useFormsLibraryStore } from "@/store/useFormsLibraryStore";
 import { SHORTCUT_KEYS } from "@/hooks/useGlobalShortcuts";
 import { Kbd } from "./Kbd";
 import { springOrInstant } from "@/lib/motion";
@@ -76,6 +82,8 @@ const NODE_ICONS: Record<NodeArchetype, React.ReactNode> = {
   "resource-link-node": <Link2 className="w-4 h-4" />,
   "code-lab-node": <Terminal className="w-4 h-4" />,
   "ai-chat-node": <Bot className="w-4 h-4" />,
+  "form-sheet-node": <ClipboardList className="w-4 h-4" />,
+  "formula-sheet-node": <SquareFunction className="w-4 h-4" />,
 };
 
 /** Minúsculas y sin tildes: «calculo» encuentra «Cálculo». */
@@ -84,6 +92,21 @@ const normalize = (s: string) =>
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "")
     .toLowerCase();
+
+/** Acciones que crean o modifican piezas: se ocultan en modo solo lectura. */
+const WRITE_COMMAND_IDS = new Set([
+  "new-node",
+  "new-card",
+  "oracle",
+  "library",
+  "draw",
+  "connect",
+  "link",
+  "codelab",
+  "forms-library",
+  "forms-autofill",
+  "new-formula",
+]);
 
 /** Centra la cámara del lienzo en el nodo (escritorio) o lo muestra (teléfono). */
 const jumpToNode = focusNodeOnScreen;
@@ -109,6 +132,8 @@ const PaletteDialog: React.FC<{ reduced: boolean; onClose: () => void }> = ({ re
   const nodes = useWorkspaceStore((s) => s.nodes);
   const theme = useWorkspaceStore((s) => s.theme);
   const expert = useIsExpert();
+  // Sala llena (7.º) o vista invitado: sin acciones que modifiquen el lienzo.
+  const readOnly = useCanvasReadOnly();
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -171,6 +196,42 @@ const PaletteDialog: React.FC<{ reduced: boolean; onClose: () => void }> = ({ re
         keywords: "invitar enlace colaborar equipo",
         icon: <Share2 className="w-4 h-4" />,
         run: () => useSocialStore.getState().setShareOpen(true),
+      },
+      {
+        id: "forms-library",
+        group: "Acciones",
+        label: "Librería de fichas",
+        hint: "Formatos replicables con campos y fotos",
+        keywords: "ficha fichas formato formulario plantilla historial clinico receta medicion registro logistica",
+        icon: <ClipboardList className="w-4 h-4" />,
+        run: () => useFormsLibraryStore.getState().openLibrary("library"),
+      },
+      {
+        id: "forms-autofill",
+        group: "Acciones",
+        label: "Llenar fichas con IA",
+        hint: "Pega tus notas y la IA llena las fichas",
+        keywords: "autollenado auto llenar rellenar ficha formulario ia notas dictado",
+        icon: <Sparkles className="w-4 h-4" />,
+        run: () => useFormsLibraryStore.getState().openLibrary("autofill"),
+      },
+      {
+        id: "new-formula",
+        group: "Acciones",
+        label: "Nueva fórmula",
+        hint: "LaTeX que se calcula sola con tus fichas",
+        keywords: "formula latex ecuacion calcular imc dosis costo margen variable katex",
+        icon: <SquareFunction className="w-4 h-4" />,
+        run: () => useFormulaCreatorStore.getState().setOpen(true),
+      },
+      {
+        id: "export-plan",
+        group: "Acciones",
+        label: "Exportar Plan del Día",
+        hint: "PDF imprimible y resumen para WhatsApp",
+        keywords: "pdf imprimir whatsapp resumen exportar documento plan",
+        icon: <FileText className="w-4 h-4" />,
+        run: () => usePlanExportStore.getState().setOpen(true),
       },
       {
         id: "friends",
@@ -311,9 +372,10 @@ const PaletteDialog: React.FC<{ reduced: boolean; onClose: () => void }> = ({ re
       run: () => jumpToNode(n.id),
     }));
     // Biblioteca Científica y CodeLab son del Modo Experto.
-    const visible = expert ? actions : actions.filter((c) => c.id !== "library" && c.id !== "codelab");
+    const byMode = expert ? actions : actions.filter((c) => c.id !== "library" && c.id !== "codelab");
+    const visible = readOnly ? byMode.filter((c) => !WRITE_COMMAND_IDS.has(c.id)) : byMode;
     return [...visible, ...nodeCommands];
-  }, [nodes, theme, expert]);
+  }, [nodes, theme, expert, readOnly]);
 
   const results = useMemo(() => {
     const tokens = normalize(query).split(/\s+/).filter(Boolean);

@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   Boxes,
   Check,
+  ClipboardList,
   CheckCircle2,
   ClipboardCheck,
   Copy,
@@ -25,6 +26,7 @@ import {
   Send,
   Sigma,
   Sparkles,
+  SquareFunction,
   TriangleAlert,
   Wand2,
   X,
@@ -46,6 +48,8 @@ import { MarkdownPreview } from "@/components/oracle/MarkdownPreview";
 import { useLibraryStore } from "@/store/useLibraryStore";
 import { referencesMarkdown, toOracleReference } from "@/lib/library/actions";
 import { Kbd } from "./Kbd";
+import { useFormsLibraryStore } from "@/store/useFormsLibraryStore";
+import { useFormulaCreatorStore } from "@/store/useFormulaCreatorStore";
 import type {
   OracleAction,
   OracleEngine,
@@ -770,6 +774,26 @@ const OracleStudio: React.FC = () => {
             Vista previa
           </button>
         </div>
+        <button
+          type="button"
+          onClick={() => useFormsLibraryStore.getState().setAutofillOpen(true)}
+          className="h-7 px-2 rounded-lg text-[11px] text-andros-muted hover:text-andros-primary hover:bg-andros-card flex items-center gap-1.5 spring-micro"
+          title="Pega información en bruto y la IA llena tus fichas"
+          aria-label="Llenar fichas con IA"
+        >
+          <ClipboardList className="w-3.5 h-3.5 text-andros-accent-ink" aria-hidden="true" />
+          <span className="hidden sm:inline" aria-hidden="true">Llenar fichas</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => useFormulaCreatorStore.getState().setOpen(true)}
+          className="h-7 px-2 rounded-lg text-[11px] text-andros-muted hover:text-andros-primary hover:bg-andros-card flex items-center gap-1.5 spring-micro"
+          title="Describe una fórmula y la IA la crea como ficha LaTeX que se calcula sola"
+          aria-label="Nueva fórmula"
+        >
+          <SquareFunction className="w-3.5 h-3.5 text-andros-accent-ink" aria-hidden="true" />
+          <span className="hidden sm:inline" aria-hidden="true">Fórmula</span>
+        </button>
         <div className="flex-1" />
         {studio.previousDocument && (
           <button

@@ -156,9 +156,15 @@ export function hasDirectNeighbors(
   return directNeighbors(nodes, connections, nodeId).length > 0;
 }
 
-/** Texto comparable de una tarjeta (el mismo que ve la IA). */
-export function impactSnapshot(node: EngineeringNodeData): string {
-  return serializeNodeForContext(node);
+/**
+ * Texto comparable de una tarjeta (el mismo que ve la IA). Con el lienzo
+ * (`graph`), una Ficha de Fórmula incluye su resultado ya recalculado.
+ */
+export function impactSnapshot(
+  node: EngineeringNodeData,
+  graph?: { nodes: EngineeringNodeData[]; connections: NodeConnection[] }
+): string {
+  return serializeNodeForContext(node, graph);
 }
 
 const ROLES_RE = /\b(roles?|responsables?|equipo|encargad[oa]s?)\b/i;
@@ -187,7 +193,7 @@ export function buildImpactRequest(
   const inputs: ImpactNeighborInput[] = [];
   for (const n of neighbors) {
     const share = Math.max(300, Math.min(NEIGHBOR_MAX_CHARS, Math.floor(room / Math.max(1, neighbors.length - inputs.length))));
-    const text = clipCleanly(impactSnapshot(n.node), share);
+    const text = clipCleanly(impactSnapshot(n.node, { nodes, connections }), share);
     room -= text.length;
     inputs.push({
       id: n.node.id,
@@ -204,7 +210,7 @@ export function buildImpactRequest(
   );
   const roles =
     rolesNode && room > 400
-      ? { title: rolesNode.title.slice(0, 120), text: clipCleanly(impactSnapshot(rolesNode), Math.min(ROLES_MAX_CHARS, room - 100)) }
+      ? { title: rolesNode.title.slice(0, 120), text: clipCleanly(impactSnapshot(rolesNode, { nodes, connections }), Math.min(ROLES_MAX_CHARS, room - 100)) }
       : undefined;
 
   return {

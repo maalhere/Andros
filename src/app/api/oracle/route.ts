@@ -59,6 +59,8 @@ TIPOS DE NODO
 - "resource-link-node": enlace externo (YouTube, GitHub, paper científico, LinkedIn/perfil o genérico). Su URL, plataforma, título y resumen llegan en textExcerpt.
 - "code-lab-node": laboratorio de código/cálculo rápido (variables, funciones matemáticas, linspace y plot). Su código, variables resultantes y errores llegan en textExcerpt.
 - "ai-chat-node": conversación con una IA (Gemini, Claude o ChatGPT), propia o importada. Su proveedor, resumen y últimos mensajes llegan en textExcerpt.
+- "form-sheet-node": ficha estructurada (historial clínico, receta, medición, registro…). Sus campos llegan en textExcerpt como «Etiqueta / clave = valor unidad»; "[revisar]" marca datos pendientes de confirmar. Las fotos adjuntas no se envían.
+- "formula-sheet-node": ficha de fórmula LaTeX reactiva. En textExcerpt llegan su LaTeX, la expresión, cada variable con su valor inyectado y su origen («← Ficha · clave», «Manual» o «Sin dato») y el «Resultado calculado» (ya calculado por Andros con los datos actuales: úsalo tal cual, no lo recalcules ni lo inventes). Si dice «Sin resultado», explica qué dato falta.
 Cada nodo trae connectedNodeIds; la lista "connections" trae los cables con su etiqueta.
 
 FORMATO DE RESPUESTA (obligatorio)
@@ -103,6 +105,7 @@ const ARCHETYPES: NodeArchetype[] = [
   "resource-link-node",
   "code-lab-node",
   "ai-chat-node",
+  "form-sheet-node",
 ];
 
 function sanitizeActions(raw: unknown, context: OracleCanvasContext): OracleAction[] {

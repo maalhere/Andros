@@ -16,6 +16,15 @@
 --   4b. (Sprint 7.6) @usuario, amistades y espacios compartidos
 --       → profiles.username, friendships, workspace_members y la función
 --         is_workspace_member() que usan las políticas RLS de la sección 5.
+--   9. (Sprint 11) Vista Invitado: enlace público de solo lectura sin cuenta
+--      → workspaces.public_share_token / public_share_enabled y la función
+--        get_public_workspace(token) (SECURITY DEFINER, solo lectura).
+--  10. (Sprint 12) Librería de fichas replicables
+--      → profiles.form_library (JSONB) y el tipo de nodo "form-sheet-node".
+--        Sin ejecutar esto, la librería sigue funcionando en localStorage.
+--  11. (Sprint 13) Fichas de Fórmula LaTeX reactivas
+--      → el tipo de nodo "formula-sheet-node" en el check de workspace_nodes.
+--        La Vista Invitado ya recibe los cables (`connections`) para calcularlas.
 -- ============================================================================
 
 create extension if not exists "pgcrypto";
@@ -43,12 +52,15 @@ create table if not exists public.profiles (
   avatar_url  text,
   -- Ajustes de comodidad (tema, cuadricula, cables...) sincronizados entre dispositivos.
   preferences jsonb not null default '{}'::jsonb,
+  -- (Sprint 12) Librería personal de fichas: { version, templates[], deleted{} }.
+  form_library jsonb not null default '{}'::jsonb,
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now()
 );
 
 -- Para bases de datos ya creadas: anade la columna si falta.
 alter table public.profiles add column if not exists preferences jsonb not null default '{}'::jsonb;
+alter table public.profiles add column if not exists form_library jsonb not null default '{}'::jsonb;
 
 drop trigger if exists profiles_set_updated_at on public.profiles;
 create trigger profiles_set_updated_at
@@ -122,7 +134,8 @@ create table if not exists public.workspace_nodes (
   type           text not null check (
                    type in (
                      'file-node', 'sketch-note-node', 'calc-latex-node',
-                     'resource-link-node', 'code-lab-node', 'ai-chat-node'
+                     'resource-link-node', 'code-lab-node', 'ai-chat-node',
+                     'form-sheet-node', 'formula-sheet-node'
                    )
                  ),
   title          text not null default '',
@@ -151,6 +164,11 @@ create trigger workspace_nodes_set_updated_at
 -- sesión: vive solo en memoria mientras dura la transmisión y NUNCA se guarda
 -- aquí, por eso NO se añade al check (así no quedan pantallas muertas en el
 -- lienzo al cerrar). Si algún cliente intentara guardarlo, el check lo rechaza.
+-- SPRINT 13: se agregó "formula-sheet-node" (Ficha de Fórmula LaTeX reactiva).
+-- Su `payload` guarda LaTeX, expresión, variables (alias, valor manual y enlace
+-- a un campo de otra tarjeta). El resultado NO se guarda: se calcula en vivo.
+-- SPRINT 12: se agregó "form-sheet-node" (Ficha estructurada con fotos). Sus
+-- fotos viajan comprimidas (WebP/JPEG ≤ 1280 px) dentro de `payload`.
 -- SPRINT 2: se agregó "ai-chat-node" (Conversación IA). Volver a ejecutar
 -- este archivo actualiza el check sin tocar los datos existentes.
 -- BLOQUE 3: se agregaron los nodos "resource-link-node" (Enlace / Fuente) y
@@ -161,7 +179,8 @@ alter table public.workspace_nodes add constraint workspace_nodes_type_check
   check (
     type in (
       'file-node', 'sketch-note-node', 'calc-latex-node',
-      'resource-link-node', 'code-lab-node', 'ai-chat-node'
+      'resource-link-node', 'code-lab-node', 'ai-chat-node',
+      'form-sheet-node', 'formula-sheet-node'
     )
   );
 
@@ -829,3 +848,108 @@ create policy "andros_collab_send"
   for insert
   to authenticated
   with check ( realtime.topic() like 'andros-collab:%' );
+
+-- ============================================================================
+-- 9. VISTA INVITADO (Sprint 11): enlace público de SOLO LECTURA, sin cuenta
+--    · El dueño lo activa o desactiva desde «Compartir espacio». Desactivarlo
+--      lo apaga al instante; «Generar enlace nuevo» cambia el token y el
+--      enlace anterior deja de funcionar para siempre.
+--    · `public_share_token`: 32 caracteres aleatorios (base64url, 192 bits)
+--      generados con crypto.getRandomValues en el navegador del dueño.
+--    · Nadie lee las tablas de forma anónima: la ÚNICA puerta es la función
+--      get_public_workspace(token) (SECURITY DEFINER, solo SELECT), que
+--      devuelve el nombre del espacio, sus nodos y sus cables. Nunca devuelve
+--      correos, perfiles, ids de usuario, rutas de archivos, el historial de
+--      los chats IA ni datos de otros espacios.
+--    Idempotente: se puede ejecutar varias veces sin perder datos.
+-- ============================================================================
+alter table public.workspaces
+  add column if not exists public_share_token text unique;
+
+alter table public.workspaces
+  add column if not exists public_share_enabled boolean not null default false;
+
+alter table public.workspaces drop constraint if exists workspaces_public_share_token_format;
+alter table public.workspaces add constraint workspaces_public_share_token_format
+  check (public_share_token is null or public_share_token ~ '^[A-Za-z0-9_-]{24,64}$');
+
+-- Solo el DUEÑO activa, desactiva o cambia el enlace público (los miembros no).
+create or replace function public.workspaces_guard_public_share()
+returns trigger
+language plpgsql
+as $$
+begin
+  if auth.uid() is null then
+    return new; -- SQL Editor / service role
+  end if;
+  if (new.public_share_token is distinct from old.public_share_token
+      or new.public_share_enabled is distinct from old.public_share_enabled)
+     and auth.uid() is distinct from old.owner_id then
+    raise exception 'Solo el dueño puede cambiar el enlace público de este espacio.';
+  end if;
+  if new.public_share_enabled and new.public_share_token is null then
+    raise exception 'Un enlace público activo necesita un token.';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists workspaces_guard_public_share on public.workspaces;
+create trigger workspaces_guard_public_share
+  before update on public.workspaces
+  for each row execute function public.workspaces_guard_public_share();
+
+-- Lectura pública del tablero (anon y authenticated), solo si el token
+-- coincide y el enlace está activo. Devuelve NULL en cualquier otro caso.
+create or replace function public.get_public_workspace(share_token text)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select jsonb_build_object(
+    'name', w.name,
+    'updatedAt', w.updated_at,
+    'nodes', coalesce((
+      select jsonb_agg(
+        jsonb_build_object(
+          'id', n.id,
+          'type', n.type,
+          'title', n.title,
+          'codeTag', n.code_tag,
+          'summary', n.summary,
+          'x', n.position_x,
+          'y', n.position_y,
+          'payload', case n.type
+            -- Archivos: solo nombre, tipo y medidas (nunca la ruta del bucket).
+            when 'file-node' then
+              n.payload - 'storagePath' - 'downloadUrl' - 'errorMessage' - 'checksum'
+            -- Chats IA: solo el resumen visible, nunca la conversación.
+            when 'ai-chat-node' then
+              jsonb_build_object('summary', n.payload -> 'summary')
+            else n.payload
+          end
+        )
+        order by n.sort_order desc
+      )
+      from public.workspace_nodes n
+      where n.workspace_id = w.id
+    ), '[]'::jsonb),
+    'connections', coalesce((
+      select jsonb_agg(
+        jsonb_build_object('id', c.id, 'from', c.from_node_id, 'to', c.to_node_id, 'label', c.label)
+      )
+      from public.workspace_connections c
+      where c.workspace_id = w.id
+    ), '[]'::jsonb)
+  )
+  from public.workspaces w
+  where share_token ~ '^[A-Za-z0-9_-]{24,64}$'
+    and w.public_share_enabled
+    and w.public_share_token = share_token
+  limit 1;
+$$;
+
+revoke all on function public.get_public_workspace(text) from public;
+grant execute on function public.get_public_workspace(text) to anon, authenticated;

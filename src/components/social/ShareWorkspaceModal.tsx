@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
-import { Copy, Loader2, LogOut, Share2, UserMinus, UserPlus, Users } from "lucide-react";
+import { Copy, FileText, Globe, Loader2, LogOut, RefreshCw, Share2, UserMinus, UserPlus, Users } from "lucide-react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { useCloudStore } from "@/store/useCloudStore";
 import { useWorkspaceManagerStore } from "@/store/useWorkspaceManagerStore";
@@ -12,6 +12,16 @@ import { refreshSocial } from "@/lib/social/useSocialSync";
 import { buildWorkspaceLink } from "@/lib/collab/room";
 import { copyWorkspaceLink } from "@/lib/collab/useCollabRoom";
 import { openCloudWorkspace, refreshCloudWorkspaceList } from "@/hooks/useCloudSync";
+import { usePlanExportStore } from "@/store/usePlanExportStore";
+import { copyText } from "@/lib/collab/room";
+import {
+  PUBLIC_SHARE_SETUP_HINT,
+  PublicShareSetupError,
+  buildGuestLink,
+  readPublicShare,
+  updatePublicShare,
+  type PublicShareState,
+} from "@/lib/share/publicShare";
 import {
   SOCIAL_SETUP_HINT,
   SocialSetupError,
@@ -35,6 +45,10 @@ import {
 //     de voz a quien sea miembro. No hay enlace de llamada aparte.
 //   · El dueño añade amistades en 1 clic (`workspace_members`) y puede
 //     quitarlas (con «Deshacer»). Cada miembro puede salir por su cuenta.
+//   · Enlace público «Vista Invitado» (`/ver/<token>`): solo lectura y sin
+//     cuenta, para voluntarios, clientes o directivos. Solo el dueño lo activa,
+//     lo desactiva o genera uno nuevo (el anterior deja de funcionar).
+//   · Atajo a «Exportar Plan del Día» (PDF + resumen para WhatsApp).
 // ============================================================================
 
 /** Botón de la barra superior (escritorio). */
@@ -49,6 +63,180 @@ export const ShareWorkspaceButton: React.FC = () => (
     <Share2 className="w-4 h-4" aria-hidden="true" />
   </button>
 );
+
+/** Interruptor accesible (role="switch") con área táctil de 44 px en el teléfono. */
+const Switch: React.FC<{ checked: boolean; disabled?: boolean; onChange: () => void; labelledBy: string }> = ({
+  checked,
+  disabled,
+  onChange,
+  labelledBy,
+}) => (
+  <button
+    type="button"
+    role="switch"
+    aria-checked={checked}
+    aria-labelledby={labelledBy}
+    disabled={disabled}
+    onClick={onChange}
+    className="shrink-0 w-14 h-11 md:w-11 md:h-9 -mr-1.5 flex items-center justify-center rounded-lg disabled:opacity-50 active:scale-[0.96] spring-micro"
+  >
+    <span
+      aria-hidden="true"
+      className={`relative w-9 h-5 rounded-full border spring-micro ${
+        checked ? "bg-andros-accent-fill border-transparent" : "bg-andros-border/60 border-andros-border-active"
+      }`}
+    >
+      <span
+        className={`absolute top-0.5 left-0.5 w-3.5 h-3.5 rounded-full shadow-sm spring-micro ${
+          checked ? "translate-x-4 bg-white" : "bg-andros-card"
+        }`}
+      />
+    </span>
+  </button>
+);
+
+/** Sección «Enlace público (Vista Invitado)» — solo para el dueño. */
+const GuestLinkSection: React.FC<{ workspaceId: string; workspaceName: string }> = ({ workspaceId, workspaceName }) => {
+  const [state, setState] = useState<PublicShareState | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [setupMissing, setSetupMissing] = useState(false);
+  const [confirmRotate, setConfirmRotate] = useState(false);
+  const guard = useSubmitGuard();
+
+  useEffect(() => {
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
+    let cancelled = false;
+    readPublicShare(supabase, workspaceId)
+      .then((next) => {
+        if (!cancelled) setState(next);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        if (err instanceof PublicShareSetupError) setSetupMissing(true);
+        else setError(describe(err, "No se pudo leer el enlace público"));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId]);
+
+  const apply = (next: { enabled: boolean; rotate?: boolean }) =>
+    guard.run(async () => {
+      const supabase = getSupabaseBrowserClient();
+      if (!supabase || !state) return;
+      try {
+        const updated = await updatePublicShare(supabase, workspaceId, state, next);
+        setState(updated);
+        setError(null);
+        setConfirmRotate(false);
+        toast({
+          message: next.rotate
+            ? "Enlace de invitado nuevo listo. El anterior ya no funciona."
+            : updated.enabled
+              ? `Vista Invitado activada para «${workspaceName}».`
+              : "Enlace público desactivado: ya nadie puede abrirlo.",
+          tone: "success",
+        });
+      } catch (err) {
+        if (err instanceof PublicShareSetupError) setSetupMissing(true);
+        else setError(describe(err, "No se pudo cambiar el enlace público"));
+      }
+    });
+
+  const guestLink = state?.enabled && state.token ? buildGuestLink(state.token) : "";
+
+  const copyGuestLink = async () => {
+    const ok = await copyText(guestLink);
+    toast({
+      message: ok
+        ? "Enlace de invitado copiado. Quien lo abra verá el tablero en solo lectura."
+        : "No se pudo copiar el enlace.",
+      tone: ok ? "success" : "error",
+    });
+  };
+
+  return (
+    <section aria-labelledby="andros-share-public" className="space-y-2 pt-4 border-t border-andros-border">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 id="andros-share-public" className="text-xs font-semibold text-andros-primary flex items-center gap-1.5">
+            <Globe className="w-3.5 h-3.5 text-andros-muted" aria-hidden="true" />
+            Enlace público (Vista Invitado)
+          </h3>
+          <p className="mt-0.5 text-[11px] leading-relaxed text-andros-muted">
+            Cualquiera con el enlace ve el tablero en solo lectura, sin cuenta: ideal para
+            voluntarios, clientes o directivos. Función Pro, abierta durante el acceso anticipado.
+          </p>
+        </div>
+        {!setupMissing && (
+          <Switch
+            checked={Boolean(state?.enabled)}
+            disabled={!state || guard.pending}
+            onChange={() => void apply({ enabled: !state?.enabled })}
+            labelledBy="andros-share-public"
+          />
+        )}
+      </div>
+
+      {setupMissing && <SetupNotice text={PUBLIC_SHARE_SETUP_HINT} />}
+      {error && (
+        <p className="text-xs text-andros-danger" role="alert">
+          {error}
+        </p>
+      )}
+      {!state && !error && !setupMissing && (
+        <p className="flex items-center gap-2 text-xs text-andros-muted">
+          <Loader2 className="w-4 h-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+          Cargando…
+        </p>
+      )}
+
+      {guestLink && (
+        <>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <input
+              readOnly
+              value={guestLink}
+              aria-label="Enlace de invitado"
+              onFocus={(e) => e.currentTarget.select()}
+              className="flex-1 min-w-0 h-11 md:h-9 px-2.5 rounded-lg bg-andros-canvas border border-andros-border font-mono text-[11px] text-andros-muted focus:outline-none focus:border-andros-border-active"
+            />
+            <button type="button" onClick={() => void copyGuestLink()} className={`${BUTTON_PRIMARY} shrink-0`}>
+              <Copy className="w-4 h-4" aria-hidden="true" />
+              Copiar enlace de invitado
+            </button>
+          </div>
+          {confirmRotate ? (
+            <div role="alert" className="flex flex-wrap items-center gap-2 text-[11px] text-andros-warning">
+              <span className="flex-1 min-w-[12rem]">El enlace actual dejará de funcionar para quien ya lo tenga.</span>
+              <button type="button" onClick={() => setConfirmRotate(false)} className={BUTTON_SECONDARY}>
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={guard.pending}
+                onClick={() => void apply({ enabled: true, rotate: true })}
+                className={BUTTON_DANGER}
+              >
+                Generar enlace nuevo
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmRotate(true)}
+              className="min-h-[44px] md:min-h-0 inline-flex items-center gap-1.5 text-[11px] text-andros-muted hover:text-andros-primary underline-offset-4 hover:underline"
+            >
+              <RefreshCw className="w-3.5 h-3.5" aria-hidden="true" />
+              Generar enlace nuevo (invalida el actual)
+            </button>
+          )}
+        </>
+      )}
+    </section>
+  );
+};
 
 function describe(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? `${fallback}: ${error.message}` : fallback;
@@ -239,6 +427,31 @@ export const ShareWorkspaceModal: React.FC = () => {
               Un solo enlace abre el lienzo y su canal de voz. Solo funciona para las personas que
               estén en la lista de miembros.
             </p>
+          </section>
+
+          {/* Vista Invitado: solo el dueño la activa */}
+          {isOwner && <GuestLinkSection workspaceId={workspaceId} workspaceName={workspaceName} />}
+
+          {/* Plan del Día: PDF imprimible + resumen para WhatsApp */}
+          <section aria-labelledby="andros-share-export" className="space-y-1.5 pt-4 border-t border-andros-border">
+            <h3 id="andros-share-export" className="text-xs font-semibold text-andros-primary">
+              Plan del Día
+            </h3>
+            <p className="text-[11px] leading-relaxed text-andros-muted">
+              Un documento ejecutivo para imprimir o guardar en PDF, y un resumen listo para pegar en
+              un grupo de WhatsApp.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                close();
+                usePlanExportStore.getState().setOpen(true);
+              }}
+              className={BUTTON_SECONDARY}
+            >
+              <FileText className="w-4 h-4" aria-hidden="true" />
+              Exportar Plan del Día
+            </button>
           </section>
 
           {setupMissing ? (

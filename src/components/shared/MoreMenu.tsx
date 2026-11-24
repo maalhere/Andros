@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   Crown,
   Eraser,
+  FileText,
   Gauge,
   Sparkle,
   FolderArchive,
@@ -35,6 +36,8 @@ import { clearInkWithUndo, resetWorkspaceWithUndo } from "@/lib/canvas/undoable"
 import { LEGAL_LINKS } from "@/lib/site";
 import { openCookiePreferences } from "@/lib/consent";
 import { saveWorkspaceAsTemplate } from "@/lib/templates/applyBlueprint";
+import { usePlanExportStore } from "@/store/usePlanExportStore";
+import { useCanvasReadOnly } from "@/store/useCollabStore";
 
 // ============================================================================
 // ANDROS — MENÚ "⋯ MÁS OPCIONES" (barra superior)
@@ -51,6 +54,9 @@ interface MenuItem {
   /** Conteo pendiente (p. ej. solicitudes de amistad). */
   badge?: number;
 }
+
+/** Opciones que modifican el lienzo: se ocultan en modo solo lectura (sala llena). */
+const READ_ONLY_HIDDEN = new Set(["zip", "save-template", "clear"]);
 
 /** Confirmación antes de borrar el contenido del espacio actual. */
 const ClearWorkspaceDialog: React.FC<{ onClose: () => void }> = ({ onClose }) => {
@@ -261,8 +267,10 @@ export const MoreMenu: React.FC = () => {
   }, [open]);
 
   const expert = useIsExpert();
+  // Sala llena (7.º): nada que importe, limpie o cree plantillas desde este lienzo.
+  const readOnly = useCanvasReadOnly();
 
-  const items: MenuItem[] = [
+  const allItems: MenuItem[] = [
     {
       id: "mode",
       label: expert ? "Cambiar a Modo Simple" : "Cambiar a Modo Experto (3D, CodeLab)",
@@ -281,6 +289,12 @@ export const MoreMenu: React.FC = () => {
       label: "Compartir espacio",
       icon: <Share2 className="w-4 h-4" />,
       onSelect: () => useSocialStore.getState().setShareOpen(true),
+    },
+    {
+      id: "export-plan",
+      label: "Exportar Plan del Día",
+      icon: <FileText className="w-4 h-4" />,
+      onSelect: () => usePlanExportStore.getState().setOpen(true),
     },
     {
       id: "arena",
@@ -348,6 +362,7 @@ export const MoreMenu: React.FC = () => {
       danger: true,
     },
   ];
+  const items = readOnly ? allItems.filter((item) => !READ_ONLY_HIDDEN.has(item.id)) : allItems;
 
   return (
     <div ref={ref} className="relative">

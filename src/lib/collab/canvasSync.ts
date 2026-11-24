@@ -28,7 +28,7 @@ import type {
   NodeDeletePayload,
   NodeUpsertPayload,
 } from "@/types/collab";
-import type { EngineeringNodeData, NodeConnection } from "@/types/workspace";
+import type { EngineeringNodeData, FormPhoto, NodeConnection } from "@/types/workspace";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { useImpactStore } from "@/store/useImpactStore";
 import { sanitizeAlertEntry } from "@/lib/canvas/impact";
@@ -38,6 +38,13 @@ import { isApplyingRemoteCollab, runAsRemoteCollab } from "./remoteFlag";
 
 /** Intervalo mínimo entre dos envíos del mismo nodo (~25 fps). */
 export const NODE_SEND_INTERVAL_MS = 40;
+/**
+ * Cursores remotos a ~14 fps (70 ms). Con 6 personas moviendo el ratón a la vez
+ * son ~86 mensajes/s en total: holgado bajo el límite de Realtime del plan
+ * gratuito de Supabase. El receptor interpola en CSS (75 ms lineal), así que
+ * el movimiento se sigue viendo continuo.
+ */
+export const CURSOR_SEND_INTERVAL_MS = 70;
 /** Realtime limita cada mensaje: se queda holgado por debajo. */
 const MAX_EVENT_BYTES = 180_000;
 const MAX_SNAPSHOT_PART_BYTES = 120_000;
@@ -67,6 +74,21 @@ function byteLength(value: unknown): number {
  * los archivos incrustados enormes saturarían el canal.
  */
 function nodeForWire(node: EngineeringNodeData): EngineeringNodeData {
+  if (node.type === "form-sheet-node") {
+    // Fichas con varias fotos: si no caben en un mensaje, viajan solo las
+    // miniaturas (el receptor conserva su imagen completa si ya la tenía).
+    if (byteLength(node) <= MAX_EVENT_BYTES - 4_000) return node;
+    const light = (photos: FormPhoto[] | undefined) => (photos ?? []).map((p) => ({ ...p, src: "" }));
+    const data = node.formSheetData;
+    return {
+      ...node,
+      formSheetData: {
+        ...data,
+        attachments: light(data.attachments),
+        fields: data.fields.map((f) => (f.type === "photo" ? { ...f, photos: light(f.photos) } : f)),
+      },
+    };
+  }
   if (node.type !== "file-node") return node;
   const url = node.fileData.downloadUrl;
   const unusable =
@@ -216,6 +238,24 @@ function mergeIncomingNode(
   incoming: EngineeringNodeData,
   local: EngineeringNodeData | undefined
 ): EngineeringNodeData {
+  if (incoming.type === "form-sheet-node" && local?.type === "form-sheet-node") {
+    // Foto que llegó solo como miniatura: se conserva la imagen completa local.
+    const fullById = new Map<string, string>();
+    for (const p of local.formSheetData.attachments) if (p.src) fullById.set(p.id, p.src);
+    for (const f of local.formSheetData.fields) for (const p of f.photos ?? []) if (p.src) fullById.set(p.id, p.src);
+    if (fullById.size === 0) return incoming;
+    const restore = (photos: FormPhoto[] | undefined) =>
+      (photos ?? []).map((p) => (p.src ? p : { ...p, src: fullById.get(p.id) ?? "" }));
+    const data = incoming.formSheetData;
+    return {
+      ...incoming,
+      formSheetData: {
+        ...data,
+        attachments: restore(data.attachments),
+        fields: data.fields.map((f) => (f.type === "photo" ? { ...f, photos: restore(f.photos) } : f)),
+      },
+    };
+  }
   if (incoming.type !== "file-node" || local?.type !== "file-node") return incoming;
   const sameFile =
     local.fileData.checksum === incoming.fileData.checksum &&

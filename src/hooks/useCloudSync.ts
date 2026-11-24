@@ -56,6 +56,8 @@ import type {
   TelemetryMetric,
 } from "@/types/workspace";
 import type { CanvasStroke } from "@/types/workspace";
+import { sanitizeFormSheet } from "@/lib/forms/formSchema";
+import { sanitizeFormulaSheet } from "@/lib/math/formulaSchema";
 
 const SAVE_DEBOUNCE_MS = 1200;
 /** Duración de los enlaces de descarga firmados (7 días). */
@@ -144,6 +146,14 @@ function cloudAiChatPayload(data: AiChatPayload): AiChatPayload {
 const AI_NODE_SETUP_HINT =
   "La base de datos todavía no acepta Nodos IA. Ejecuta de nuevo supabase/schema.sql en el SQL Editor de Supabase (añade \"ai-chat-node\" a los tipos permitidos)";
 
+/** Postgres 23514: la base aún no acepta el tipo de nodo "form-sheet-node". */
+const FORM_NODE_SETUP_HINT =
+  "La base de datos todavía no acepta Fichas. Ejecuta de nuevo supabase/schema.sql en el SQL Editor de Supabase (añade \"form-sheet-node\" a los tipos permitidos); mientras tanto, tus fichas siguen en este dispositivo";
+
+/** Postgres 23514: la base aún no acepta el tipo de nodo "formula-sheet-node". */
+const FORMULA_NODE_SETUP_HINT =
+  "La base de datos todavía no acepta Fichas de Fórmula. Ejecuta de nuevo supabase/schema.sql en el SQL Editor de Supabase (añade \"formula-sheet-node\" a los tipos permitidos); mientras tanto, tus fórmulas siguen en este dispositivo";
+
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 function nodeToRow(
@@ -163,7 +173,11 @@ function nodeToRow(
             ? node.resourceLinkData
             : node.type === "ai-chat-node"
               ? cloudAiChatPayload(node.aiChatData)
-              : node.codeLabData;
+              : node.type === "form-sheet-node"
+                ? node.formSheetData
+                : node.type === "formula-sheet-node"
+                  ? node.formulaSheetData
+                  : node.codeLabData;
 
   return {
     workspace_id: workspaceId,
@@ -244,6 +258,18 @@ function rowToNode(row: NodeRow): EngineeringNodeData | null {
         },
       };
     }
+    case "form-sheet-node":
+      return {
+        ...base,
+        type: "form-sheet-node",
+        formSheetData: sanitizeFormSheet(payload),
+      };
+    case "formula-sheet-node":
+      return {
+        ...base,
+        type: "formula-sheet-node",
+        formulaSheetData: sanitizeFormulaSheet(payload),
+      };
     case "code-lab-node":
       return {
         ...base,
@@ -301,6 +327,8 @@ const NODE_DATA_KEY: Record<string, string> = {
   "resource-link-node": "resourceLinkData",
   "code-lab-node": "codeLabData",
   "ai-chat-node": "aiChatData",
+  "form-sheet-node": "formSheetData",
+  "formula-sheet-node": "formulaSheetData",
 };
 
 /** Valida un nodo leído de un archivo externo (.andros.zip) y completa lo que falte. */
@@ -567,6 +595,12 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
           .from("workspace_nodes")
           .upsert(changedNodes, { onConflict: "workspace_id,id" });
         if (error) {
+          if (error.code === "23514" && changedNodes.some((r) => r.type === "formula-sheet-node")) {
+            throw new Error(FORMULA_NODE_SETUP_HINT);
+          }
+          if (error.code === "23514" && changedNodes.some((r) => r.type === "form-sheet-node")) {
+            throw new Error(FORM_NODE_SETUP_HINT);
+          }
           if (error.code === "23514" && changedNodes.some((r) => r.type === "ai-chat-node")) {
             throw new Error(AI_NODE_SETUP_HINT);
           }

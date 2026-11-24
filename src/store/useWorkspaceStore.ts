@@ -13,6 +13,8 @@ import {
   EngineeringNodeBase,
   EngineeringNodeData,
   FileNodePayload,
+  FormSheetPayload,
+  FormulaSheetPayload,
   LegacyNodeCategory,
   MobileSheetType,
   NodeArchetype,
@@ -28,6 +30,18 @@ import {
   ThemeMode,
 } from "@/types/workspace";
 import { SHEET_MAX_ROWS } from "@/lib/canvas/sheet";
+import {
+  createEmptyFormSheetPayload,
+  formatFieldValue,
+  FORM_SHEET_CODE_TAG,
+} from "@/lib/forms/formSchema";
+
+import {
+  createEmptyFormulaSheetPayload,
+  FORMULA_SHEET_CODE_TAG,
+} from "@/lib/math/formulaSchema";
+
+export { createEmptyFormSheetPayload, createEmptyFormulaSheetPayload };
 
 // ============================================================================
 // 1. CONTRATO DEL STORE
@@ -262,7 +276,9 @@ export function resolveNodeArchetype(
     type === "calc-latex-node" ||
     type === "resource-link-node" ||
     type === "code-lab-node" ||
-    type === "ai-chat-node"
+    type === "ai-chat-node" ||
+    type === "form-sheet-node" ||
+    type === "formula-sheet-node"
   ) {
     return type;
   }
@@ -276,6 +292,8 @@ export const NODE_ARCHETYPE_LABELS: Record<NodeArchetype, string> = {
   "resource-link-node": "Enlace / Fuente",
   "code-lab-node": "Código / Cálculo",
   "ai-chat-node": "Conversación IA",
+  "form-sheet-node": "Ficha",
+  "formula-sheet-node": "Fórmula",
 };
 
 const DEFAULT_TITLES: Record<NodeArchetype, string> = {
@@ -285,6 +303,8 @@ const DEFAULT_TITLES: Record<NodeArchetype, string> = {
   "resource-link-node": "Nuevo Enlace / Fuente",
   "code-lab-node": "Nuevo Laboratorio de Código",
   "ai-chat-node": "Nodo IA",
+  "form-sheet-node": "Nueva ficha",
+  "formula-sheet-node": "Nueva fórmula",
 };
 
 const DEFAULT_TAGS: Record<NodeArchetype, string> = {
@@ -294,6 +314,8 @@ const DEFAULT_TAGS: Record<NodeArchetype, string> = {
   "resource-link-node": "LINK",
   "code-lab-node": "CODE-v1",
   "ai-chat-node": "AI-CHAT",
+  "form-sheet-node": FORM_SHEET_CODE_TAG,
+  "formula-sheet-node": FORMULA_SHEET_CODE_TAG,
 };
 
 /** Título que recibe un nodo de archivo recién creado (aún sin archivo). */
@@ -506,6 +528,26 @@ function buildNodeFromInput(
       },
     };
   }
+  if (archetype === "form-sheet-node") {
+    return {
+      ...base,
+      type: "form-sheet-node",
+      formSheetData: {
+        ...createEmptyFormSheetPayload(),
+        ...partial?.formSheetData,
+      },
+    };
+  }
+  if (archetype === "formula-sheet-node") {
+    return {
+      ...base,
+      type: "formula-sheet-node",
+      formulaSheetData: {
+        ...createEmptyFormulaSheetPayload(),
+        ...partial?.formulaSheetData,
+      },
+    };
+  }
   if (archetype === "ai-chat-node") {
     return {
       ...base,
@@ -671,6 +713,8 @@ export function textBlocksToHtml(blocks: NoteTextBlock[]): string {
 
 /** Alto máximo (px) del área de texto de un cuaderno en el lienzo. */
 export const SKETCH_TEXT_MAX_HEIGHT = 320;
+/** Alto máximo (px) de la lista de campos de una ficha en el lienzo (luego hay scroll). */
+export const FORM_FIELDS_MAX_HEIGHT = 520;
 
 /** Ancho real de un nodo en el lienzo (`w-80` en `EngineeringNode`). */
 const CANVAS_NODE_WIDTH = 320;
@@ -702,6 +746,13 @@ function noteFullText(node: EngineeringNodeData): string {
   }
   if (node.type === "code-lab-node") return node.codeLabData.code;
   if (node.type === "ai-chat-node") return node.aiChatData.summary ?? "";
+  if (node.type === "form-sheet-node") {
+    return node.formSheetData.fields.map((f) => `${f.label}: ${formatFieldValue(f)}`).join("\n");
+  }
+  if (node.type === "formula-sheet-node") {
+    const data = node.formulaSheetData;
+    return [data.description, data.resultLabel, ...data.variables.map((v) => v.label)].filter(Boolean).join("\n");
+  }
   return node.summary ?? "";
 }
 
@@ -712,6 +763,8 @@ function defaultHumanZone(node: EngineeringNodeData): HumanLayoutZone {
   if (node.type === "resource-link-node") return 3;
   if (node.type === "code-lab-node") return 3;
   if (node.type === "ai-chat-node") return 2;
+  if (node.type === "form-sheet-node") return 2;
+  if (node.type === "formula-sheet-node") return 3;
   const header = `${node.title} ${node.codeTag}`;
   if (REFERENCE_PATTERN.test(header)) return 3;
   const text = noteFullText(node);
@@ -770,6 +823,22 @@ export function estimateNodeHeight(node: EngineeringNodeData): number {
     height += node.resourceLinkData.platform === "youtube" ? 220 : 150;
   } else if (node.type === "ai-chat-node") {
     height += node.aiChatData.messages.length > 0 ? 300 : 200;
+  } else if (node.type === "form-sheet-node") {
+    const data = node.formSheetData;
+    let fields = 0;
+    for (const field of data.fields) {
+      if (field.type === "textarea") fields += 84;
+      else if (field.type === "photo") fields += (field.photos?.length ?? 0) > 0 ? 112 : 64;
+      else if (field.type === "checkbox") fields += 40;
+      else fields += 58;
+    }
+    // La lista de campos tiene alto máximo con scroll propio (ver FormSheetNode).
+    height += 40 + Math.min(fields, FORM_FIELDS_MAX_HEIGHT) + 52;
+    if (data.attachments.length > 0) height += 96;
+  } else if (node.type === "formula-sheet-node") {
+    // KaTeX + tabla de variables + sustitución + resultado destacado.
+    const variables = Array.isArray(node.formulaSheetData.variables) ? node.formulaSheetData.variables.length : 0;
+    height += 72 + 28 + variables * 52 + 64 + 76 + 48;
   } else {
     // code-lab-node
     const data = node.codeLabData;
@@ -1323,6 +1392,24 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
               aiChatData: {
                 ...node.aiChatData,
                 ...(patch as Partial<AiChatPayload>),
+              },
+            };
+          case "form-sheet-node":
+            return {
+              ...node,
+              updatedAt: "Ahora mismo",
+              formSheetData: {
+                ...node.formSheetData,
+                ...(patch as Partial<FormSheetPayload>),
+              },
+            };
+          case "formula-sheet-node":
+            return {
+              ...node,
+              updatedAt: "Ahora mismo",
+              formulaSheetData: {
+                ...node.formulaSheetData,
+                ...(patch as Partial<FormulaSheetPayload>),
               },
             };
         }

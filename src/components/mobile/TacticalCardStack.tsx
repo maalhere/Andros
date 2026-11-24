@@ -20,6 +20,8 @@ const FILTER_TABS: { id: "all" | NodeArchetype; label: string }[] = [
   { id: "resource-link-node", label: "Enlaces" },
   { id: "code-lab-node", label: "Código" },
   { id: "ai-chat-node", label: "IA" },
+  { id: "form-sheet-node", label: "Fichas" },
+  { id: "formula-sheet-node", label: "Fórmulas" },
 ];
 
 export const TacticalCardStack: React.FC = () => {

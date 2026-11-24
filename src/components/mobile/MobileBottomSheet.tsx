@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Bot,
+  ClipboardList,
   Box,
   Cable,
   Calculator,
@@ -15,6 +16,7 @@ import {
   MessagesSquare,
   NotebookPen,
   Sigma,
+  SquareFunction,
   StickyNote,
   Terminal,
   X,
@@ -27,6 +29,7 @@ import { useIsExpert } from "@/store/useSettingsStore";
 import { motion, useReducedMotion } from "framer-motion";
 import { useSwipeToDismiss } from "@/hooks/useSwipeToDismiss";
 import { springOrInstant } from "@/lib/motion";
+import { useCanvasReadOnly } from "@/store/useCollabStore";
 
 // ============================================================================
 // Piezas compartidas
@@ -46,6 +49,10 @@ const renderArchetypeIcon = (type: NodeArchetype, className: string) => {
       return <Terminal className={className} />;
     case "ai-chat-node":
       return <Bot className={className} />;
+    case "form-sheet-node":
+      return <ClipboardList className={className} />;
+    case "formula-sheet-node":
+      return <SquareFunction className={className} />;
   }
 };
 
@@ -317,6 +324,8 @@ const QUICK_ADD_ICONS: Record<QuickAddKind, React.ReactNode> = {
   note: <StickyNote className="w-5 h-5" />,
   link: <Link2 className="w-5 h-5" />,
   calc: <Calculator className="w-5 h-5" />,
+  forms: <ClipboardList className="w-5 h-5" />,
+  formula: <SquareFunction className="w-5 h-5" />,
   ai: <Bot className="w-5 h-5" />,
   "ai-import": <MessagesSquare className="w-5 h-5" />,
 };
@@ -406,8 +415,11 @@ export const MobileBottomSheet: React.FC = () => {
   const setActiveMobileSheet = useWorkspaceStore((s) => s.setActiveMobileSheet);
   const reduced = useReducedMotion() ?? false;
   const { sheetProps, handleProps } = useSwipeToDismiss(() => setActiveMobileSheet("none"));
+  // Sala llena: ni «Agregar» ni «Conectar» (el lienzo es de solo lectura).
+  const readOnly = useCanvasReadOnly();
 
   if (
+    readOnly ||
     activeMobileSheet === "none" ||
     activeMobileSheet === "node-detail" ||
     activeMobileSheet === "library" ||

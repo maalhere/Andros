@@ -68,6 +68,7 @@ import {
   useMediaDevicesStore,
 } from "./mediaDevices";
 import {
+  CURSOR_SEND_INTERVAL_MS,
   SnapshotAssembler,
   applyRemoteAlertResolve,
   applyRemoteAlertUpsert,
@@ -86,8 +87,8 @@ import {
   resolveCurrentRoom,
 } from "./room";
 
-/** ~25 fps para los cursores (el receptor los suaviza con una transición de 75 ms). */
-export const CURSOR_SEND_INTERVAL_MS = 40;
+/** ~14 fps para los cursores (definido en `canvasSync.ts`; el receptor los interpola en CSS). */
+export { CURSOR_SEND_INTERVAL_MS };
 /** Un cursor sin moverse durante este tiempo se oculta. */
 const CURSOR_STALE_MS = 6000;
 /** Un nodo de pantalla finalizado se retira solo tras este tiempo. */
@@ -1345,7 +1346,7 @@ export async function copyWorkspaceLink(workspaceId?: string | null): Promise<vo
   );
 }
 
-/** Envía tu cursor (coordenadas del lienzo) a ~25 fps, siempre con la última posición. */
+/** Envía tu cursor (coordenadas del lienzo) a ~14 fps, siempre con la última posición. */
 export function sendCollabCursor(x: number, y: number): void {
   if (!session?.subscribed || !hasPeers() || collab().capacity.readOnly) return;
   pendingCursor = { x: Math.round(x), y: Math.round(y) };

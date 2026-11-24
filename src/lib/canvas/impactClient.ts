@@ -37,8 +37,9 @@ let quotaWarned = false;
 
 /** Texto comparable de una tarjeta (para `commitWithImpact` con edición en vivo). */
 export function snapshotOf(nodeId: string): string | null {
-  const node = useWorkspaceStore.getState().nodes.find((n) => n.id === nodeId);
-  return node ? impactSnapshot(node) : null;
+  const { nodes, connections } = useWorkspaceStore.getState();
+  const node = nodes.find((n) => n.id === nodeId);
+  return node ? impactSnapshot(node, { nodes, connections }) : null;
 }
 
 function newAlertId(): string {

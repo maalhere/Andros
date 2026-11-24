@@ -17,6 +17,8 @@ import type {
   NodeConnection,
 } from "@/types/workspace";
 import { formatScale, isIdentityScale } from "@/lib/3d/modelScale";
+import { serializeFormSheet } from "@/lib/forms/formSchema";
+import { serializeFormulaSheet, type FormulaGraph } from "@/lib/math/formulaBinding";
 
 /**
  * Límite de texto por nodo y total, para no saturar el contexto del modelo ni
@@ -79,8 +81,12 @@ export function serializeAiChat(node: AiChatEngineeringNode, maxMessages = 4): s
   return lines.join("\n");
 }
 
-/** Contenido vivo de un nodo, como texto legible para un modelo de IA. */
-export function serializeNodeForContext(node: EngineeringNodeData): string {
+/**
+ * Contenido vivo de un nodo, como texto legible para un modelo de IA.
+ * `graph` (opcional) permite a las Fichas de Fórmula leer los datos de sus
+ * fichas conectadas y exponer el resultado YA calculado.
+ */
+export function serializeNodeForContext(node: EngineeringNodeData, graph?: FormulaGraph): string {
   const lines: string[] = [];
   if (node.summary) lines.push(`Notas: ${node.summary}`);
 
@@ -182,6 +188,14 @@ export function serializeNodeForContext(node: EngineeringNodeData): string {
     case "ai-chat-node":
       lines.push(serializeAiChat(node));
       break;
+    case "form-sheet-node":
+      // Pares «label / fieldKey = valor unidad» (las imágenes no viajan a la IA).
+      lines.push(serializeFormSheet(node.title, node.formSheetData));
+      break;
+    case "formula-sheet-node":
+      // LaTeX, variables con su valor inyectado y origen, y el resultado final.
+      lines.push(serializeFormulaSheet(node, graph));
+      break;
   }
   return clip(lines.join("\n"), MAX_NODE_CHARS);
 }
@@ -258,7 +272,7 @@ export function collectUpstreamContext(
           type: node.type,
           depth,
           ...(edge.label ? { via: edge.label } : {}),
-          text: serializeNodeForContext(node),
+          text: serializeNodeForContext(node, { nodes, connections }),
         });
         next.push(node.id);
       }

@@ -198,6 +198,233 @@
   }
 }
 
+/* ==========================================================================
+   PLAN DEL DÍA (ExportPlanModal) — documento ejecutivo para PDF / papel
+   Invisible en pantalla; al imprimir es lo ÚNICO que sale. Sin librerías:
+   el navegador lo guarda como PDF desde su diálogo de impresión.
+   ========================================================================== */
+.andros-plan-sheet {
+  display: none;
+}
+
+@media print {
+  html:has(.andros-plan-sheet),
+  body:has(> .andros-plan-sheet) {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  body:has(> .andros-plan-sheet) > *:not(.andros-plan-sheet) {
+    display: none !important;
+  }
+
+  .andros-plan-sheet {
+    display: block;
+    color: #1a1a18;
+    font-family: Inter, -apple-system, "Segoe UI", sans-serif;
+    font-size: 10.5pt;
+    line-height: 1.45;
+  }
+
+  .andros-plan-sheet .aps-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 10mm;
+    padding-bottom: 4mm;
+    border-bottom: 1.5pt solid #1a1a18;
+  }
+
+  .andros-plan-sheet .aps-brand {
+    display: flex;
+    align-items: center;
+    gap: 2mm;
+    font-size: 8.5pt;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #555555;
+  }
+
+  .andros-plan-sheet .aps-brand svg {
+    width: 4.5mm;
+    height: 4.5mm;
+  }
+
+  .andros-plan-sheet h1 {
+    margin-top: 1.5mm;
+    font-size: 20pt;
+    font-weight: 700;
+    line-height: 1.15;
+    overflow-wrap: anywhere;
+  }
+
+  .andros-plan-sheet .aps-meta {
+    text-align: right;
+    font-size: 9pt;
+    color: #555555;
+    white-space: nowrap;
+  }
+
+  .andros-plan-sheet .aps-meta strong {
+    display: block;
+    font-size: 13pt;
+    color: #1a1a18;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .andros-plan-sheet section {
+    break-inside: avoid;
+    padding: 5mm 0 1mm;
+    border-bottom: 0.5pt solid #d5d2cb;
+  }
+
+  .andros-plan-sheet .aps-kicker {
+    font-size: 7.5pt;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #a9452a;
+  }
+
+  .andros-plan-sheet h2 {
+    margin: 0.5mm 0 2mm;
+    font-size: 12.5pt;
+    font-weight: 700;
+  }
+
+  .andros-plan-sheet h3 {
+    margin: 2mm 0 1mm;
+    font-size: 10.5pt;
+    font-weight: 700;
+  }
+
+  .andros-plan-sheet p {
+    margin: 0 0 1.5mm;
+  }
+
+  .andros-plan-sheet ul {
+    margin: 0 0 1.5mm;
+    padding-left: 5mm;
+  }
+
+  .andros-plan-sheet li {
+    margin: 0.6mm 0;
+  }
+
+  .andros-plan-sheet .aps-checklist {
+    list-style: none;
+    padding-left: 0;
+  }
+
+  .andros-plan-sheet .aps-checklist li {
+    display: flex;
+    gap: 2.5mm;
+    align-items: baseline;
+  }
+
+  .andros-plan-sheet .aps-box {
+    flex: none;
+    width: 3.4mm;
+    height: 3.4mm;
+    border: 0.75pt solid #1a1a18;
+    font-size: 7pt;
+    line-height: 3.2mm;
+    text-align: center;
+  }
+
+  .andros-plan-sheet .aps-done {
+    color: #555555;
+    text-decoration: line-through;
+  }
+
+  .andros-plan-sheet table {
+    width: 100%;
+    margin: 1mm 0 2mm;
+    border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .andros-plan-sheet th,
+  .andros-plan-sheet td {
+    padding: 1.6mm 2.5mm;
+    border-bottom: 0.5pt solid #d5d2cb;
+    text-align: left;
+    vertical-align: top;
+    overflow-wrap: anywhere;
+  }
+
+  .andros-plan-sheet th {
+    font-size: 8.5pt;
+    font-weight: 600;
+    color: #555555;
+    border-bottom: 1pt solid #1a1a18;
+  }
+
+  .andros-plan-sheet td + td,
+  .andros-plan-sheet th + th {
+    text-align: right;
+  }
+
+  .andros-plan-sheet tfoot td {
+    font-weight: 700;
+    border-top: 1pt solid #1a1a18;
+    border-bottom: none;
+  }
+
+  /* Fichas: tabla «Campo | Valor» con valores de texto a la izquierda. */
+  .andros-plan-sheet table.aps-fields td + td,
+  .andros-plan-sheet table.aps-fields th + th {
+    text-align: left;
+  }
+
+  .andros-plan-sheet table.aps-fields td:first-child {
+    width: 38%;
+    color: #555555;
+  }
+
+  /* Ficha de Fórmula: LaTeX (KaTeX) simbólico y sustitución numérica. */
+  .andros-plan-sheet .aps-formula {
+    margin: 1mm 0 2.5mm;
+    padding: 2mm 3mm;
+    border: 0.5pt solid #d5d2cb;
+    break-inside: avoid;
+  }
+
+  .andros-plan-sheet .aps-formula .katex-display {
+    margin: 0.5mm 0;
+  }
+
+  .andros-plan-sheet .aps-photos {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 3mm;
+    margin: 2mm 0 3mm;
+  }
+
+  .andros-plan-sheet .aps-photos img {
+    width: 100%;
+    max-height: 60mm;
+    object-fit: contain;
+    border: 0.5pt solid #d5d2cb;
+    break-inside: avoid;
+  }
+
+  .andros-plan-sheet .aps-note {
+    font-size: 9pt;
+    color: #555555;
+  }
+
+  .andros-plan-sheet a {
+    color: #1a1a18;
+    text-decoration: underline;
+  }
+
+  .andros-plan-sheet .aps-footer {
+    margin-top: 6mm;
+    font-size: 8pt;
+    color: #555555;
+  }
+}
+
 /* Capa components: `absolute`/`fixed` (utilities) siguen mandando sobre position. */
 @layer components {
   /* Área táctil ampliada sin cambiar el tamaño visual (Fitts): puertos y asas pequeñas */

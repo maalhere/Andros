@@ -6,8 +6,8 @@ export default function robots(): MetadataRoute.Robots {
     rules: {
       userAgent: "*",
       allow: "/",
-      // Endpoints de servidor y retorno de OAuth: sin valor para buscadores.
-      disallow: ["/api/", "/auth/"],
+      // Endpoints de servidor, retorno de OAuth y Vista Invitado (enlaces privados de solo lectura).
+      disallow: ["/api/", "/auth/", "/ver/"],
     },
     sitemap: `${SITE_URL}/sitemap.xml`,
     host: SITE_URL,

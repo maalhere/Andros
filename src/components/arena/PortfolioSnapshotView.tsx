@@ -2,7 +2,7 @@
 
 import React, { useMemo } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Bot, Box, Cable, Calculator, FileText, Link2, Quote, StickyNote, Terminal, X } from "lucide-react";
+import { Bot, Box, Cable, Calculator, ClipboardList, FileText, Link2, Quote, SquareFunction, StickyNote, Terminal, X } from "lucide-react";
 import type { NodeArchetype } from "@/types/workspace";
 import type { PortfolioSnapshot } from "@/types/arena";
 
@@ -20,6 +20,8 @@ const TYPE_META: Record<NodeArchetype, { label: string; color: string; icon: Rea
   "resource-link-node": { label: "Fuentes", color: "#3B82F6", icon: <Link2 className="w-3 h-3" /> },
   "code-lab-node": { label: "CodeLab", color: "#10B981", icon: <Terminal className="w-3 h-3" /> },
   "ai-chat-node": { label: "Nodos IA", color: "#A855F7", icon: <Bot className="w-3 h-3" /> },
+  "form-sheet-node": { label: "Fichas", color: "#C95A3B", icon: <ClipboardList className="w-3 h-3" /> },
+  "formula-sheet-node": { label: "Fórmulas", color: "#4F6B58", icon: <SquareFunction className="w-3 h-3" /> },
 };
 
 const NODE_W = 300;

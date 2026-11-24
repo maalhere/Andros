@@ -84,6 +84,8 @@ const VALID_TYPES: NodeArchetype[] = [
   "resource-link-node",
   "code-lab-node",
   "ai-chat-node",
+  "form-sheet-node",
+  "formula-sheet-node",
 ];
 
 /** Instantánea de otro espacio guardado en Supabase (lectura con RLS del dueño). */

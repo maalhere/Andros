@@ -13,12 +13,14 @@ import {
   Bot,
   Cable,
   CheckSquare,
+  ClipboardList,
   FileBox,
   Link2,
   NotebookPen,
   Pencil,
   Sigma,
   Square,
+  SquareFunction,
   Terminal,
   X,
 } from "lucide-react";
@@ -35,6 +37,36 @@ import { ResourceLinkNodeView } from "@/components/nodes/ResourceLinkNode";
 import { AiChatNodeView } from "@/components/nodes/AiChatNode";
 import { CalcSheetEditor, NoteTextEditor } from "@/components/nodes/NodeEditors";
 import { NodeImpactBadge, ReviewImpactButton, useNodeAlertCount } from "@/components/nodes/ImpactControls";
+
+// Fichas estructuradas: se descargan al aparecer la primera ficha del lienzo.
+const FormSheetNodeView = dynamic(
+  () => import("@/components/nodes/FormSheetNode").then((m) => m.FormSheetNodeView),
+  {
+    ssr: false,
+    loading: () => (
+      <div
+        role="status"
+        aria-label="Cargando ficha"
+        className="my-3 h-40 rounded-xl border border-andros-border bg-andros-canvas animate-pulse motion-reduce:animate-none"
+      />
+    ),
+  }
+);
+
+// Fichas de Fórmula (con KaTeX): se descargan al aparecer la primera fórmula del lienzo.
+const FormulaSheetNodeView = dynamic(
+  () => import("@/components/nodes/FormulaSheetNode").then((m) => m.FormulaSheetNodeView),
+  {
+    ssr: false,
+    loading: () => (
+      <div
+        role="status"
+        aria-label="Cargando fórmula"
+        className="my-3 h-44 rounded-xl border border-andros-border bg-andros-canvas animate-pulse motion-reduce:animate-none"
+      />
+    ),
+  }
+);
 
 // CodeLab (intérprete de código, solo Modo Experto) se descarga al aparecer su primera tarjeta.
 const CodeLabNodeView = dynamic(
@@ -398,6 +430,10 @@ export const EngineeringNode = React.memo(function EngineeringNode({
         return <Terminal className="w-4 h-4 text-andros-accent-ink shrink-0" />;
       case "ai-chat-node":
         return <Bot className="w-4 h-4 text-andros-accent-ink shrink-0" />;
+      case "form-sheet-node":
+        return <ClipboardList className="w-4 h-4 text-andros-accent-ink shrink-0" />;
+      case "formula-sheet-node":
+        return <SquareFunction className="w-4 h-4 text-andros-accent-ink shrink-0" />;
     }
   };
 
@@ -415,6 +451,10 @@ export const EngineeringNode = React.memo(function EngineeringNode({
         return <CodeLabNodeView node={node} variant={variant} />;
       case "ai-chat-node":
         return <AiChatNodeView node={node} variant={variant} />;
+      case "form-sheet-node":
+        return <FormSheetNodeView node={node} variant={variant} />;
+      case "formula-sheet-node":
+        return <FormulaSheetNodeView node={node} variant={variant} />;
     }
   };
 

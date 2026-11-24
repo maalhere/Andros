@@ -69,14 +69,16 @@ export type MobileSheetType =
 // 2. Los 3 Nodos Definitivos de Andros
 // ----------------------------------------------------------------------------
 
-/** Los 6 arquetipos oficiales de nodo. */
+/** Los arquetipos oficiales de nodo. */
 export type NodeArchetype =
   | "file-node"
   | "sketch-note-node"
   | "calc-latex-node"
   | "resource-link-node"
   | "code-lab-node"
-  | "ai-chat-node";
+  | "ai-chat-node"
+  | "form-sheet-node"
+  | "formula-sheet-node";
 
 /**
  * Alias de compatibilidad: los archivos de la Fase 0 importaban `NodeCategory`.
@@ -441,7 +443,126 @@ export interface AiChatPayload {
 }
 
 // ----------------------------------------------------------------------------
-// 7. Nodo de ingeniería (unión estricta de los 6 tipos)
+// 6e. NODO TIPO 7 — Ficha estructurada con fotos (`form-sheet-node`)
+//     Formatos replicables (historial clínico, receta, medición, logística…)
+//     con campos tipados. Cada campo tiene un `fieldKey` limpio en snake_case
+//     para poder usarlo más adelante como variable de fórmulas LaTeX reactivas.
+// ----------------------------------------------------------------------------
+
+export type FormFieldType =
+  | "text"
+  | "textarea"
+  | "number"
+  | "date"
+  | "checkbox"
+  | "select"
+  | "photo";
+
+/**
+ * Imagen adjunta, ya comprimida en el navegador (máx. 1280 px, WebP o JPEG).
+ * Se guarda como `data:` dentro de la ficha: viaja con el espacio a la nube,
+ * a la Vista Invitado y a la exportación sin depender de otro servicio.
+ */
+export interface FormPhoto {
+  id: string;
+  /** Imagen completa (`data:image/webp;base64,…`), lado mayor ≤ 1280 px. */
+  src: string;
+  /** Miniatura ligera (lado mayor ≤ 320 px) para la tarjeta y la sala en vivo. */
+  thumb: string;
+  /** Nombre original del archivo (o «Imagen pegada»). */
+  name: string;
+  width: number;
+  height: number;
+  /** Peso aproximado de `src` en bytes. */
+  bytes: number;
+}
+
+/** Valor de un campo: texto/fecha/lista → string, número → number, casilla → boolean. */
+export type FormFieldValue = string | number | boolean | null;
+
+export interface FormField {
+  id: string;
+  /** Identificador limpio en snake_case, p. ej. `peso_kg`, `dosis_mg`, `asistentes`. */
+  fieldKey: string;
+  label: string;
+  type: FormFieldType;
+  value: FormFieldValue;
+  /** Unidad opcional, p. ej. `kg`, `mmHg`, `USD`. */
+  unit?: string;
+  /** Opciones de la lista desplegable (solo `select`). */
+  options?: string[];
+  /** Fotos del campo (solo `photo`). */
+  photos?: FormPhoto[];
+  /** Dato incompleto o dudoso tras el auto-llenado: el usuario debe revisarlo. */
+  needsReview?: boolean;
+}
+
+export interface FormSheetPayload {
+  /** Formato de la librería del que salió la ficha (o "custom"). */
+  templateId: string;
+  /** Categoría libre: «Salud», «Técnico», «Logística»… */
+  category: string;
+  fields: FormField[];
+  /** Adjuntos visuales generales de la ficha (además de los campos «foto»). */
+  attachments: FormPhoto[];
+  /** Expediente o lote al que pertenece (fichas llenadas juntas por la IA). */
+  batchLabel?: string;
+  /** `true` si la llenó el auto-llenado IA (se muestra «Llenada con IA»). */
+  aiFilled?: boolean;
+}
+
+// ----------------------------------------------------------------------------
+// 6f. NODO TIPO 8 — Ficha de Fórmula LaTeX reactiva (`formula-sheet-node`)
+//     Una fórmula simbólica (KaTeX) + una expresión segura evaluable. Sus
+//     variables toman el dato de las fichas conectadas (enlace explícito o
+//     auto-emparejado por alias) o el valor escrito a mano. El resultado NO se
+//     guarda: se deriva en vivo (0 ms, $0 API) del lienzo en cada cliente.
+// ----------------------------------------------------------------------------
+
+/** Campo numérico concreto de otra tarjeta del que una variable toma su valor. */
+export interface FormulaSourceBinding {
+  nodeId: string;
+  /** `fieldKey` de una ficha, dirección de celda («B4») o «resultado» de otra fórmula. */
+  fieldKey: string;
+}
+
+export interface FormulaVariable {
+  /** Identificador seguro usado en `expression` (p. ej. `m`, `h`, `presupuesto`). */
+  key: string;
+  /** Símbolo LaTeX que se muestra (p. ej. `m`, `\sigma`). */
+  symbolLatex: string;
+  /** Nombre legible: «Peso corporal». */
+  label: string;
+  /** Unidad esperada: `kg`, `m`, `USD`… */
+  unit?: string;
+  /** Claves en snake_case para auto-emparejar con campos de fichas (`peso`, `peso_kg`…). */
+  aliases: string[];
+  /** Valor escrito a mano (respaldo si ninguna ficha conectada lo aporta). */
+  manualValue?: number | null;
+  /** Enlace explícito a un campo de una tarjeta conectada. */
+  sourceBinding?: FormulaSourceBinding | null;
+  /** `true`: usar SIEMPRE el valor manual (sin auto-emparejar). */
+  lockManual?: boolean;
+}
+
+export interface FormulaSheetPayload {
+  /** Expresión simbólica en LaTeX (KaTeX), p. ej. `\text{IMC} = \frac{m}{h^2}`. */
+  latex: string;
+  /** Expresión evaluable con las `key` de las variables, p. ej. `m / (h ^ 2)`. */
+  expression: string;
+  resultLabel: string;
+  resultUnit: string;
+  /** Decimales del resultado (0–6). Por defecto 2. */
+  resultDecimals?: number;
+  variables: FormulaVariable[];
+  /** Explicación corta de para qué sirve (la escribe la IA o la persona). */
+  description?: string;
+  /** `true` si la generó la IA a partir de lenguaje natural. */
+  aiGenerated?: boolean;
+}
+
+// ----------------------------------------------------------------------------
+// 7. Nodo de ingeniería (unión estricta de los 8 tipos)
 // ----------------------------------------------------------------------------
 
 /** Campos comunes a cualquier nodo. */
@@ -467,6 +588,8 @@ export interface FileEngineeringNode extends EngineeringNodeBase {
   resourceLinkData?: undefined;
   codeLabData?: undefined;
   aiChatData?: undefined;
+  formSheetData?: undefined;
+  formulaSheetData?: undefined;
 }
 
 export interface SketchNoteEngineeringNode extends EngineeringNodeBase {
@@ -477,6 +600,8 @@ export interface SketchNoteEngineeringNode extends EngineeringNodeBase {
   resourceLinkData?: undefined;
   codeLabData?: undefined;
   aiChatData?: undefined;
+  formSheetData?: undefined;
+  formulaSheetData?: undefined;
 }
 
 export interface CalcLatexEngineeringNode extends EngineeringNodeBase {
@@ -487,6 +612,8 @@ export interface CalcLatexEngineeringNode extends EngineeringNodeBase {
   resourceLinkData?: undefined;
   codeLabData?: undefined;
   aiChatData?: undefined;
+  formSheetData?: undefined;
+  formulaSheetData?: undefined;
 }
 
 export interface ResourceLinkEngineeringNode extends EngineeringNodeBase {
@@ -497,6 +624,8 @@ export interface ResourceLinkEngineeringNode extends EngineeringNodeBase {
   calcLatexData?: undefined;
   codeLabData?: undefined;
   aiChatData?: undefined;
+  formSheetData?: undefined;
+  formulaSheetData?: undefined;
 }
 
 export interface CodeLabEngineeringNode extends EngineeringNodeBase {
@@ -507,6 +636,8 @@ export interface CodeLabEngineeringNode extends EngineeringNodeBase {
   calcLatexData?: undefined;
   resourceLinkData?: undefined;
   aiChatData?: undefined;
+  formSheetData?: undefined;
+  formulaSheetData?: undefined;
 }
 
 export interface AiChatEngineeringNode extends EngineeringNodeBase {
@@ -517,10 +648,36 @@ export interface AiChatEngineeringNode extends EngineeringNodeBase {
   calcLatexData?: undefined;
   resourceLinkData?: undefined;
   codeLabData?: undefined;
+  formSheetData?: undefined;
+  formulaSheetData?: undefined;
+}
+
+export interface FormSheetEngineeringNode extends EngineeringNodeBase {
+  type: "form-sheet-node";
+  formSheetData: FormSheetPayload;
+  fileData?: undefined;
+  sketchNoteData?: undefined;
+  calcLatexData?: undefined;
+  resourceLinkData?: undefined;
+  codeLabData?: undefined;
+  aiChatData?: undefined;
+  formulaSheetData?: undefined;
+}
+
+export interface FormulaSheetEngineeringNode extends EngineeringNodeBase {
+  type: "formula-sheet-node";
+  formulaSheetData: FormulaSheetPayload;
+  fileData?: undefined;
+  sketchNoteData?: undefined;
+  calcLatexData?: undefined;
+  resourceLinkData?: undefined;
+  codeLabData?: undefined;
+  aiChatData?: undefined;
+  formSheetData?: undefined;
 }
 
 /**
- * Un nodo es exactamente uno de los 5 tipos. Al comprobar `node.type`,
+ * Un nodo es exactamente uno de los 8 tipos. Al comprobar `node.type`,
  * TypeScript garantiza que su payload existe (sin `?` ni `undefined`).
  */
 export type EngineeringNodeData =
@@ -529,7 +686,9 @@ export type EngineeringNodeData =
   | CalcLatexEngineeringNode
   | ResourceLinkEngineeringNode
   | CodeLabEngineeringNode
-  | AiChatEngineeringNode;
+  | AiChatEngineeringNode
+  | FormSheetEngineeringNode
+  | FormulaSheetEngineeringNode;
 
 /** Cambios parciales aceptados por `updateNodePayload`. */
 export type NodePayloadPatch =
@@ -538,7 +697,9 @@ export type NodePayloadPatch =
   | Partial<CalcLatexPayload>
   | Partial<ResourceLinkPayload>
   | Partial<CodeLabPayload>
-  | Partial<AiChatPayload>;
+  | Partial<AiChatPayload>
+  | Partial<FormSheetPayload>
+  | Partial<FormulaSheetPayload>;
 
 /** Campos de cabecera editables con `updateNodeMeta`. */
 export type NodeMetaPatch = Partial<
@@ -563,4 +724,6 @@ export interface SpawnNodeInput {
   resourceLinkData?: Partial<ResourceLinkPayload>;
   codeLabData?: Partial<CodeLabPayload>;
   aiChatData?: Partial<AiChatPayload>;
+  formSheetData?: Partial<FormSheetPayload>;
+  formulaSheetData?: Partial<FormulaSheetPayload>;
 }

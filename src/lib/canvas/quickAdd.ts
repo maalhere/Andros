@@ -1,21 +1,25 @@
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { useAiProvidersStore } from "@/store/useAiProvidersStore";
 import { markPendingImportPanel } from "@/lib/ai/nodeChatClient";
+import { useFormsLibraryStore } from "@/store/useFormsLibraryStore";
+import { useFormulaCreatorStore } from "@/store/useFormulaCreatorStore";
 
 // ============================================================================
 // ANDROS — MENÚ "+ AGREGAR" (dock de escritorio y cajón del teléfono)
 // Las opciones visibles para cualquier persona: Archivo 3D, Nota, Enlace
-// Web/YouTube, Cálculo, Nodo IA e Importar chat. Ambos viewports usan estas
-// mismas funciones.
+// Web/YouTube, Cálculo, Ficha (librería de formatos), Fórmula LaTeX, Nodo IA e
+// Importar chat. Ambos viewports usan estas mismas funciones.
 // ============================================================================
 
-export type QuickAddKind = "file3d" | "note" | "link" | "calc" | "ai" | "ai-import";
+export type QuickAddKind = "file3d" | "note" | "link" | "calc" | "forms" | "formula" | "ai" | "ai-import";
 
 export const QUICK_ADD_OPTIONS: { kind: QuickAddKind; label: string; description: string }[] = [
   { kind: "file3d", label: "Archivo 3D", description: "Sube una pieza .stl, .obj o .3mf" },
   { kind: "note", label: "Nota", description: "Texto, listas y bocetos rápidos" },
   { kind: "link", label: "Enlace Web/YouTube", description: "Video, paper o página con vista previa" },
   { kind: "calc", label: "Cálculo", description: "Hoja con fórmulas y ecuaciones" },
+  { kind: "forms", label: "Librería de fichas", description: "Fichas con campos y fotos, replicables o llenadas con IA" },
+  { kind: "formula", label: "Fórmula LaTeX", description: "Se calcula sola con los datos de tus fichas conectadas" },
   { kind: "ai", label: "Nuevo Nodo IA", description: "Gemini, Claude o ChatGPT con el contexto de sus cables" },
   { kind: "ai-import", label: "Importar chat", description: "Trae una conversación de ChatGPT, Claude o Gemini" },
 ];
@@ -52,9 +56,24 @@ export function visibleSpawnPoint(): { x: number; y: number } {
   return { x: Math.round(centerX - 170 + cascade), y: Math.round(centerY - 140 + cascade) };
 }
 
-/** Crea el nodo de la opción elegida en la zona visible del lienzo. */
+/**
+ * Crea el nodo de la opción elegida en la zona visible del lienzo.
+ * «Librería de fichas» y «Fórmula LaTeX» abren su diálogo (devuelven "" porque aún no crean nodo).
+ */
 export function quickAdd(kind: QuickAddKind, file?: File): string {
   const ws = useWorkspaceStore.getState();
+  if (kind === "forms") {
+    ws.setActiveTool("pointer");
+    ws.setActiveMobileSheet("none");
+    useFormsLibraryStore.getState().openLibrary("library");
+    return "";
+  }
+  if (kind === "formula") {
+    ws.setActiveTool("pointer");
+    ws.setActiveMobileSheet("none");
+    useFormulaCreatorStore.getState().setOpen(true);
+    return "";
+  }
   const position = visibleSpawnPoint();
   let id: string;
   switch (kind) {
@@ -70,6 +89,9 @@ export function quickAdd(kind: QuickAddKind, file?: File): string {
       break;
     case "calc":
       id = ws.aiCreateNode({ type: "calc-latex-node", position });
+      break;
+    default:
+      id = "";
       break;
     case "ai":
     case "ai-import": {

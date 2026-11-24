@@ -10,6 +10,8 @@
 import type { EngineeringNodeData, NodeConnection } from "@/types/workspace";
 import type { OracleCanvasContext, OracleCanvasNodeSummary } from "@/types/oracle";
 import { serializeAiChat } from "@/lib/canvas/contextGraph";
+import { serializeFormSheet } from "@/lib/forms/formSchema";
+import { serializeFormulaSheet, type FormulaGraph } from "@/lib/math/formulaBinding";
 
 /** Límite de texto por nodo para no saturar el contexto del modelo. */
 const MAX_EXCERPT_CHARS = 1500;
@@ -19,7 +21,7 @@ function clip(text: string, max = MAX_EXCERPT_CHARS): string {
   return clean.length > max ? `${clean.slice(0, max)}…` : clean;
 }
 
-function excerptOf(node: EngineeringNodeData): string | undefined {
+function excerptOf(node: EngineeringNodeData, graph: FormulaGraph): string | undefined {
   if (node.type === "sketch-note-node") {
     const data = node.sketchNoteData;
     const lines = [
@@ -89,6 +91,11 @@ function excerptOf(node: EngineeringNodeData): string | undefined {
 
   if (node.type === "ai-chat-node") return clip(serializeAiChat(node));
 
+  if (node.type === "form-sheet-node") return clip(serializeFormSheet(node.title, node.formSheetData), 2500);
+
+  // Resultado ya calculado con los datos de sus fichas conectadas (0 ms, sin IA).
+  if (node.type === "formula-sheet-node") return clip(serializeFormulaSheet(node, graph), 2000);
+
   return undefined;
 }
 
@@ -126,7 +133,7 @@ export function buildOracleCanvasContext(
       if (file.modelDimensionsMm) summary.dimensionsMm = file.modelDimensionsMm;
     }
 
-    const excerpt = excerptOf(node);
+    const excerpt = excerptOf(node, { nodes, connections });
     if (excerpt) summary.textExcerpt = excerpt;
     return summary;
   });

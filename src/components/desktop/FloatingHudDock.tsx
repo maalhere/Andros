@@ -7,6 +7,7 @@ import {
   Bot,
   Box,
   Calculator,
+  ClipboardList,
   MessagesSquare,
   Library,
   Link2,
@@ -15,6 +16,8 @@ import {
   Sparkles,
   PenLine,
   Eraser,
+  Eye,
+  SquareFunction,
   StickyNote,
   Undo2,
   Minus,
@@ -29,6 +32,7 @@ import {
 import type { CanvasInkColor, CanvasInkTip } from "@/types/workspace";
 import { useLibraryStore } from "@/store/useLibraryStore";
 import { SPRING_SNAPPY } from "@/lib/motion";
+import { useCanvasReadOnly } from "@/store/useCollabStore";
 
 // ============================================================================
 // 1. INDICADOR DE ZOOM DISCRETO (esquina inferior izquierda)  − 100% +
@@ -312,6 +316,8 @@ const QUICK_ADD_ICONS: Record<QuickAddKind, React.ReactNode> = {
   note: <StickyNote className="w-4 h-4" />,
   link: <Link2 className="w-4 h-4" />,
   calc: <Calculator className="w-4 h-4" />,
+  forms: <ClipboardList className="w-4 h-4" />,
+  formula: <SquareFunction className="w-4 h-4" />,
   ai: <Bot className="w-4 h-4" />,
   "ai-import": <MessagesSquare className="w-4 h-4" />,
 };
@@ -387,10 +393,19 @@ export const FloatingHudDock: React.FC = () => {
   const setOracleModalOpen = useWorkspaceStore((s) => s.setOracleModalOpen);
   const full = useSettingsStore((s) => s.animations) === "full";
   const expert = useIsExpert();
+  // Sala llena (7.º en el espacio): el dock solo deja navegar, nada de escritura.
+  const readOnly = useCanvasReadOnly();
 
   const [addOpen, setAddOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const closeAdd = useCallback(() => setAddOpen(false), []);
+
+  // Al pasar a solo lectura se sueltan el lápiz y el cable (el menú «Agregar» ya no se pinta).
+  useEffect(() => {
+    if (!readOnly) return;
+    const ws = useWorkspaceStore.getState();
+    if (ws.activeTool !== "pointer") ws.setActiveTool("pointer");
+  }, [readOnly]);
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -398,7 +413,36 @@ export const FloatingHudDock: React.FC = () => {
     if (file) quickAdd("file3d", file);
   };
 
-  const isDrawing = activeTool === "draw";
+  const isDrawing = activeTool === "draw" && !readOnly;
+
+  if (readOnly) {
+    return (
+      <>
+        <CanvasZoomIndicator />
+        <nav
+          aria-label="Herramientas del Lienzo (solo lectura)"
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1 p-1.5 rounded-2xl bg-andros-surface backdrop-blur-xl border border-andros-border shadow-hud-light dark:shadow-hud-dark"
+        >
+          <DockButton
+            full={full}
+            title="Seleccionar y mover la vista (V)"
+            label="Seleccionar"
+            icon={<MousePointer2 className="w-4 h-4" />}
+            active
+            onClick={() => setActiveTool("pointer")}
+          />
+          <p
+            role="status"
+            title="La sala está llena: ves el lienzo en vivo, pero no puedes modificarlo."
+            className="flex items-center gap-2 h-10 px-3.5 rounded-xl text-[13px] font-medium text-andros-muted"
+          >
+            <Eye className="w-4 h-4" aria-hidden="true" />
+            Solo lectura
+          </p>
+        </nav>
+      </>
+    );
+  }
 
   return (
     <>

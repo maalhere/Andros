@@ -24,6 +24,10 @@ interface SocialDialogProps {
   icon?: React.ReactNode;
   description?: React.ReactNode;
   children: React.ReactNode;
+  /** Diálogo ancho (librería de fichas): `max-w-2xl` en vez de `max-w-md`. */
+  wide?: boolean;
+  /** `top`: por encima del Estudio del Oráculo (z-90). */
+  layer?: "default" | "top";
 }
 
 export const SocialDialog: React.FC<SocialDialogProps> = ({
@@ -34,6 +38,8 @@ export const SocialDialog: React.FC<SocialDialogProps> = ({
   icon,
   description,
   children,
+  wide = false,
+  layer = "default",
 }) => {
   const systemReduced = useReducedMotion();
   const reduced = useSettingsStore((s) => s.animations) === "reduced" || Boolean(systemReduced);
@@ -61,7 +67,7 @@ export const SocialDialog: React.FC<SocialDialogProps> = ({
           exit={{ opacity: 0 }}
           transition={reduced ? { duration: 0 } : { duration: 0.15 }}
           onPointerDown={onClose}
-          className="fixed inset-0 z-[85] bg-black/50 backdrop-blur-xs flex items-end md:items-center justify-center p-3 md:p-6"
+          className={`fixed inset-0 ${layer === "top" ? "z-[92]" : "z-[85]"} bg-black/50 backdrop-blur-xs flex items-end md:items-center justify-center p-3 md:p-6`}
         >
           <motion.div
             role="dialog"
@@ -72,7 +78,7 @@ export const SocialDialog: React.FC<SocialDialogProps> = ({
             exit={{ opacity: 0, y: 12 }}
             transition={springOrInstant(reduced)}
             onPointerDown={(e) => e.stopPropagation()}
-            className="w-full max-w-md max-h-[85vh] overflow-y-auto rounded-3xl bg-andros-card border border-andros-border shadow-sheet-light dark:shadow-sheet-dark p-5"
+            className={`w-full ${wide ? "max-w-2xl" : "max-w-md"} max-h-[85vh] overflow-y-auto rounded-3xl bg-andros-card border border-andros-border shadow-sheet-light dark:shadow-sheet-dark p-5`}
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex items-center gap-2">
