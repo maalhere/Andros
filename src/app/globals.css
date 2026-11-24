@@ -199,7 +199,7 @@
 }
 
 /* ==========================================================================
-   PLAN DEL DÍA (ExportPlanModal) — documento ejecutivo para PDF / papel
+   PLAN DEL DÍA y ESTUDIO DE EXPORTACIÓN (ExportDeliverableModal) — PDF / papel
    Invisible en pantalla; al imprimir es lo ÚNICO que sale. Sin librerías:
    el navegador lo guarda como PDF desde su diálogo de impresión.
    ========================================================================== */
@@ -421,6 +421,74 @@
   .andros-plan-sheet .aps-footer {
     margin-top: 6mm;
     font-size: 8pt;
+    color: #555555;
+  }
+
+  /* --- Estudio de Exportación: síntesis enriquecida (OutlinePrintSheet) --- */
+  .andros-plan-sheet h2,
+  .andros-plan-sheet h3,
+  .andros-plan-sheet .aps-kicker,
+  .andros-plan-sheet caption {
+    break-after: avoid;
+  }
+
+  .andros-plan-sheet thead {
+    display: table-header-group;
+  }
+
+  .andros-plan-sheet tr,
+  .andros-plan-sheet figure {
+    break-inside: avoid;
+  }
+
+  .andros-plan-sheet caption {
+    caption-side: top;
+    text-align: left;
+    padding-bottom: 1.2mm;
+    font-size: 9pt;
+    font-weight: 600;
+    color: #555555;
+  }
+
+  .andros-plan-sheet .aps-subtitle {
+    margin-top: 1mm;
+    font-size: 11pt;
+    color: #555555;
+  }
+
+  .andros-plan-sheet .aps-meta span {
+    display: block;
+  }
+
+  .andros-plan-sheet .aps-summary {
+    padding: 3mm 4mm;
+    margin-top: 5mm;
+    background: #f6f5f2;
+    border-left: 1.5pt solid #c95a3b;
+    border-bottom: none;
+  }
+
+  .andros-plan-sheet .aps-summary p {
+    font-size: 11pt;
+  }
+
+  .andros-plan-sheet .aps-formula-title {
+    font-weight: 600;
+    margin-bottom: 1mm;
+  }
+
+  .andros-plan-sheet .aps-result {
+    margin-top: 1.5mm;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .andros-plan-sheet figure {
+    margin: 0;
+  }
+
+  .andros-plan-sheet figcaption {
+    margin-top: 1mm;
+    font-size: 7.5pt;
     color: #555555;
   }
 }

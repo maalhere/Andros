@@ -432,14 +432,14 @@ export const ShareWorkspaceModal: React.FC = () => {
           {/* Vista Invitado: solo el dueño la activa */}
           {isOwner && <GuestLinkSection workspaceId={workspaceId} workspaceName={workspaceName} />}
 
-          {/* Plan del Día: PDF imprimible + resumen para WhatsApp */}
+          {/* Estudio de exportación: PDF, Word, PowerPoint y WhatsApp */}
           <section aria-labelledby="andros-share-export" className="space-y-1.5 pt-4 border-t border-andros-border">
             <h3 id="andros-share-export" className="text-xs font-semibold text-andros-primary">
-              Plan del Día
+              Exportar como documento
             </h3>
             <p className="text-[11px] leading-relaxed text-andros-muted">
-              Un documento ejecutivo para imprimir o guardar en PDF, y un resumen listo para pegar en
-              un grupo de WhatsApp.
+              PDF imprimible, Word / Google Docs, PowerPoint / Google Slides o un resumen listo para
+              pegar en un grupo de WhatsApp, con o sin síntesis de IA.
             </p>
             <button
               type="button"
@@ -450,7 +450,7 @@ export const ShareWorkspaceModal: React.FC = () => {
               className={BUTTON_SECONDARY}
             >
               <FileText className="w-4 h-4" aria-hidden="true" />
-              Exportar Plan del Día
+              Abrir Estudio de exportación
             </button>
           </section>
 

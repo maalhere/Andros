@@ -47,6 +47,13 @@ export interface PlanTable {
 export interface PlanImage {
   src: string;
   alt: string;
+  /** `FormPhoto.id`: referencia estable para la síntesis con IA (que nunca recibe la imagen). */
+  id?: string;
+  /** Tamaño real en píxeles (para incrustarla en Word/PowerPoint sin deformarla). */
+  width?: number;
+  height?: number;
+  /** Etiqueta del campo de foto («Herida», «Adjunto»…). */
+  label?: string;
 }
 
 export interface PlanSection {
@@ -72,6 +79,10 @@ export interface PlanFormula {
   substitutionLatex: string | null;
   /** Expresión legible para WhatsApp: «m / h^2». */
   expression: string;
+  /** Sustitución en texto plano («82 / 1.75^2») para Word y PowerPoint, o `null` si faltan datos. */
+  substitutionText?: string | null;
+  /** Resultado ya calculado («IMC», «26.78 kg/m²»). */
+  result?: { label: string; value: string };
 }
 
 export interface PlanDocument {
@@ -265,6 +276,10 @@ function sectionFromNode(node: EngineeringNodeData, graph: FormulaGraph): PlanSe
         .map(({ photo, label }) => ({
           src: photo.src || photo.thumb,
           alt: `Foto «${label}» de la ficha «${base.title}»`,
+          id: photo.id,
+          width: photo.width,
+          height: photo.height,
+          label,
         }))
         .filter((img) => img.src);
       if (rows.length === 0 && images.length === 0) return null;
@@ -300,12 +315,28 @@ function sectionFromNode(node: EngineeringNodeData, graph: FormulaGraph): PlanSe
           latex: data.latex.trim() || expressionLatex(data),
           substitutionLatex: resolved.substitutionLatex,
           expression: data.expression.trim(),
+          substitutionText: substitutionText(data.expression, resolved),
+          result: { label: data.resultLabel || "Resultado", value: formulaResultLine(data, resolved) },
         },
       };
     }
     default:
       return null;
   }
+}
+
+/** «m / h^2» con m=82, h=1.75 → «82 / 1.75^2» (solo si están todos los datos). */
+function substitutionText(expression: string, resolved: ReturnType<typeof resolveFormula>): string | null {
+  if (resolved.substitutionLatex === null || !expression.trim()) return null;
+  const values = new Map<string, number>();
+  for (const entry of resolved.variables) if (entry.value !== null) values.set(entry.variable.key, entry.value);
+  return expression
+    .trim()
+    .replace(/[A-Za-z_][A-Za-z0-9_]*/g, (name) => {
+      const value = values.get(name);
+      return value === undefined ? name : String(Number(value.toPrecision(10)));
+    })
+    .replace(/\s+/g, " ");
 }
 
 /**

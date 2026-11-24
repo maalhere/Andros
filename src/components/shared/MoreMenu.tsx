@@ -292,7 +292,7 @@ export const MoreMenu: React.FC = () => {
     },
     {
       id: "export-plan",
-      label: "Exportar Plan del Día",
+      label: "Exportar: PDF, Word, PowerPoint",
       icon: <FileText className="w-4 h-4" />,
       onSelect: () => usePlanExportStore.getState().setOpen(true),
     },

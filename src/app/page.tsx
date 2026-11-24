@@ -12,7 +12,7 @@ import { AiKeysModal } from "@/components/settings/AiKeysModal";
 import { WorkspaceManagerDrawer } from "@/components/workspaces/WorkspaceManagerDrawer";
 import { UpgradeModal } from "@/components/shared/UpgradeModal";
 import { ProWaitlistModal } from "@/components/shared/ProWaitlistModal";
-import { ExportPlanModal } from "@/components/plan/ExportPlanModal";
+import { ExportDeliverableModal } from "@/components/plan/ExportDeliverableModal";
 import { TopStatusBar } from "@/components/shared/TopStatusBar";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { useLibraryStore } from "@/store/useLibraryStore";
@@ -132,7 +132,7 @@ export default function AndrosWorkspacePage() {
       {formulaMounted && <FormulaCreatorModal />}
       <UpgradeModal />
       <ProWaitlistModal />
-      <ExportPlanModal />
+      <ExportDeliverableModal />
       <FriendsModal />
       <ShareWorkspaceModal />
       <UsernameSetupModal />

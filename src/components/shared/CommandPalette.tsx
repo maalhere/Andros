@@ -227,9 +227,9 @@ const PaletteDialog: React.FC<{ reduced: boolean; onClose: () => void }> = ({ re
       {
         id: "export-plan",
         group: "Acciones",
-        label: "Exportar Plan del Día",
-        hint: "PDF imprimible y resumen para WhatsApp",
-        keywords: "pdf imprimir whatsapp resumen exportar documento plan",
+        label: "Estudio de exportación",
+        hint: "PDF, Word / Google Docs, PowerPoint / Google Slides y WhatsApp",
+        keywords: "pdf imprimir whatsapp resumen exportar documento plan del dia word docx google docs powerpoint pptx google slides presentacion diapositivas informe",
         icon: <FileText className="w-4 h-4" />,
         run: () => usePlanExportStore.getState().setOpen(true),
       },

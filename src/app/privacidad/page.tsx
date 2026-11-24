@@ -125,11 +125,27 @@ export default function PrivacidadPage() {
         antes la normativa de protección de datos de salud de tu país y obtén asesoría legal; eres
         responsable de contar con el consentimiento de las personas cuyos datos registres.
       </p>
-      <h3>Exportar Plan del Día y lista de espera Pro</h3>
+      <h3>Estudio de exportación (PDF, Word, PowerPoint y WhatsApp) y lista de espera Pro</h3>
       <ul>
         <li>
-          <strong>Plan del Día</strong> (PDF y resumen para WhatsApp): se genera por completo en tu
-          navegador e incluye los campos de las fichas (y sus fotos en la versión imprimible). No se envía a nuestros servidores; tú decides dónde lo guardas o lo pegas.
+          <strong>Directo del tablero (sin IA)</strong>: el PDF imprimible, el documento de Word
+          (.docx), la presentación de PowerPoint (.pptx) y el resumen para WhatsApp se generan por
+          completo en tu navegador e incluyen los campos de las fichas, las tablas, las fórmulas y
+          sus fotos. No se envía nada a nuestros servidores; tú decides dónde guardas o compartes el
+          archivo (por ejemplo, si lo subes a Google Drive para abrirlo en Google Docs o Google
+          Slides, se aplica la política de Google).
+        </li>
+        <li>
+          <strong>«Sintetizar y ordenar con IA»</strong>: solo si eliges esta opción, se envían a
+          Google Gemini el texto de las tarjetas del espacio (notas, campos de las fichas, tablas con
+          sus totales y fórmulas con sus valores y resultados), el nombre del espacio, la
+          instrucción opcional que escribas y, de cada foto, solo una referencia interna y su
+          etiqueta. <strong>Las imágenes nunca se envían a Gemini ni a nuestros servidores</strong>:
+          se incrustan en el .docx, el .pptx o el PDF dentro de tu propio dispositivo. El servidor de
+          Andros no guarda ese contenido ni la estructura que devuelve la IA; se aplican la misma
+          cuota diaria gratuita y las mismas reglas de clave propia (BYOK) que en el resto de
+          funciones de IA. Funciona también en espacios compartidos en solo lectura, con el
+          contenido que ya puedes ver.
         </li>
         <li>
           <strong>Lista de espera de Andros Pro</strong>: el formulario no guarda nada; abre tu app
@@ -206,7 +222,8 @@ export default function PrivacidadPage() {
           espacio y no se guardan en la nube. Si usas «Llenar fichas con IA», se envían el texto
           que pegas y el esquema de las fichas elegidas (sin fotos). Si usas «Generar fórmula con
           IA», se envían tu descripción y los nombres de los campos numéricos del tablero (sin sus
-          valores). Las
+          valores). Si exportas con «Sintetizar y ordenar con IA», se envían el texto y los datos de
+          las tarjetas del espacio y tu instrucción opcional, nunca las fotos. Las
           plantillas que guardas desde «Guardar como plantilla» se quedan solo en el
           almacenamiento local de tu navegador.
         </li>

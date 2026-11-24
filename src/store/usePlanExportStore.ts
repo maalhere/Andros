@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 // ============================================================================
-// ANDROS — MODAL «EXPORTAR PLAN DEL DÍA» (abierto / cerrado)
+// ANDROS — ESTUDIO DE EXPORTACIÓN (antes «Exportar Plan del Día»): abierto / cerrado
 // Se abre desde ⋯ Más opciones, la paleta ⌘K y «Compartir espacio».
 // ============================================================================
 
