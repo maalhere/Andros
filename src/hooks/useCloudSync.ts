@@ -15,6 +15,7 @@
 // ============================================================================
 
 import { useEffect } from "react";
+import { track } from "@/lib/analytics/telemetry";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { getSupabaseBrowserClient, PRINT_FILES_BUCKET } from "@/lib/supabase/client";
 import { useCloudStore, type CloudUser } from "@/store/useCloudStore";
@@ -1109,6 +1110,7 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
       if (error) throw error;
       const id = (data as { id: string }).id;
       await openWorkspaceRaw(id, seed ?? { nodes: [], connections: [], strokes: [] });
+      track("workspace_created", { seeded: Boolean(seed && seed.nodes.length > 0) });
       return id;
     });
 

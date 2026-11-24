@@ -1,5 +1,6 @@
 "use client";
 
+import { track } from "@/lib/analytics/telemetry";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
@@ -187,6 +188,7 @@ const ExportStudioBody: React.FC = () => {
       setBusy(output);
       try {
         await task();
+        track("deliverable_exported", { type: output, ai: useAi });
       } catch (error) {
         console.error("[export] fallo al generar:", error instanceof Error ? error.message : error);
         toast({ message: "No se pudo generar el archivo. Inténtalo de nuevo.", tone: "error" });
@@ -248,6 +250,7 @@ const ExportStudioBody: React.FC = () => {
   const copyWhatsApp = async () => {
     const ok = await copyText(whatsapp);
     setCopied(ok);
+    if (ok) track("deliverable_exported", { type: "whatsapp" });
     toast({
       message: ok
         ? "Resumen copiado. Pégalo en tu grupo de WhatsApp."

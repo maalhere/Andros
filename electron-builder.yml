@@ -18,6 +18,7 @@ files:
   - electron/config.cjs
   - electron/titlebar.html
   - electron/generated/flashforge.cjs
+  - electron/generated/klipper.cjs
   - public/icons/icon-192.png
   - public/icons/icon-512.png
   - "!**/node_modules/**/*"

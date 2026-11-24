@@ -76,7 +76,8 @@ export const PublicBoardClient: React.FC<{ params: Promise<{ token: string }> }>
         </div>
       </header>
 
-      <main id="contenido" className="flex-1 mx-auto w-full max-w-5xl px-4 md:px-6 py-6 md:py-10">
+      {/* Clarity: el tablero compartido nunca se graba. */}
+      <main id="contenido" data-clarity-mask="true" className="flex-1 mx-auto w-full max-w-5xl px-4 md:px-6 py-6 md:py-10">
         {state.phase === "loading" && (
           <p role="status" className="flex items-center gap-2 text-sm text-andros-muted">
             <Loader2 className="w-4 h-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />

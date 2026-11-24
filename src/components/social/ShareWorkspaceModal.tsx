@@ -1,5 +1,6 @@
 "use client";
 
+import { track } from "@/lib/analytics/telemetry";
 import React, { useCallback, useEffect, useState } from "react";
 import { Copy, FileText, Globe, Loader2, LogOut, RefreshCw, Share2, UserMinus, UserPlus, Users } from "lucide-react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
@@ -127,6 +128,7 @@ const GuestLinkSection: React.FC<{ workspaceId: string; workspaceName: string }>
       if (!supabase || !state) return;
       try {
         const updated = await updatePublicShare(supabase, workspaceId, state, next);
+        if (updated.enabled && (next.rotate || !state.enabled)) track("guest_link_enabled", { rotated: Boolean(next.rotate) });
         setState(updated);
         setError(null);
         setConfirmRotate(false);

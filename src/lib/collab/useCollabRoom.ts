@@ -23,6 +23,7 @@
 // desmontar se cierra TODO: nada queda encendido.
 // ============================================================================
 
+import { track } from "@/lib/analytics/telemetry";
 import { useEffect } from "react";
 import type { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
@@ -1086,6 +1087,7 @@ export async function joinCollabRoom(): Promise<void> {
     state.setRoom(null, "Modo local");
     state.setStatus("local", LOCAL_MODE_MESSAGE);
     state.setCall({ inCall: true });
+    track("voice_joined", { mode: "local" });
     return;
   }
 
@@ -1177,6 +1179,7 @@ export async function joinCollabRoom(): Promise<void> {
   call = { mesh, voice, callId: randomId() };
   callJoinedAt = Date.now();
   collab().setCall({ inCall: true, callConnecting: false });
+  track("voice_joined", { mode: "cloud" });
 
   // Primero se anuncia { inCall: true } (con acuse del servidor) y DESPUÉS se
   // conecta: así los demás ya te ven en voz cuando llega tu oferta WebRTC.

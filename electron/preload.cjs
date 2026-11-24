@@ -5,6 +5,8 @@
 //   · printer.discover() → busca la Adventurer 3 en el Wi-Fi
 //   · printer.status(ip, port) → temperaturas / progreso
 //   · printer.print(ip, port, fileName, bytes) → envía el .gx e imprime
+//   · klipper.status / klipper.print → Moonraker (Creality K2 SE, K1, Elegoo, QIDI)
+//   · slicers.detect() / slicers.open(id, fileName, bytes) → laminador instalado
 //   · auth.begin() / auth.openInBrowser(url) / auth.onResult(cb) → login con
 //     Google en el navegador del sistema con vuelta automática a la app
 // Además sincroniza el tema (clase "dark" en <html>) con la barra de título.
@@ -45,6 +47,16 @@ if (appOrigin && window.location.origin === appOrigin) {
       status: (ip, port) => ipcRenderer.invoke("andros:printer:status", String(ip), Number(port)),
       print: (ip, port, fileName, data) =>
         ipcRenderer.invoke("andros:printer:print", String(ip), Number(port), String(fileName), data),
+    },
+    klipper: {
+      status: (ip, port) => ipcRenderer.invoke("andros:klipper:status", String(ip), Number(port)),
+      print: (ip, port, fileName, data) =>
+        ipcRenderer.invoke("andros:klipper:print", String(ip), Number(port), String(fileName), data),
+    },
+    slicers: {
+      detect: () => ipcRenderer.invoke("andros:slicers:detect"),
+      open: (slicerId, fileName, data) =>
+        ipcRenderer.invoke("andros:slicers:open", String(slicerId), String(fileName), data),
     },
     auth: {
       begin: () => ipcRenderer.invoke("andros:auth:begin"),

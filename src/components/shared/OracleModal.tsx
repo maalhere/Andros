@@ -879,6 +879,7 @@ const OracleStudio: React.FC = () => {
     >
       <style>{`@keyframes andros-progress{0%{transform:translateX(-100%)}100%{transform:translateX(300%)}}`}</style>
       <div
+        data-clarity-mask="true"
         role="dialog"
         aria-modal="true"
         aria-label="Estudio del Oráculo IA"

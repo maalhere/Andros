@@ -1,5 +1,6 @@
 "use client";
 
+import { track } from "@/lib/analytics/telemetry";
 import React, { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Layers, LayoutTemplate, Loader2, Sparkles, X } from "lucide-react";
@@ -91,6 +92,7 @@ const StarterCard: React.FC<Props> = ({ variant }) => {
       abortRef.current = controller;
       try {
         applyBlueprint(await generateBlueprint(prompt, controller.signal));
+        track("blueprint_generated", { source: "ai" });
       } catch (error) {
         if (error instanceof BlueprintError && error.code === "aborted") return;
         setFail(
@@ -106,6 +108,7 @@ const StarterCard: React.FC<Props> = ({ variant }) => {
 
   const applyBaseTemplate = () => {
     applyBlueprint(baseBlueprintFor(lastPrompt || text), "Plantilla base lista: ajusta lo que necesites.");
+    track("blueprint_generated", { source: "base" });
   };
 
   const removeCustom = (template: LocalTemplate) => {
@@ -242,7 +245,10 @@ const StarterCard: React.FC<Props> = ({ variant }) => {
                 <button
                   type="button"
                   disabled={pending}
-                  onClick={() => applyBlueprint(template.blueprint, `Plantilla «${template.name.slice(0, 40)}» aplicada.`)}
+                  onClick={() => {
+                    applyBlueprint(template.blueprint, `Plantilla «${template.name.slice(0, 40)}» aplicada.`);
+                    track("blueprint_generated", { source: "template" });
+                  }}
                   className="min-w-0 flex-1 min-h-11 md:min-h-9 px-3 py-2 rounded-xl border border-andros-border bg-andros-canvas text-left hover:border-andros-border-active hover:bg-andros-border/30 active:scale-[0.96] spring-micro disabled:opacity-50"
                 >
                   <span className="flex items-center gap-1.5 text-xs font-medium text-andros-primary">

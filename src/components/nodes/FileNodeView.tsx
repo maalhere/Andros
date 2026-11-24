@@ -33,6 +33,7 @@ import {
   useWorkspaceStore,
 } from "@/store/useWorkspaceStore";
 import { useCloudStore } from "@/store/useCloudStore";
+import { useIsExpert } from "@/store/useSettingsStore";
 import { retryFileUpload } from "@/hooks/useCloudSync";
 import { takePendingFile } from "@/lib/canvas/quickAdd";
 import { requestFileDownload } from "@/lib/downloadWithPermission";
@@ -246,6 +247,10 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
   const isReady = file.status === "ready" && file.downloadUrl !== "";
   const canPreview3D = isReady && isPreviewable3D(file.extension);
   const canPrint3D = isReady && isPrintable3D(file.extension);
+  // El asistente de impresión (registro de impresoras + adaptadores) es del Modo
+  // Experto y se descarga aparte, solo al abrirlo.
+  const expert = useIsExpert();
+  const canOpenPrinter = canPrint3D && expert;
   const isCloudWorthy = canPrint3D || file.extension === "pdf";
   const isLocalOnly = file.downloadUrl.startsWith("blob:") && !file.storagePath;
   const dimensions = measured?.url === file.downloadUrl ? measured.dimensions : null;
@@ -663,7 +668,7 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
           )}
 
           {/* Acción principal: asistente de impresión 3D */}
-          {canPrint3D && (
+          {canOpenPrinter && (
             <button
               type="button"
               onClick={() => setIsPrintOpen(true)}
@@ -726,7 +731,7 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
         </div>
       )}
 
-      {isPrintOpen && canPrint3D && (
+      {isPrintOpen && canOpenPrinter && (
         <Print3DModal
           pieceName={node.title}
           fileName={file.fileName}

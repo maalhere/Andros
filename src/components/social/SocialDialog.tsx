@@ -70,6 +70,8 @@ export const SocialDialog: React.FC<SocialDialogProps> = ({
           className={`fixed inset-0 ${layer === "top" ? "z-[92]" : "z-[85]"} bg-black/50 backdrop-blur-xs flex items-end md:items-center justify-center p-3 md:p-6`}
         >
           <motion.div
+            // Clarity: el contenido de estos diálogos (fichas, fórmulas, IA, correos) nunca se graba.
+            data-clarity-mask="true"
             role="dialog"
             aria-modal="true"
             aria-labelledby={titleId}

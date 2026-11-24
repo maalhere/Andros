@@ -25,6 +25,20 @@ export interface AndrosDesktopBridge {
     status: (ip: string, port: number) => Promise<PrinterStatus>;
     print: (ip: string, port: number, fileName: string, data: Uint8Array) => Promise<PrintResult>;
   };
+  /** Impresoras Klipper (Moonraker) por HTTP local (app ≥ Sprint 15). */
+  klipper?: {
+    status: (ip: string, port: number) => Promise<PrinterStatus>;
+    print: (ip: string, port: number, fileName: string, data: Uint8Array) => Promise<PrintResult>;
+  };
+  /** Laminadores instalados en Windows (app ≥ Sprint 15). Nunca expone rutas del disco. */
+  slicers?: {
+    detect: () => Promise<{ id: string; installed: boolean }[]>;
+    open: (
+      slicerId: string,
+      fileName: string,
+      data: Uint8Array
+    ) => Promise<{ ok: boolean; error?: string; notInstalled?: boolean }>;
+  };
   /** Login con Google en el navegador del sistema (app ≥ esta versión). */
   auth?: {
     begin: () => Promise<{ port: number; state: string }>;

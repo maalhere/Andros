@@ -5,7 +5,7 @@ import { CookiePreferencesLink } from "@/components/legal/CookiePreferencesLink"
 export const metadata: Metadata = {
   title: "Política de Cookies",
   description:
-    "Qué cookies y almacenamiento local usa Andros: solo las necesarias para la sesión y tus preferencias; la analítica opcional requiere tu permiso.",
+    "Qué cookies y almacenamiento local usa Andros: las necesarias para la sesión y tus preferencias; la analítica opcional (Microsoft Clarity y PostHog) requiere tu permiso.",
   alternates: { canonical: "/cookies" },
 };
 
@@ -63,6 +63,15 @@ export default function CookiesPage() {
             </tr>
             <tr>
               <td>
+                Almacenamiento local: impresora 3D elegida y su IP privada (
+                <code>andros-printer-model</code>, <code>andros-klipper-targets</code>,{" "}
+                <code>andros-adv3-ip</code>)
+              </td>
+              <td>Recordar tu impresora y conectarla por tu Wi-Fi sin volver a escribir la IP</td>
+              <td>Hasta que lo borres</td>
+            </tr>
+            <tr>
+              <td>
                 Almacenamiento local: <code>andros-cookie-consent</code>
               </td>
               <td>Recordar tu elección en este aviso</td>
@@ -74,10 +83,43 @@ export default function CookiesPage() {
 
       <h2>2. Analítica (opcional)</h2>
       <p>
-        Hoy Andros <strong>no usa ninguna herramienta de analítica</strong>. Si en el futuro
-        añadimos una para medir de forma agregada qué funciones se usan, solo se cargará si
-        pulsas «Aceptar todas», y la nombraremos en esta página.
+        Solo se activa si pulsas «Aceptar todas» y si la versión de Andros que usas la tiene
+        configurada. Con «Solo necesarias» no se carga ni se envía nada. Sirve para saber de
+        forma agregada qué funciones se usan y dónde se atasca la interfaz; el contenido de tus
+        tarjetas, fichas, fórmulas y chats IA se enmascara y nunca se envía.
       </p>
+      <div className="legal-table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Qué</th>
+              <th scope="col">Para qué</th>
+              <th scope="col">Duración</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>
+                Microsoft Clarity: cookies <code>_clck</code> y <code>_clsk</code>
+              </td>
+              <td>Mapas de calor y grabación de sesión con el contenido enmascarado</td>
+              <td>
+                <code>_clck</code> 1 año · <code>_clsk</code> 1 día
+              </td>
+            </tr>
+            <tr>
+              <td>
+                PostHog: almacenamiento local <code>andros-telemetry-id</code> (sin cookies)
+              </td>
+              <td>
+                Identificador aleatorio para contar eventos de uso (sin contenido, sin perfil de
+                persona y sin geolocalización)
+              </td>
+              <td>Hasta que retires el consentimiento</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
       <h2>3. Publicidad</h2>
       <p>Andros no usa cookies de publicidad ni de seguimiento entre sitios.</p>

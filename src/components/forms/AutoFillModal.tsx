@@ -1,5 +1,6 @@
 "use client";
 
+import { track } from "@/lib/analytics/telemetry";
 import React, { useMemo, useRef, useState } from "react";
 import { ClipboardList, KeyRound, Loader2, ShieldAlert, Sparkles, X } from "lucide-react";
 import { useFormsLibraryStore } from "@/store/useFormsLibraryStore";
@@ -116,6 +117,7 @@ export const AutoFillPanel: React.FC<{ onDone?: () => void }> = ({ onDone }) => 
       abortRef.current = new AbortController();
       try {
         const outcome = await runAutofill(text, sources, abortRef.current.signal);
+        track("form_autofilled", { created: outcome.created, updated: outcome.updated, fields: outcome.filledFields });
         const parts = [
           outcome.created > 0 ? `${outcome.created} ficha${outcome.created === 1 ? "" : "s"} nueva${outcome.created === 1 ? "" : "s"}` : "",
           outcome.updated > 0 ? `${outcome.updated} actualizada${outcome.updated === 1 ? "" : "s"}` : "",

@@ -1,5 +1,6 @@
 "use client";
 
+import { track } from "@/lib/analytics/telemetry";
 import React, { useRef, useState } from "react";
 import { KeyRound, Loader2, ShieldAlert, Sparkles, SquareFunction, X, Zap } from "lucide-react";
 import { useFormulaCreatorStore } from "@/store/useFormulaCreatorStore";
@@ -57,6 +58,7 @@ const FormulaCreatorPanel: React.FC<{ onDone: () => void }> = ({ onDone }) => {
     const data = structuredClone(preset.data);
     const inserted = insertFormulaNode(preset.title, data);
     announce(preset.title, inserted);
+    track("formula_created", { source: "preset" });
     onDone();
   };
 
@@ -73,6 +75,7 @@ const FormulaCreatorPanel: React.FC<{ onDone: () => void }> = ({ onDone }) => {
         const generated = await generateFormula(text, useWorkspaceStore.getState().nodes, abortRef.current.signal);
         const inserted = insertFormulaNode(generated.title, generated.data);
         announce(generated.title, inserted, generated.notes);
+        track("formula_created", { source: "ai" });
         setDescription("");
         onDone();
       } catch (err) {

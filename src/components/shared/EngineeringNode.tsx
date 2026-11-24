@@ -488,6 +488,8 @@ export const EngineeringNode = React.memo(function EngineeringNode({
   return (
     <motion.div
       data-node-id={node.id}
+      // Clarity: notas, fichas, fórmulas y chats IA nunca se graban (título incluido).
+      data-clarity-mask="true"
       initial={variant === "canvas" && full ? { scale: 0.85, opacity: 0 } : false}
       animate={{ scale: isDragging && full ? 1.025 : 1, opacity: 1 }}
       transition={

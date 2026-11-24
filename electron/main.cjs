@@ -20,6 +20,12 @@
 //     FlashForge Adventurer 3 en el Wi-Fi (UDP 19000/48899 + barrido TCP 8899),
 //     lee su estado y le envía el .gx — con sockets reales desde este equipo,
 //     aunque la web venga de Vercel.
+//   · Impresoras Klipper (Creality K2 SE, K1, Elegoo, QIDI…): estado y envío de
+//     .gcode por la API HTTP local de Moonraker (solo IPs RFC 1918, puertos
+//     7125 / 4408 / 80).
+//   · Laminadores instalados (Creality Print, OrcaSlicer, Bambu Studio,
+//     PrusaSlicer, FlashPrint): se detectan en las carpetas de instalación de
+//     Windows y el archivo exportado se abre directo en el elegido (1 clic).
 // ============================================================================
 
 const {
@@ -41,6 +47,8 @@ const http = require("node:http");
 const path = require("node:path");
 const config = require("./config.cjs");
 const printer = require("./generated/flashforge.cjs");
+const klipper = require("./generated/klipper.cjs");
+const { spawn } = require("node:child_process");
 
 const IS_DEV = !app.isPackaged || process.env.ANDROS_DESKTOP_DEV === "1";
 const APP_URL = process.env.ANDROS_URL || (app.isPackaged ? config.productionUrl : config.devUrl);
@@ -104,7 +112,7 @@ function visibleBounds(bounds) {
 
 const GOOGLE_AUTH_HOST = /^accounts\.google\.[a-z.]+$|^accounts\.youtube\.com$/i;
 const SUPABASE_HOST = /(^|\.)supabase\.(co|com|in)$/i;
-const EXTERNAL_SCHEMES = new Set(["http:", "https:", "mailto:", "bambustudio:", "prusaslicer:", "cura:"]);
+const EXTERNAL_SCHEMES = new Set(["http:", "https:", "mailto:", "bambustudio:", "prusaslicer:", "orcaslicer:", "cura:"]);
 
 function parseUrl(url) {
   try {
@@ -635,6 +643,142 @@ function setupPrinterBridge() {
 }
 
 // ---------------------------------------------------------------------------
+// Puente Klipper / Moonraker (Creality K2 SE, K1, Elegoo, QIDI…)
+// El núcleo (electron/generated/klipper.cjs) valida de nuevo cada destino:
+// solo IPv4 RFC 1918 y puertos 7125 / 4408 / 80, sin redirecciones.
+// ---------------------------------------------------------------------------
+
+/** Transferencias en curso por IP (una a la vez por impresora). */
+const klipperTransfers = new Set();
+
+function setupKlipperBridge() {
+  ipcMain.handle("andros:klipper:status", async (event, ip, port) => {
+    assertTrusted(event);
+    const target = klipper.parseKlipperTarget(ip, port);
+    if (typeof target === "string") return { ok: false, error: target };
+    if (klipperTransfers.has(target.ip)) return BUSY_STATUS;
+    try {
+      return await klipper.readKlipperStatus(target);
+    } catch (e) {
+      return { ok: false, error: `No se pudo conectar con ${target.ip}:${target.port}. ${klipper.describeMoonrakerError(e)}.` };
+    }
+  });
+
+  ipcMain.handle("andros:klipper:print", async (event, ip, port, fileName, data) => {
+    assertTrusted(event);
+    const target = klipper.parseKlipperTarget(ip, port);
+    if (typeof target === "string") return { ok: false, error: target };
+    if (!(data instanceof Uint8Array) || data.byteLength === 0) {
+      return { ok: false, error: "El archivo de impresión está vacío." };
+    }
+    if (data.byteLength > klipper.KLIPPER_MAX_UPLOAD_BYTES) return { ok: false, error: "El archivo supera 128 MB." };
+    if (klipperTransfers.has(target.ip)) {
+      return { ok: false, error: "Ya se está enviando un archivo a esta impresora. Espera a que termine." };
+    }
+    klipperTransfers.add(target.ip);
+    try {
+      const bytes = new Uint8Array(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength));
+      return await klipper.uploadAndPrintKlipper(target, String(fileName ?? "ANDROS_pieza"), bytes);
+    } catch (e) {
+      return { ok: false, error: `No se pudo enviar a ${target.ip}:${target.port}. ${klipper.describeMoonrakerError(e)}.` };
+    } finally {
+      klipperTransfers.delete(target.ip);
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Laminadores instalados en Windows (abrir el archivo exportado en 1 clic)
+//   · Solo se buscan ejecutables conocidos en las carpetas de instalación
+//     estándar; la web recibe { id, installed } y NUNCA rutas del disco.
+//   · El archivo se escribe en %TEMP%\Andros\imprimir con un nombre saneado y
+//     una extensión permitida, y se abre con spawn (sin shell).
+// ---------------------------------------------------------------------------
+
+const SLICER_EXTENSIONS = new Set(["stl", "3mf", "obj", "step", "stp", "gcode"]);
+const SLICER_MAX_BYTES = 256 * 1024 * 1024;
+
+/** Carpetas base de instalación (64 bits, 32 bits y por usuario). */
+function programRoots() {
+  return [process.env.ProgramFiles, process.env["ProgramFiles(x86)"], process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Programs")]
+    .filter(Boolean);
+}
+
+/** Subcarpetas de `dir` cuyo nombre empieza por `prefix` (p. ej. «Creality Print 6.0»). */
+function versionedDirs(dir, prefix) {
+  try {
+    return fs
+      .readdirSync(dir, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && d.name.toLowerCase().startsWith(prefix.toLowerCase()))
+      .map((d) => path.join(dir, d.name))
+      .sort()
+      .reverse();
+  } catch {
+    return [];
+  }
+}
+
+const SLICER_CANDIDATES = {
+  "creality-print": (root) =>
+    versionedDirs(path.join(root, "Creality"), "Creality Print").flatMap((dir) => [
+      path.join(dir, "CrealityPrint.exe"),
+      path.join(dir, "Creality Print.exe"),
+    ]),
+  orcaslicer: (root) => [path.join(root, "OrcaSlicer", "orca-slicer.exe")],
+  "bambu-studio": (root) => [path.join(root, "Bambu Studio", "bambu-studio.exe")],
+  prusaslicer: (root) => [path.join(root, "Prusa3D", "PrusaSlicer", "prusa-slicer.exe")],
+  flashprint: (root) => [
+    ...versionedDirs(path.join(root, "FlashForge"), "FlashPrint").map((dir) => path.join(dir, "FlashPrint.exe")),
+  ],
+};
+
+function findSlicerExe(id) {
+  if (process.platform !== "win32" || !Object.prototype.hasOwnProperty.call(SLICER_CANDIDATES, id)) return null;
+  for (const root of programRoots()) {
+    for (const candidate of SLICER_CANDIDATES[id](root)) {
+      try {
+        if (fs.statSync(candidate).isFile()) return candidate;
+      } catch {
+        // No está aquí: se prueba la siguiente ruta.
+      }
+    }
+  }
+  return null;
+}
+
+function setupSlicerBridge() {
+  ipcMain.handle("andros:slicers:detect", async (event) => {
+    assertTrusted(event);
+    return Object.keys(SLICER_CANDIDATES).map((id) => ({ id, installed: Boolean(findSlicerExe(id)) }));
+  });
+
+  ipcMain.handle("andros:slicers:open", async (event, slicerId, fileName, data) => {
+    assertTrusted(event);
+    const id = String(slicerId ?? "");
+    if (!Object.prototype.hasOwnProperty.call(SLICER_CANDIDATES, id)) return { ok: false, error: "Laminador no soportado." };
+    if (!(data instanceof Uint8Array) || data.byteLength === 0) return { ok: false, error: "El archivo está vacío." };
+    if (data.byteLength > SLICER_MAX_BYTES) return { ok: false, error: "El archivo supera 256 MB." };
+    const name = path.basename(safeFileName(String(fileName ?? ""))).slice(0, 120);
+    const ext = path.extname(name).slice(1).toLowerCase();
+    if (!SLICER_EXTENSIONS.has(ext)) return { ok: false, error: "Tipo de archivo no permitido." };
+    const exe = findSlicerExe(id);
+    if (!exe) return { ok: false, notInstalled: true, error: "El laminador no está instalado en este equipo." };
+    try {
+      const dir = path.join(app.getPath("temp"), "Andros", "imprimir");
+      fs.mkdirSync(dir, { recursive: true });
+      const target = path.join(dir, name);
+      fs.writeFileSync(target, Buffer.from(data.buffer, data.byteOffset, data.byteLength));
+      const child = spawn(exe, [target], { detached: true, stdio: "ignore", shell: false, windowsHide: false });
+      child.on("error", () => {});
+      child.unref();
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : "No se pudo abrir el laminador." };
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Login con Google en el navegador del sistema (RFC 8252, "loopback")
 //
 //   1. La web pide `andros:auth:begin` → aquí se abre un servidor temporal en
@@ -841,6 +985,8 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(() => {
     setupSession();
     setupPrinterBridge();
+    setupKlipperBridge();
+    setupSlicerBridge();
     setupAuthBridge();
     createWindow();
     app.on("activate", () => {

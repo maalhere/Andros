@@ -153,6 +153,64 @@ export default function PrivacidadPage() {
           recibimos el correo que decidas enviar.
         </li>
       </ul>
+      <h3>Impresión 3D multi-impresora (Modo Experto)</h3>
+      <ul>
+        <li>
+          <strong>Impresora elegida y su IP local</strong>: el modelo que eliges (por ejemplo,
+          Creality K2 SE o FlashForge Adventurer 3) y, si la conectas por Wi-Fi, su dirección IP
+          privada y su puerto se guardan solo en el almacenamiento local de tu dispositivo
+          (<code>andros-printer-model</code>, <code>andros-klipper-targets</code> y{" "}
+          <code>andros-adv3-ip</code>). Nunca se envían a nuestra base de datos.
+        </li>
+        <li>
+          <strong>Conexión directa en tu red</strong>: Andros solo habla con la impresora desde la
+          app de Windows o desde un servidor de Andros que corre en tu propia red. Solo acepta
+          direcciones de redes privadas (10.x.x.x, 172.16–31.x.x y 192.168.x.x) y los puertos
+          estándar de cada impresora (8899 en FlashForge; 7125, 4408 u 80 en Moonraker/Fluidd de
+          Klipper). La web pública nunca contacta con tu impresora ni con tu red.
+        </li>
+        <li>
+          <strong>Archivos de impresión</strong>: el .gx, .gcode o .stl preparado viaja de tu
+          dispositivo directamente a tu impresora o a tu laminador; no pasa por nuestros
+          servidores. Para Bambu Lab, Prusa, Anycubic y otras, el archivo se descarga (con tu
+          permiso) o se abre en el programa que elijas.
+        </li>
+        <li>
+          <strong>Laminadores instalados (app de Windows)</strong>: para abrir el archivo en 1
+          clic, la app comprueba si Creality Print, OrcaSlicer, Bambu Studio, PrusaSlicer o
+          FlashPrint están en las carpetas de instalación estándar de Windows. El resultado se
+          queda en tu equipo; el archivo se guarda en una carpeta temporal de Windows antes de
+          abrirse.
+        </li>
+      </ul>
+      <h3>Medición de uso opcional (Microsoft Clarity y PostHog)</h3>
+      <ul>
+        <li>
+          <strong>Solo con tu permiso</strong>: estas herramientas se cargan únicamente si pulsas
+          «Aceptar todas» en el aviso de cookies y si la versión de Andros que usas las tiene
+          activadas. Con «Solo necesarias» no se carga nada ni se hace ninguna petición a ellas.
+        </li>
+        <li>
+          <strong>PostHog (eventos de producto)</strong>: registramos acciones sueltas, sin su
+          contenido: que se creó un espacio, se generó un tablero, se llenaron fichas con IA (solo
+          cuántas), se creó una fórmula, se exportó un entregable (pdf, docx, pptx o WhatsApp), se
+          activó un enlace de invitado, alguien entró a voz o se eligió una impresora (su modelo).
+          Cada evento lleva un identificador aleatorio guardado en tu navegador
+          (<code>andros-telemetry-id</code>), sin perfil de persona y sin geolocalización.
+          Nunca enviamos texto de notas, fichas, fórmulas o chats IA, nombres de espacios o de
+          personas, enlaces con códigos de invitado ni tus claves de IA.
+        </li>
+        <li>
+          <strong>Microsoft Clarity (mapas de calor y grabación de sesión)</strong>: registra
+          movimientos, clics y desplazamientos para detectar problemas de uso. El contenido de las
+          tarjetas (notas, fichas, fórmulas y chats IA), los diálogos con datos y los campos de
+          texto se <strong>enmascaran</strong>: Clarity ve recuadros vacíos, no tu contenido.
+        </li>
+        <li>
+          Ambos servicios reciben tu dirección IP como parte de la conexión. Si retiras el
+          consentimiento, Clarity deja de grabar y se borra el identificador anónimo.
+        </li>
+      </ul>
       <h3>Si abres un espacio en la nube o entras a su canal de voz</h3>
       <ul>
         <li>
@@ -186,6 +244,10 @@ export default function PrivacidadPage() {
         <li>Mantener tu sesión y guardar tu trabajo en la nube.</li>
         <li>Mostrar tus publicaciones de Arena a otras personas cuando tú las publicas.</li>
         <li>Responder a tus mensajes de soporte.</li>
+        <li>
+          Solo si aceptas la analítica opcional: medir de forma agregada qué funciones se usan y
+          dónde falla la interfaz, para mejorarla.
+        </li>
       </ul>
       <p>
         No vendemos tus datos, no los usamos para publicidad y no creamos perfiles comerciales.
@@ -226,6 +288,11 @@ export default function PrivacidadPage() {
           las tarjetas del espacio y tu instrucción opcional, nunca las fotos. Las
           plantillas que guardas desde «Guardar como plantilla» se quedan solo en el
           almacenamiento local de tu navegador.
+        </li>
+        <li>
+          <strong>Microsoft (Clarity) y PostHog</strong>: solo si aceptas la analítica opcional y
+          está activada; reciben los eventos y las sesiones con el contenido enmascarado descritos
+          en el punto 2.
         </li>
         <li>
           <strong>OpenAI y Anthropic</strong>: solo si eliges esos modelos en un nodo IA con tu
@@ -289,7 +356,8 @@ export default function PrivacidadPage() {
 
       <h2>9. Cookies</h2>
       <p>
-        Usamos cookies estrictamente necesarias para mantener la sesión. Los detalles están en la{" "}
+        Usamos cookies estrictamente necesarias para mantener la sesión, y analítica opcional
+        (Microsoft Clarity y PostHog) solo si la aceptas. Los detalles están en la{" "}
         <Link href="/cookies">Política de Cookies</Link>.
       </p>
 

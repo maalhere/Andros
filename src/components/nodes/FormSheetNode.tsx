@@ -225,6 +225,7 @@ const PhotoLightbox: React.FC<{
       onPointerDown={onClose}
     >
       <div
+        data-clarity-mask="true"
         role="dialog"
         aria-modal="true"
         aria-label={`Foto «${photo.name}» de la ficha «${sheetTitle}»`}
