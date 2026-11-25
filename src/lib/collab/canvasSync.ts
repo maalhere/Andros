@@ -17,10 +17,23 @@
 // como `alert:upsert` / `alert:resolve` con el mismo `senderId`; las que llegan
 // se aplican con la misma marca remota, así que tampoco rebotan. Solo viven en
 // la sesión (no se guardan en la nube).
+//
+// (Sprint 16) Permisos y comentarios:
+//   · Los cambios de lienzo que lleguen de alguien con rol Comentarista o
+//     Solo lectura se IGNORAN (`isReadOnlySender`): nadie los aplica ni los
+//     guarda en la nube en su nombre.
+//   · `comment:upsert` / `comment:resolve` / `comment:delete` actualizan el
+//     cajón de comentarios de quien tiene el espacio abierto. La tabla
+//     `workspace_comments` (RLS) es la fuente de verdad: estos avisos nunca
+//     se guardan, solo evitan recargar.
 // ============================================================================
 
 import type {
+  AccessChangedPayload,
   AlertResolvePayload,
+  CommentDeletePayload,
+  CommentResolvePayload,
+  CommentUpsertPayload,
   AlertUpsertPayload,
   CanvasSnapshotPayload,
   EdgeDeletePayload,
@@ -35,6 +48,10 @@ import { sanitizeAlertEntry } from "@/lib/canvas/impact";
 import { parseImportedConnection, parseImportedNode } from "@/hooks/useCloudSync";
 import { sanitizeCanvasStrokes } from "@/lib/canvas/inkGeometry";
 import { isApplyingRemoteCollab, runAsRemoteCollab } from "./remoteFlag";
+import { isReadOnlySender, setKnownMemberRole } from "@/lib/access/memberRoles";
+import { isMemberRole } from "@/lib/access/permissions";
+import { sanitizeComment } from "@/lib/comments/commentModel";
+import { useCommentsStore } from "@/store/useCommentsStore";
 
 /** Intervalo mínimo entre dos envíos del mismo nodo (~25 fps). */
 export const NODE_SEND_INTERVAL_MS = 40;
@@ -274,12 +291,18 @@ function mergeIncomingNode(
   };
 }
 
+/** El remitente no tiene permiso de edición en este espacio: se descarta. */
+function blocked(payload: { workspaceId: string; senderUserId: string }): boolean {
+  return isReadOnlySender(payload.workspaceId, payload.senderUserId);
+}
+
 /** `persist`: el cambio vino de otra cuenta → el dueño debe guardarlo. */
 function persistFor(senderUserId: string, selfUserId: string): boolean {
   return senderUserId !== selfUserId;
 }
 
 export function applyRemoteNodeUpsert(payload: NodeUpsertPayload, selfUserId: string): void {
+  if (blocked(payload)) return;
   const node = parseImportedNode(payload.node);
   if (!node) return;
   runAsRemoteCollab(
@@ -296,6 +319,7 @@ export function applyRemoteNodeUpsert(payload: NodeUpsertPayload, selfUserId: st
 }
 
 export function applyRemoteNodeDelete(payload: NodeDeletePayload, selfUserId: string): void {
+  if (blocked(payload)) return;
   if (typeof payload.id !== "string") return;
   runAsRemoteCollab(
     () =>
@@ -319,6 +343,7 @@ export function applyRemoteNodeDelete(payload: NodeDeletePayload, selfUserId: st
 }
 
 export function applyRemoteEdgeUpsert(payload: EdgeUpsertPayload, selfUserId: string): void {
+  if (blocked(payload)) return;
   const edge = parseImportedConnection(payload.edge);
   if (!edge) return;
   runAsRemoteCollab(
@@ -337,6 +362,7 @@ export function applyRemoteEdgeUpsert(payload: EdgeUpsertPayload, selfUserId: st
 }
 
 export function applyRemoteEdgeDelete(payload: EdgeDeletePayload, selfUserId: string): void {
+  if (blocked(payload)) return;
   if (typeof payload.id !== "string") return;
   runAsRemoteCollab(
     () =>
@@ -361,6 +387,39 @@ export function applyRemoteAlertUpsert(payload: AlertUpsertPayload): void {
 export function applyRemoteAlertResolve(payload: AlertResolvePayload): void {
   if (typeof payload.id !== "string") return;
   runAsRemoteCollab(() => useImpactStore.getState().resolveAlert(payload.id), { persist: false });
+}
+
+// ----------------------------------------------------------------------------
+// Comentarios y permisos (Sprint 16)
+// ----------------------------------------------------------------------------
+
+export function applyRemoteCommentUpsert(payload: CommentUpsertPayload): void {
+  const comment = sanitizeComment(payload.comment);
+  // Solo se acepta un comentario de su propio autor y para este espacio.
+  if (!comment || comment.workspaceId !== payload.workspaceId || comment.authorId !== payload.senderUserId) return;
+  useCommentsStore.getState().upsert(comment);
+}
+
+export function applyRemoteCommentResolve(payload: CommentResolvePayload): void {
+  if (typeof payload.id !== "string" || typeof payload.resolved !== "boolean") return;
+  useCommentsStore.getState().setResolved(payload.id, payload.resolved);
+}
+
+export function applyRemoteCommentDelete(payload: CommentDeletePayload): void {
+  if (typeof payload.id !== "string") return;
+  useCommentsStore.getState().remove(payload.id);
+}
+
+/**
+ * Cambio de permiso anunciado por el dueño. Devuelve `true` si te afecta a
+ * ti (quien llama vuelve a leer tu rol REAL de la base, no el del mensaje).
+ */
+export function applyRemoteAccessChanged(payload: AccessChangedPayload, selfUserId: string): boolean {
+  if (typeof payload.userId !== "string" || typeof payload.workspaceId !== "string") return false;
+  const role = payload.role === null ? null : isMemberRole(payload.role) ? payload.role : undefined;
+  if (role === undefined) return false;
+  setKnownMemberRole(payload.workspaceId, payload.userId, role);
+  return payload.userId === selfUserId;
 }
 
 // ----------------------------------------------------------------------------

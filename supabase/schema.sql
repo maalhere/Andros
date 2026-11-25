@@ -25,6 +25,12 @@
 --  11. (Sprint 13) Fichas de Fórmula LaTeX reactivas
 --      → el tipo de nodo "formula-sheet-node" en el check de workspace_nodes.
 --        La Vista Invitado ya recibe los cables (`connections`) para calcularlas.
+--  12. (Sprint 16) Roles de acceso estilo Google Docs + comentarios
+--      → workspace_members.role ('editor' | 'commenter' | 'viewer'),
+--        get_workspace_role() / can_edit_workspace() / can_comment_workspace()
+--        (SECURITY DEFINER) y la tabla workspace_comments con su RLS.
+--        Dueño y Editor escriben nodos, cables y tinta; Comentarista y
+--        Solo lectura únicamente leen (Comentarista además comenta).
 -- ============================================================================
 
 create extension if not exists "pgcrypto";
@@ -275,17 +281,54 @@ create trigger friendships_guard_update
   before update on public.friendships
   for each row execute function public.friendships_guard_update();
 
--- WORKSPACE_MEMBERS: personas añadidas a un espacio (el dueño es implícito).
+-- WORKSPACE_MEMBERS: personas añadidas a un espacio (el dueño es implícito,
+-- nunca tiene fila aquí). (Sprint 16) Roles estilo Google Docs:
+--   · editor     → lee y edita nodos, cables y tinta.
+--   · commenter  → solo lee el lienzo, pero puede comentar.
+--   · viewer     → solo lee el lienzo y los comentarios.
 create table if not exists public.workspace_members (
   workspace_id  uuid not null references public.workspaces (id) on delete cascade,
   user_id       uuid not null references auth.users (id) on delete cascade,
-  role          text not null default 'editor' check (role in ('owner', 'editor')),
+  role          text not null default 'editor' check (role in ('editor', 'commenter', 'viewer')),
   added_by      uuid default auth.uid() references auth.users (id) on delete set null,
   created_at    timestamptz not null default now(),
   primary key (workspace_id, user_id)
 );
 
 create index if not exists workspace_members_user_idx on public.workspace_members (user_id);
+
+-- Bases ya creadas (Sprint 7.6 aceptaba 'owner' | 'editor'): se normaliza a los
+-- 3 roles nuevos sin perder a nadie. Idempotente.
+alter table public.workspace_members add column if not exists role text not null default 'editor';
+alter table public.workspace_members drop constraint if exists workspace_members_role_check;
+update public.workspace_members
+  set role = 'editor'
+  where role is null or role not in ('editor', 'commenter', 'viewer');
+alter table public.workspace_members alter column role set default 'editor';
+alter table public.workspace_members add constraint workspace_members_role_check
+  check (role in ('editor', 'commenter', 'viewer'));
+
+-- Al cambiar el rol de alguien solo puede cambiar `role` (nunca la persona ni
+-- el espacio: así nadie convierte una fila en acceso para un desconocido).
+create or replace function public.workspace_members_guard_update()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.workspace_id is distinct from old.workspace_id
+     or new.user_id is distinct from old.user_id
+     or new.added_by is distinct from old.added_by
+     or new.created_at is distinct from old.created_at then
+    raise exception 'Solo se puede cambiar el rol de un miembro.';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists workspace_members_guard_update on public.workspace_members;
+create trigger workspace_members_guard_update
+  before update on public.workspace_members
+  for each row execute function public.workspace_members_guard_update();
 
 -- ----------------------------------------------------------------------------
 -- Funciones auxiliares SECURITY DEFINER: consultan `workspaces` y
@@ -317,6 +360,55 @@ as $$
     )
   );
 $$;
+
+-- (Sprint 16) Rol de la persona actual en un espacio:
+--   'owner' | 'editor' | 'commenter' | 'viewer' | NULL (sin acceso).
+create or replace function public.get_workspace_role(ws_id uuid)
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select case
+    when auth.uid() is null then null
+    when exists (select 1 from public.workspaces w where w.id = ws_id and w.owner_id = auth.uid())
+      then 'owner'
+    else (
+      select m.role from public.workspace_members m
+      where m.workspace_id = ws_id and m.user_id = auth.uid()
+    )
+  end;
+$$;
+
+-- Escribir nodos, cables y tinta: solo dueño y editores.
+create or replace function public.can_edit_workspace(ws_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce(public.get_workspace_role(ws_id) in ('owner', 'editor'), false);
+$$;
+
+-- Crear comentarios: dueño, editores y comentaristas (nunca «Solo lectura»).
+create or replace function public.can_comment_workspace(ws_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce(public.get_workspace_role(ws_id) in ('owner', 'editor', 'commenter'), false);
+$$;
+
+revoke all on function public.get_workspace_role(uuid) from public, anon;
+revoke all on function public.can_edit_workspace(uuid) from public, anon;
+revoke all on function public.can_comment_workspace(uuid) from public, anon;
+grant execute on function public.get_workspace_role(uuid) to authenticated;
+grant execute on function public.can_edit_workspace(uuid) to authenticated;
+grant execute on function public.can_comment_workspace(uuid) to authenticated;
 
 create or replace function public.are_friends(a uuid, b uuid)
 returns boolean
@@ -502,10 +594,12 @@ create policy "workspaces_insert_own" on public.workspaces
 
 drop policy if exists "workspaces_update_own" on public.workspaces;
 drop policy if exists "workspaces_update_member" on public.workspaces;
+-- (Sprint 16) Solo dueño y editores: la tinta (`canvas_strokes`) vive en esta
+-- fila, así que Comentarista y Solo lectura tampoco pueden dibujar.
 create policy "workspaces_update_member" on public.workspaces
   for update to authenticated
-  using (public.is_workspace_member(id))
-  with check (public.is_workspace_member(id));
+  using (public.can_edit_workspace(id))
+  with check (public.can_edit_workspace(id));
 
 drop policy if exists "workspaces_delete_own" on public.workspaces;
 create policy "workspaces_delete_own" on public.workspaces
@@ -514,6 +608,7 @@ create policy "workspaces_delete_own" on public.workspaces
 -- WORKSPACE_NODES ------------------------------------------------------------
 -- `owner_id` de cada fila = dueño del ESPACIO (también cuando escribe un
 -- miembro): el lienzo sigue siendo del dueño aunque otra persona lo edite.
+-- (Sprint 16) Leer: cualquier miembro. Escribir: solo dueño y editores.
 drop policy if exists "nodes_select_own" on public.workspace_nodes;
 drop policy if exists "nodes_select_member" on public.workspace_nodes;
 create policy "nodes_select_member" on public.workspace_nodes
@@ -524,7 +619,7 @@ drop policy if exists "nodes_insert_member" on public.workspace_nodes;
 create policy "nodes_insert_member" on public.workspace_nodes
   for insert to authenticated
   with check (
-    public.is_workspace_member(workspace_id)
+    public.can_edit_workspace(workspace_id)
     and owner_id = public.workspace_owner_id(workspace_id)
   );
 
@@ -532,16 +627,16 @@ drop policy if exists "nodes_update_own" on public.workspace_nodes;
 drop policy if exists "nodes_update_member" on public.workspace_nodes;
 create policy "nodes_update_member" on public.workspace_nodes
   for update to authenticated
-  using (public.is_workspace_member(workspace_id))
+  using (public.can_edit_workspace(workspace_id))
   with check (
-    public.is_workspace_member(workspace_id)
+    public.can_edit_workspace(workspace_id)
     and owner_id = public.workspace_owner_id(workspace_id)
   );
 
 drop policy if exists "nodes_delete_own" on public.workspace_nodes;
 drop policy if exists "nodes_delete_member" on public.workspace_nodes;
 create policy "nodes_delete_member" on public.workspace_nodes
-  for delete to authenticated using (public.is_workspace_member(workspace_id));
+  for delete to authenticated using (public.can_edit_workspace(workspace_id));
 
 -- WORKSPACE_CONNECTIONS ------------------------------------------------------
 drop policy if exists "connections_select_own" on public.workspace_connections;
@@ -554,7 +649,7 @@ drop policy if exists "connections_insert_member" on public.workspace_connection
 create policy "connections_insert_member" on public.workspace_connections
   for insert to authenticated
   with check (
-    public.is_workspace_member(workspace_id)
+    public.can_edit_workspace(workspace_id)
     and owner_id = public.workspace_owner_id(workspace_id)
   );
 
@@ -562,16 +657,16 @@ drop policy if exists "connections_update_own" on public.workspace_connections;
 drop policy if exists "connections_update_member" on public.workspace_connections;
 create policy "connections_update_member" on public.workspace_connections
   for update to authenticated
-  using (public.is_workspace_member(workspace_id))
+  using (public.can_edit_workspace(workspace_id))
   with check (
-    public.is_workspace_member(workspace_id)
+    public.can_edit_workspace(workspace_id)
     and owner_id = public.workspace_owner_id(workspace_id)
   );
 
 drop policy if exists "connections_delete_own" on public.workspace_connections;
 drop policy if exists "connections_delete_member" on public.workspace_connections;
 create policy "connections_delete_member" on public.workspace_connections
-  for delete to authenticated using (public.is_workspace_member(workspace_id));
+  for delete to authenticated using (public.can_edit_workspace(workspace_id));
 
 -- FRIENDSHIPS ----------------------------------------------------------------
 -- Solo las dos personas de la pareja leen, actualizan o borran la fila.
@@ -614,9 +709,20 @@ create policy "workspace_members_insert_owner" on public.workspace_members
   with check (
     public.workspace_owner_id(workspace_id) = (select auth.uid())
     and user_id <> (select auth.uid())
-    and role = 'editor'
+    and role in ('editor', 'commenter', 'viewer')
     and added_by = (select auth.uid())
     and public.are_friends((select auth.uid()), user_id)
+  );
+
+-- (Sprint 16) Solo el dueño cambia el rol de un miembro (el disparador
+-- workspace_members_guard_update impide tocar cualquier otra columna).
+drop policy if exists "workspace_members_update_owner" on public.workspace_members;
+create policy "workspace_members_update_owner" on public.workspace_members
+  for update to authenticated
+  using (public.workspace_owner_id(workspace_id) = (select auth.uid()))
+  with check (
+    public.workspace_owner_id(workspace_id) = (select auth.uid())
+    and role in ('editor', 'commenter', 'viewer')
   );
 
 drop policy if exists "workspace_members_delete" on public.workspace_members;
@@ -953,3 +1059,92 @@ $$;
 
 revoke all on function public.get_public_workspace(text) from public;
 grant execute on function public.get_public_workspace(text) to anon, authenticated;
+
+-- ============================================================================
+-- 12. COMENTARIOS DEL TABLERO (Sprint 16): roles estilo Google Docs
+--     · Dueño, Editor y Comentarista leen y crean comentarios.
+--     · Solo lectura (viewer) únicamente los lee.
+--     · Dueño, Editor y el propio autor marcan como resuelto o borran.
+--     · `node_id` NULL = comentario general; con valor = anclado a una tarjeta
+--       (sin FK: si la tarjeta se borra, el hilo sigue visible como «tarjeta
+--       eliminada» hasta que alguien lo resuelva o lo borre).
+--     · En vivo: la app avisa a la sala con Broadcast (`comment:upsert`,
+--       `comment:resolve`, `comment:delete`); esta tabla es la fuente de verdad.
+--     Idempotente: se puede ejecutar varias veces sin perder datos.
+-- ============================================================================
+create table if not exists public.workspace_comments (
+  id            uuid primary key default gen_random_uuid(),
+  workspace_id  uuid not null references public.workspaces (id) on delete cascade,
+  node_id       text check (node_id is null or char_length(node_id) between 1 and 120),
+  author_id     uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  author_name   text not null default '' check (char_length(author_name) <= 120),
+  body          text not null check (char_length(btrim(body)) between 1 and 2000),
+  resolved      boolean not null default false,
+  created_at    timestamptz not null default now()
+);
+
+create index if not exists workspace_comments_ws_idx
+  on public.workspace_comments (workspace_id, created_at desc);
+
+-- Al actualizar solo puede cambiar `resolved` (el texto y el autor son fijos).
+create or replace function public.workspace_comments_guard_update()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.workspace_id is distinct from old.workspace_id
+     or new.node_id is distinct from old.node_id
+     or new.author_id is distinct from old.author_id
+     or new.author_name is distinct from old.author_name
+     or new.body is distinct from old.body
+     or new.created_at is distinct from old.created_at then
+    raise exception 'Solo se puede marcar un comentario como resuelto o pendiente.';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists workspace_comments_guard_update on public.workspace_comments;
+create trigger workspace_comments_guard_update
+  before update on public.workspace_comments
+  for each row execute function public.workspace_comments_guard_update();
+
+alter table public.workspace_comments enable row level security;
+
+-- Leer: cualquier persona con acceso al espacio (incluye «Solo lectura»).
+drop policy if exists "workspace_comments_select" on public.workspace_comments;
+create policy "workspace_comments_select" on public.workspace_comments
+  for select to authenticated
+  using (public.is_workspace_member(workspace_id));
+
+-- Crear: dueño, editores y comentaristas, siempre como uno mismo y sin resolver.
+drop policy if exists "workspace_comments_insert" on public.workspace_comments;
+create policy "workspace_comments_insert" on public.workspace_comments
+  for insert to authenticated
+  with check (
+    public.can_comment_workspace(workspace_id)
+    and author_id = (select auth.uid())
+    and resolved = false
+  );
+
+-- Resolver / reabrir: dueño, editores o el propio autor (si sigue en el espacio).
+drop policy if exists "workspace_comments_update" on public.workspace_comments;
+create policy "workspace_comments_update" on public.workspace_comments
+  for update to authenticated
+  using (
+    public.can_edit_workspace(workspace_id)
+    or (author_id = (select auth.uid()) and public.is_workspace_member(workspace_id))
+  )
+  with check (
+    public.can_edit_workspace(workspace_id)
+    or (author_id = (select auth.uid()) and public.is_workspace_member(workspace_id))
+  );
+
+-- Borrar: dueño, editores o el propio autor (si sigue en el espacio).
+drop policy if exists "workspace_comments_delete" on public.workspace_comments;
+create policy "workspace_comments_delete" on public.workspace_comments
+  for delete to authenticated
+  using (
+    public.can_edit_workspace(workspace_id)
+    or (author_id = (select auth.uid()) and public.is_workspace_member(workspace_id))
+  );

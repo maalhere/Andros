@@ -1,15 +1,17 @@
 "use client";
 
 import React, { useEffect } from "react";
-import { Eye, MousePointer2, PenLine, Plus, Sparkles } from "lucide-react";
+import { Eye, MessageSquare, MousePointer2, PenLine, Plus, Sparkles } from "lucide-react";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
-import { useCanvasReadOnly } from "@/store/useCollabStore";
+import { READ_ONLY_LABELS, useReadOnlyReason } from "@/store/useCollabStore";
+import { useCommentsStore } from "@/store/useCommentsStore";
 import { quickAddSketch } from "@/lib/canvas/quickAdd";
 
 // ============================================================================
 // ANDROS — BARRA INFERIOR DEL TELÉFONO (zona del pulgar)
 // 4 botones claros con icono + etiqueta: Seleccionar · Agregar · Dibujar · Oráculo IA
 // En solo lectura (sala llena 6/6) solo queda «Seleccionar» + aviso «Solo lectura».
+// Con rol Comentarista o Solo lectura (Sprint 16) se añade «Comentarios».
 // ============================================================================
 
 const BASE =
@@ -19,7 +21,8 @@ export const ThumbZoneBar: React.FC = () => {
   const activeMobileSheet = useWorkspaceStore((s) => s.activeMobileSheet);
   const setActiveMobileSheet = useWorkspaceStore((s) => s.setActiveMobileSheet);
   const selectNode = useWorkspaceStore((s) => s.selectNode);
-  const readOnly = useCanvasReadOnly();
+  const readOnlyReason = useReadOnlyReason();
+  const readOnly = readOnlyReason !== null;
 
   // Al quedar en solo lectura se cierra cualquier cajón de escritura abierto.
   useEffect(() => {
@@ -53,13 +56,26 @@ export const ThumbZoneBar: React.FC = () => {
       </button>
 
       {readOnly ? (
-        <p
-          role="status"
-          className="flex-[3] min-w-0 min-h-[52px] px-3 flex items-center justify-center gap-2 text-[12px] font-medium text-andros-muted text-center"
-        >
-          <Eye className="w-[18px] h-[18px] shrink-0" aria-hidden="true" />
-          <span>Solo lectura · sala llena</span>
-        </p>
+        <>
+          {readOnlyReason !== "capacity" && (
+            <button
+              type="button"
+              onClick={() => useCommentsStore.getState().openDrawer(null)}
+              className={`${BASE} text-andros-muted`}
+            >
+              <MessageSquare className="w-[18px] h-[18px]" aria-hidden="true" />
+              <span className="text-[11px] font-medium">Comentarios</span>
+            </button>
+          )}
+          <p
+            role="status"
+            title={READ_ONLY_LABELS[readOnlyReason ?? "capacity"].long}
+            className="flex-[2] min-w-0 min-h-[52px] px-3 flex items-center justify-center gap-2 text-[12px] font-medium text-andros-muted text-center"
+          >
+            <Eye className="w-[18px] h-[18px] shrink-0" aria-hidden="true" />
+            <span>{READ_ONLY_LABELS[readOnlyReason ?? "capacity"].short}</span>
+          </p>
+        </>
       ) : (
         <>
           <button

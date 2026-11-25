@@ -2,6 +2,8 @@
 // ANDROS — @USUARIO, AMISTADES Y MIEMBROS DE ESPACIOS (Sprint 7.6)
 // ============================================================================
 
+import type { WorkspaceRole } from "@/lib/access/permissions";
+
 /** Datos básicos y públicos de una persona (nunca su correo). */
 export interface BasicProfile {
   id: string;
@@ -26,7 +28,8 @@ export interface Friendship {
 
 export interface WorkspaceMember {
   userId: string;
-  role: "owner" | "editor";
+  /** (Sprint 16) Dueño, Editor, Comentarista o Solo lectura. */
+  role: WorkspaceRole;
   profile: BasicProfile;
 }
 

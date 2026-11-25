@@ -17,6 +17,7 @@ import {
   PenLine,
   Eraser,
   Eye,
+  MessageSquare,
   SquareFunction,
   StickyNote,
   Undo2,
@@ -32,7 +33,8 @@ import {
 import type { CanvasInkColor, CanvasInkTip } from "@/types/workspace";
 import { useLibraryStore } from "@/store/useLibraryStore";
 import { SPRING_SNAPPY } from "@/lib/motion";
-import { useCanvasReadOnly } from "@/store/useCollabStore";
+import { READ_ONLY_LABELS, useReadOnlyReason } from "@/store/useCollabStore";
+import { useCommentsStore } from "@/store/useCommentsStore";
 
 // ============================================================================
 // 1. INDICADOR DE ZOOM DISCRETO (esquina inferior izquierda)  − 100% +
@@ -393,8 +395,9 @@ export const FloatingHudDock: React.FC = () => {
   const setOracleModalOpen = useWorkspaceStore((s) => s.setOracleModalOpen);
   const full = useSettingsStore((s) => s.animations) === "full";
   const expert = useIsExpert();
-  // Sala llena (7.º en el espacio): el dock solo deja navegar, nada de escritura.
-  const readOnly = useCanvasReadOnly();
+  // Sala llena (7.º) o rol Comentarista / Solo lectura: el dock solo deja navegar (y comentar).
+  const readOnlyReason = useReadOnlyReason();
+  const readOnly = readOnlyReason !== null;
 
   const [addOpen, setAddOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -431,13 +434,22 @@ export const FloatingHudDock: React.FC = () => {
             active
             onClick={() => setActiveTool("pointer")}
           />
+          {readOnlyReason !== "capacity" && (
+            <DockButton
+              full={full}
+              title={readOnlyReason === "commenter" ? "Ver y escribir comentarios" : "Leer los comentarios"}
+              label="Comentarios"
+              icon={<MessageSquare className="w-4 h-4" />}
+              onClick={() => useCommentsStore.getState().openDrawer(null)}
+            />
+          )}
           <p
             role="status"
-            title="La sala está llena: ves el lienzo en vivo, pero no puedes modificarlo."
+            title={READ_ONLY_LABELS[readOnlyReason ?? "capacity"].long}
             className="flex items-center gap-2 h-10 px-3.5 rounded-xl text-[13px] font-medium text-andros-muted"
           >
             <Eye className="w-4 h-4" aria-hidden="true" />
-            Solo lectura
+            {readOnlyReason === "commenter" ? "Comentarista" : "Solo lectura"}
           </p>
         </nav>
       </>

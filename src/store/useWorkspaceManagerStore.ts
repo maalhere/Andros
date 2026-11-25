@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { MemberRole } from "@/lib/access/permissions";
 
 // ============================================================================
 // ANDROS — ESTADO DEL GESTOR DE ESPACIOS (carpetas y proyectos del usuario)
@@ -20,6 +21,8 @@ export interface SharedWorkspaceSummary extends WorkspaceSummary {
   ownerId: string;
   /** Nombre o @usuario del dueño (si la base lo permite leer). */
   ownerName: string;
+  /** (Sprint 16) Tu permiso en este espacio: Editor, Comentarista o Solo lectura. */
+  role: MemberRole;
 }
 
 interface WorkspaceManagerState {

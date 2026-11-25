@@ -72,6 +72,17 @@ export default function CookiesPage() {
             </tr>
             <tr>
               <td>
+                Almacenamiento de sesión: permiso de Google Calendar (<code>andros.calendar.token</code>)
+                y almacenamiento local: aviso de conexión pendiente (<code>andros.calendar.pending</code>)
+              </td>
+              <td>
+                Solo si pulsas «Conectar Google Calendar»: enviar hitos a tu calendario o importar tu
+                agenda sin volver a pedir permiso en esa pestaña
+              </td>
+              <td>Menos de 1 hora (token) · 10 minutos (aviso)</td>
+            </tr>
+            <tr>
+              <td>
                 Almacenamiento local: <code>andros-cookie-consent</code>
               </td>
               <td>Recordar tu elección en este aviso</td>

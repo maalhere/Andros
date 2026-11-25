@@ -9,7 +9,7 @@ import { NodeArchetype } from "@/types/workspace";
 import { EngineeringNode } from "@/components/shared/EngineeringNode";
 import { EmptyWorkspaceStarter, useStarterVisible } from "@/components/shared/EmptyWorkspaceStarter";
 import { useStarterStore } from "@/store/useStarterStore";
-import { useCollabStore } from "@/store/useCollabStore";
+import { useCanvasReadOnly } from "@/store/useCollabStore";
 import { ImpactAlertsBanner } from "@/components/shared/ImpactAlertsBanner";
 
 const FILTER_TABS: { id: "all" | NodeArchetype; label: string }[] = [
@@ -39,8 +39,8 @@ export const TacticalCardStack: React.FC = () => {
   const starterVisible = useStarterVisible();
   const reopenStarter = useStarterStore((s) => s.reopen);
   const starterDismissed = useStarterStore((s) => s.dismissed);
-  // Sala completa (7.º en el espacio): tarjetas de solo lectura (el desplazamiento sigue).
-  const readOnly = useCollabStore((s) => s.capacity.readOnly);
+  // Sala completa (7.º) o rol Comentarista / Solo lectura: tarjetas de solo lectura (el desplazamiento sigue).
+  const readOnly = useCanvasReadOnly();
 
   const filteredNodes =
     mobileCategoryFilter === "all"

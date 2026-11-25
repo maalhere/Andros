@@ -6,6 +6,8 @@
 
 import type { CanvasStroke, EngineeringNodeData, NodeConnection } from "./workspace";
 import type { ImpactAlertEntry } from "@/lib/canvas/impact";
+import type { WorkspaceComment } from "@/lib/comments/commentModel";
+import type { MemberRole } from "@/lib/access/permissions";
 
 /**
  * Tope duro por espacio: con 6 la edición en vivo sigue siendo coordinable y
@@ -222,4 +224,41 @@ export interface CollabGuestSession {
   workspaceId: string;
   workspaceName: string;
   hostName: string;
+}
+
+// ----------------------------------------------------------------------------
+// (Sprint 16) Comentarios y permisos en vivo
+//   · La tabla `workspace_comments` es la fuente de verdad (RLS); estos
+//     mensajes solo avisan a quien tiene el espacio abierto para no recargar.
+// ----------------------------------------------------------------------------
+
+export interface CommentUpsertPayload {
+  senderId: string;
+  senderUserId: string;
+  workspaceId: string;
+  comment: WorkspaceComment;
+}
+
+export interface CommentResolvePayload {
+  senderId: string;
+  senderUserId: string;
+  workspaceId: string;
+  id: string;
+  resolved: boolean;
+}
+
+export interface CommentDeletePayload {
+  senderId: string;
+  senderUserId: string;
+  workspaceId: string;
+  id: string;
+}
+
+/** El dueño cambió (o quitó: `role: null`) el permiso de un miembro. */
+export interface AccessChangedPayload {
+  senderId: string;
+  senderUserId: string;
+  workspaceId: string;
+  userId: string;
+  role: MemberRole | null;
 }

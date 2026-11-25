@@ -10,6 +10,8 @@ import type {
   RemoteEditor,
   ScreenShareNodeData,
 } from "@/types/collab";
+import { canEditCanvas, type WorkspaceRole } from "@/lib/access/permissions";
+import { currentWorkspaceRole, useWorkspaceRole } from "@/lib/access/workspaceRole";
 
 // ============================================================================
 // ANDROS — ESTADO DE LA SALA EN VIVO (voz, presencia, cursores, pantallas)
@@ -364,10 +366,45 @@ export const useCollabStore = create<CollabState>((set) => ({
 //     cualquier vista compartida que lo reutilice pasa por el mismo selector.
 // ---------------------------------------------------------------------------
 
-/** `true` cuando el lienzo NO debe aceptar cambios locales (crear, dibujar, conectar, importar). */
+//   · (Sprint 16) Rol «Comentarista» o «Solo lectura» en un espacio compartido:
+//     el mismo modo de solo lectura (la RLS de Supabase lo exige igualmente).
+
+/** Sala llena (7.º en el espacio): solo depende del estado de la sala. */
 export const selectCanvasReadOnly = (s: CollabState): boolean => s.capacity.readOnly;
 
-export const useCanvasReadOnly = (): boolean => useCollabStore(selectCanvasReadOnly);
+/** Por qué el lienzo está en solo lectura (o `null` si se puede editar). */
+export type ReadOnlyReason = "capacity" | "commenter" | "viewer";
+
+function reasonFor(capacityReadOnly: boolean, role: WorkspaceRole): ReadOnlyReason | null {
+  if (!canEditCanvas(role)) return role === "commenter" ? "commenter" : "viewer";
+  return capacityReadOnly ? "capacity" : null;
+}
+
+/** `true` cuando el lienzo NO debe aceptar cambios locales (crear, dibujar, conectar, importar). */
+export const useCanvasReadOnly = (): boolean => useReadOnlyReason() !== null;
+
+export const useReadOnlyReason = (): ReadOnlyReason | null => {
+  const capacityReadOnly = useCollabStore(selectCanvasReadOnly);
+  const role = useWorkspaceRole();
+  return reasonFor(capacityReadOnly, role);
+};
 
 /** Lectura puntual (atajos de teclado, paleta de comandos, acciones fuera de React). */
-export const isCanvasReadOnly = (): boolean => selectCanvasReadOnly(useCollabStore.getState());
+export const isCanvasReadOnly = (): boolean =>
+  reasonFor(selectCanvasReadOnly(useCollabStore.getState()), currentWorkspaceRole()) !== null;
+
+/** Texto corto del aviso «Solo lectura» del dock y la barra del teléfono. */
+export const READ_ONLY_LABELS: Record<ReadOnlyReason, { short: string; long: string }> = {
+  capacity: {
+    short: "Solo lectura · sala llena",
+    long: "La sala está llena: ves el lienzo en vivo, pero no puedes modificarlo.",
+  },
+  commenter: {
+    short: "Comentarista",
+    long: "Tu permiso es Comentarista: ves el lienzo y puedes dejar comentarios, sin editarlo.",
+  },
+  viewer: {
+    short: "Solo lectura",
+    long: "Tu permiso es Solo lectura: ves el lienzo y los comentarios, sin modificarlos.",
+  },
+};

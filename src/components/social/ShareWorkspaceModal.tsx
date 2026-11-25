@@ -29,8 +29,16 @@ import {
   addWorkspaceMember,
   listWorkspaceMembers,
   removeWorkspaceMember,
+  updateWorkspaceMemberRole,
 } from "@/lib/social/repository";
 import type { WorkspaceMember } from "@/types/social";
+import { ROLE_LABELS, isMemberRole, type MemberRole } from "@/lib/access/permissions";
+import { useWorkspaceRole } from "@/lib/access/workspaceRole";
+import { setKnownMemberRole } from "@/lib/access/memberRoles";
+import { broadcastCollabEvent, collabEventBase } from "@/lib/collab/useCollabRoom";
+import { requestShareNotification, shareNotifyNote } from "@/lib/share/shareNotifyClient";
+import type { AccessChangedPayload } from "@/types/collab";
+import { RolePicker, RoleSelect } from "./RoleSelect";
 import {
   BUTTON_DANGER,
   BUTTON_PRIMARY,
@@ -50,7 +58,19 @@ import {
 //     cuenta, para voluntarios, clientes o directivos. Solo el dueño lo activa,
 //     lo desactiva o genera uno nuevo (el anterior deja de funcionar).
 //   · Atajo a «Exportar Plan del Día» (PDF + resumen para WhatsApp).
+//   · (Sprint 16) Permisos estilo Google Docs: Editor, Comentarista o Solo
+//     lectura al añadir y en 1 clic por miembro. Cada alta o cambio avisa por
+//     correo (si el servidor tiene Resend) y en vivo a la sala.
 // ============================================================================
+
+/** Avisa a la sala que cambió el permiso de alguien (`role: null` = quitado). */
+function announceAccess(workspaceId: string, userId: string, role: MemberRole | null): void {
+  setKnownMemberRole(workspaceId, userId, role);
+  const base = collabEventBase();
+  if (!base || base.workspaceId !== workspaceId) return;
+  const payload: AccessChangedPayload = { ...base, userId, role };
+  broadcastCollabEvent("access:changed", payload);
+}
 
 /** Botón de la barra superior (escritorio). */
 export const ShareWorkspaceButton: React.FC = () => (
@@ -264,7 +284,18 @@ export const ShareWorkspaceModal: React.FC = () => {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [hiddenMembers, setHiddenMembers] = useState<string[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [addRole, setAddRole] = useState<MemberRole>("editor");
+  const [mailNote, setMailNote] = useState<string | null>(null);
+  const ownRole = useWorkspaceRole();
   const guard = useSubmitGuard();
+
+  /** Aviso por correo sin bloquear: compartir ya quedó guardado. */
+  const notifyByMail = (wsId: string, userId: string, name: string, reason: "added" | "role_changed") => {
+    void requestShareNotification(wsId, userId, reason).then((outcome) => {
+      const note = shareNotifyNote(outcome, name);
+      if (note) setMailNote(note);
+    });
+  };
 
   const close = () => useSocialStore.getState().setShareOpen(false);
 
@@ -324,9 +355,15 @@ export const ShareWorkspaceModal: React.FC = () => {
       if (!supabase || !workspaceId || !user) return;
       setBusyId(userId);
       try {
-        await addWorkspaceMember(supabase, workspaceId, user.id, userId);
+        const role = addRole;
+        await addWorkspaceMember(supabase, workspaceId, user.id, userId, role);
         await load();
-        toast({ message: `${name} ya puede abrir «${workspaceName}» y entrar a su voz.`, tone: "success" });
+        announceAccess(workspaceId, userId, role);
+        toast({
+          message: `${name} ya puede abrir «${workspaceName}» como ${ROLE_LABELS[role]}.`,
+          tone: "success",
+        });
+        notifyByMail(workspaceId, userId, name, "added");
       } catch (error) {
         if (error instanceof SocialSetupError) useSocialStore.getState().setSetupMissing(true);
         else toast({ message: describe(error, "No se pudo añadir"), tone: "error" });
@@ -334,6 +371,33 @@ export const ShareWorkspaceModal: React.FC = () => {
         setBusyId(null);
       }
     });
+
+  /** Cambia el permiso de un miembro en 1 clic (optimista; se revierte si falla). */
+  const changeRole = (member: WorkspaceMember, role: MemberRole) => {
+    if (!workspaceId || member.role === role || member.role === "owner") return;
+    const wsId = workspaceId;
+    const previous = member.role;
+    setMembers((list) => (list ?? []).map((m) => (m.userId === member.userId ? { ...m, role } : m)));
+    void guard.run(async () => {
+      const supabase = getSupabaseBrowserClient();
+      if (!supabase) return;
+      setBusyId(member.userId);
+      try {
+        await updateWorkspaceMemberRole(supabase, wsId, member.userId, role);
+        announceAccess(wsId, member.userId, role);
+        toast({ message: `${member.profile.fullName} ahora es ${ROLE_LABELS[role]}.`, tone: "success" });
+        notifyByMail(wsId, member.userId, member.profile.fullName, "role_changed");
+      } catch (error) {
+        setMembers((list) =>
+          (list ?? []).map((m) => (m.userId === member.userId ? { ...m, role: previous } : m))
+        );
+        if (error instanceof SocialSetupError) useSocialStore.getState().setSetupMissing(true);
+        else toast({ message: describe(error, "No se pudo cambiar el permiso"), tone: "error" });
+      } finally {
+        setBusyId(null);
+      }
+    });
+  };
 
   /** Quita a un miembro con «Deshacer» (se borra al expirar el aviso). */
   const removeMember = (member: WorkspaceMember) => {
@@ -350,6 +414,7 @@ export const ShareWorkspaceModal: React.FC = () => {
         const supabase = getSupabaseBrowserClient();
         if (!supabase) return;
         void removeWorkspaceMember(supabase, wsId, member.userId)
+          .then(() => announceAccess(wsId, member.userId, null))
           .catch((error: unknown) => toast({ message: describe(error, "No se pudo quitar"), tone: "error" }))
           .finally(() => {
             void load().finally(() =>
@@ -397,8 +462,8 @@ export const ShareWorkspaceModal: React.FC = () => {
       icon={<Share2 className="w-4 h-4 text-andros-accent-ink" aria-hidden="true" />}
       description={
         sharedWorkspace
-          ? `Espacio de ${sharedWorkspace.ownerName}. Solo su dueño puede añadir o quitar miembros.`
-          : "Los miembros pueden ver y editar el lienzo y entrar a su canal de voz."
+          ? `Espacio de ${sharedWorkspace.ownerName}. Tu permiso: ${ROLE_LABELS[ownRole]}. Solo su dueño añade miembros o cambia permisos.`
+          : "Elige qué puede hacer cada persona: editar, comentar o solo ver. Todos pueden entrar a su canal de voz."
       }
     >
       {!user || !workspaceId ? (
@@ -486,8 +551,24 @@ export const ShareWorkspaceModal: React.FC = () => {
                       <ProfileRow
                         key={m.userId}
                         profile={m.profile}
-                        detail={m.role === "owner" ? "dueño" : m.userId === user.id ? "tú" : "puede editar"}
+                        detail={
+                          m.role === "owner"
+                            ? "dueño"
+                            : isOwner
+                              ? undefined
+                              : m.userId === user.id
+                                ? `tú · ${ROLE_LABELS[m.role]}`
+                                : ROLE_LABELS[m.role]
+                        }
                       >
+                        {isOwner && isMemberRole(m.role) && (
+                          <RoleSelect
+                            value={m.role}
+                            disabled={busyId === m.userId}
+                            label={`Permiso de ${m.profile.fullName}`}
+                            onChange={(role) => changeRole(m, role)}
+                          />
+                        )}
                         {isOwner && m.role !== "owner" && (
                           <button
                             type="button"
@@ -511,12 +592,26 @@ export const ShareWorkspaceModal: React.FC = () => {
                 )}
               </section>
 
+              {mailNote && (
+                <p role="status" className="text-[11px] leading-relaxed text-andros-muted">
+                  {mailNote}
+                </p>
+              )}
+
               {/* Añadir amistades en 1 clic */}
               {isOwner && (
                 <section aria-labelledby="andros-share-add" className="space-y-1">
                   <h3 id="andros-share-add" className="text-xs font-semibold text-andros-primary">
                     Añadir amigos
                   </h3>
+                  {friendsToAdd.length > 0 && (
+                    <div className="pb-1">
+                      <p id="andros-share-add-role" className="mb-1 text-[11px] text-andros-muted">
+                        Permiso al añadir
+                      </p>
+                      <RolePicker value={addRole} onChange={setAddRole} labelledBy="andros-share-add-role" />
+                    </div>
+                  )}
                   {friendsToAdd.length === 0 ? (
                     <div className="space-y-2">
                       <p className="text-xs text-andros-muted">

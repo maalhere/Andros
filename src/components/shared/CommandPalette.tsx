@@ -5,7 +5,9 @@ import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   Bot,
+  CalendarDays,
   ClipboardList,
+  MessageSquare,
   Cable,
   Code2,
   Gauge,
@@ -44,6 +46,8 @@ import { useMarketStore } from "@/store/useMarketStore";
 import { useIsExpert, useSettingsStore } from "@/store/useSettingsStore";
 import { useCanvasReadOnly, useCollabStore } from "@/store/useCollabStore";
 import { useSocialStore } from "@/store/useSocialStore";
+import { useCommentsStore } from "@/store/useCommentsStore";
+import { useCalendarStore } from "@/store/useCalendarStore";
 import { joinCollabRoom } from "@/lib/collab/useCollabRoom";
 import { quickAdd } from "@/lib/canvas/quickAdd";
 import { useAiProvidersStore } from "@/store/useAiProvidersStore";
@@ -240,6 +244,23 @@ const PaletteDialog: React.FC<{ reduced: boolean; onClose: () => void }> = ({ re
         keywords: "contactos usuarios solicitudes",
         icon: <Users className="w-4 h-4" />,
         run: () => useSocialStore.getState().setFriendsOpen(true),
+      },
+      {
+        id: "comments",
+        group: "Acciones",
+        label: "Comentarios del tablero",
+        keywords: "comentar notas revision feedback hilo resolver",
+        icon: <MessageSquare className="w-4 h-4" />,
+        run: () => useCommentsStore.getState().openDrawer(null),
+      },
+      {
+        id: "google-calendar",
+        group: "Acciones",
+        label: "Google Calendar",
+        hint: "Fechas del tablero a tu calendario, .ics e importar agenda",
+        keywords: "calendario agenda fechas cita evento ics outlook apple cronograma recordatorio",
+        icon: <CalendarDays className="w-4 h-4" />,
+        run: () => useCalendarStore.getState().openModal(null),
       },
       {
         id: "oracle",

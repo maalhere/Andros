@@ -35,6 +35,8 @@ import { useLandingStore } from "@/store/useLandingStore";
 import { useToastStore } from "@/store/useToastStore";
 import { useCollabStore } from "@/store/useCollabStore";
 import { shouldSkipAutosaveForRemote } from "@/lib/collab/remoteFlag";
+import { canEditCanvas, normalizeMemberRole, type MemberRole } from "@/lib/access/permissions";
+import { currentWorkspaceRole } from "@/lib/access/workspaceRole";
 import { sanitizeCanvasStrokes } from "@/lib/canvas/inkGeometry";
 import { getDesktopBridge, type AndrosDesktopBridge } from "@/lib/printer/printerClient";
 import {
@@ -549,6 +551,12 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
 
   const runSync = async (): Promise<void> => {
     if (!ready || !userId || !workspaceId || disposed || collabGuest) return;
+    // (Sprint 16) Comentarista / Solo lectura: nunca se escribe en el lienzo
+    // (la RLS lo rechazaría igualmente). Lo de otros ya lo guardan ellos.
+    if (!canEditCanvas(currentWorkspaceRole())) {
+      if (cloud().status === "saving" || cloud().status === "loading") cloud().setStatus("saved", null);
+      return;
+    }
     const ep = epoch;
     const ws = workspaceId;
     const uid = rowOwnerId ?? userId;
@@ -770,7 +778,7 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
   let uploadChain: Promise<void> = Promise.resolve();
 
   const queueUploads = () => {
-    if (!ready || disposed || collabGuest) return;
+    if (!ready || disposed || collabGuest || !canEditCanvas(currentWorkspaceRole())) return;
     for (const node of useWorkspaceStore.getState().nodes) {
       if (node.type !== "file-node") continue;
       const file = node.fileData;
@@ -853,6 +861,18 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
       return [];
     }
     const rows = (data ?? []) as unknown as Record<string, unknown>[];
+    // (Sprint 16) Tu rol en cada espacio compartido. Si la consulta falla (base
+    // sin actualizar), se asume «Editor», el único rol que existía antes.
+    const roles = new Map<string, MemberRole>();
+    if (rows.length > 0) {
+      const { data: memberRows } = await supabase
+        .from("workspace_members")
+        .select("workspace_id, role")
+        .eq("user_id", uid);
+      for (const row of (memberRows ?? []) as Record<string, unknown>[]) {
+        roles.set(String(row.workspace_id), normalizeMemberRole(row.role));
+      }
+    }
     const ownerIds = [...new Set(rows.map((r) => String(r.owner_id ?? "")).filter(Boolean))];
     const names = new Map<string, string>();
     if (ownerIds.length > 0) {
@@ -872,6 +892,7 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
       updatedAt: String(r.updated_at ?? ""),
       ownerId: String(r.owner_id ?? ""),
       ownerName: names.get(String(r.owner_id ?? "")) ?? "Otra cuenta",
+      role: roles.get(String(r.id)) ?? "editor",
     }));
     useWorkspaceManagerStore.getState().setSharedWorkspaces(list);
     return list;
@@ -1422,7 +1443,30 @@ const DESKTOP_AUTH_NOTICE =
  * verificador PKCE queda en esta ventana) y el código vuelve por la app
  * (127.0.0.1) → `completeDesktopSignIn`.
  */
-async function signInWithGoogleDesktop(supabase: SupabaseClient, auth: DesktopAuthBridge): Promise<void> {
+/**
+ * Permisos extra de Google pedidos de forma incremental (p. ej. Google Calendar).
+ * Sin opciones es el inicio de sesión normal (solo perfil y correo).
+ */
+export interface GoogleSignInOptions {
+  /** Scopes adicionales separados por espacio. */
+  scopes?: string;
+  /** Ruta interna a la que volver tras el consentimiento. */
+  next?: string;
+}
+
+function googleQueryParams(options: GoogleSignInOptions): Record<string, string> {
+  return options.scopes
+    ? // Consentimiento explícito + acceso sin conexión: Google devuelve un token
+      // con el scope nuevo y conserva los permisos ya concedidos.
+      { access_type: "offline", prompt: "consent", include_granted_scopes: "true" }
+    : { prompt: "select_account" };
+}
+
+async function signInWithGoogleDesktop(
+  supabase: SupabaseClient,
+  auth: DesktopAuthBridge,
+  options: GoogleSignInOptions = {}
+): Promise<void> {
   const cloud = useCloudStore.getState();
   cloud.setAuthNotice(null);
   try {
@@ -1436,7 +1480,8 @@ async function signInWithGoogleDesktop(supabase: SupabaseClient, auth: DesktopAu
       options: {
         redirectTo: redirect.toString(),
         skipBrowserRedirect: true,
-        queryParams: { prompt: "select_account" },
+        ...(options.scopes ? { scopes: options.scopes } : {}),
+        queryParams: googleQueryParams(options),
       },
     });
     if (error) throw error;
@@ -1479,23 +1524,31 @@ async function completeDesktopSignIn(
 }
 
 /** Abre la ventana de Google. Al volver, /auth/callback crea la sesión. */
-export async function signInWithGoogle(): Promise<void> {
+export async function signInWithGoogle(options: GoogleSignInOptions = {}): Promise<void> {
   const supabase = getSupabaseBrowserClient();
   const cloud = useCloudStore.getState();
   if (!supabase) return;
 
   const desktopAuth = getDesktopBridge()?.auth;
   if (desktopAuth) {
-    await signInWithGoogleDesktop(supabase, desktopAuth);
+    await signInWithGoogleDesktop(supabase, desktopAuth, options);
     return;
   }
 
-  cloud.setStatus("connecting", null);
+  if (options.scopes) {
+    // Se sale a Google: lo pendiente del lienzo se guarda antes.
+    await activeEngine?.flush();
+  } else {
+    cloud.setStatus("connecting", null);
+  }
+  const callback = new URL("/auth/callback", window.location.origin);
+  if (options.next) callback.searchParams.set("next", options.next);
   const { error } = await supabase.auth.signInWithOAuth({
     provider: "google",
     options: {
-      redirectTo: `${window.location.origin}/auth/callback`,
-      queryParams: { prompt: "select_account" },
+      redirectTo: callback.toString(),
+      ...(options.scopes ? { scopes: options.scopes } : {}),
+      queryParams: googleQueryParams(options),
     },
   });
   if (error) {

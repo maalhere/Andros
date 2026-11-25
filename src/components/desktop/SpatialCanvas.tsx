@@ -20,7 +20,7 @@ import {
 import { EngineeringNode } from "@/components/shared/EngineeringNode";
 import { ScreenShareLayer } from "@/components/nodes/ScreenShareNode";
 import { CollabCursorsLayer } from "@/components/collab/CollabCursorsLayer";
-import { useCollabStore } from "@/store/useCollabStore";
+import { useCanvasReadOnly } from "@/store/useCollabStore";
 import { collectUpstreamContext } from "@/lib/canvas/contextGraph";
 import {
   Bounds,
@@ -429,8 +429,8 @@ export const SpatialCanvas: React.FC = () => {
   const nodeSizesRef = useRef<Record<string, Size>>({});
   const viewAnimationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Sala completa (7.º en el espacio): lienzo en modo lectura (paneo y zoom sí).
-  const readOnly = useCollabStore((s) => s.capacity.readOnly);
+  // Sala completa (7.º) o rol Comentarista / Solo lectura: lienzo en modo lectura (paneo y zoom sí).
+  const readOnly = useCanvasReadOnly();
   const isConnectTool = activeTool === "connect" && !readOnly;
   const isDrawTool = activeTool === "draw" && !readOnly;
   const nodeIdsKey = nodes.map((n) => n.id).join("|");
@@ -508,6 +508,7 @@ export const SpatialCanvas: React.FC = () => {
       if (
         (e.key === "Delete" || e.key === "Backspace") &&
         selectedConnectionId &&
+        !readOnly &&
         !isTypingTarget(e.target)
       ) {
         e.preventDefault();
@@ -523,6 +524,7 @@ export const SpatialCanvas: React.FC = () => {
     cancelConnecting,
     selectConnection,
     removeConnection,
+    readOnly,
     isDrawTool,
     inkMode,
     setInkMode,

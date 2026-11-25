@@ -4,8 +4,10 @@ import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
+  CalendarDays,
   Crown,
   Eraser,
+  MessageSquare,
   FileText,
   Gauge,
   Sparkle,
@@ -38,6 +40,8 @@ import { openCookiePreferences } from "@/lib/consent";
 import { saveWorkspaceAsTemplate } from "@/lib/templates/applyBlueprint";
 import { usePlanExportStore } from "@/store/usePlanExportStore";
 import { useCanvasReadOnly } from "@/store/useCollabStore";
+import { useCommentsStore, useOpenCommentTotal } from "@/store/useCommentsStore";
+import { useCalendarStore } from "@/store/useCalendarStore";
 
 // ============================================================================
 // ANDROS — MENÚ "⋯ MÁS OPCIONES" (barra superior)
@@ -267,8 +271,9 @@ export const MoreMenu: React.FC = () => {
   }, [open]);
 
   const expert = useIsExpert();
-  // Sala llena (7.º): nada que importe, limpie o cree plantillas desde este lienzo.
+  // Sala llena (7.º) o rol Comentarista / Solo lectura: nada que importe, limpie o cree plantillas.
   const readOnly = useCanvasReadOnly();
+  const openComments = useOpenCommentTotal();
 
   const allItems: MenuItem[] = [
     {
@@ -289,6 +294,19 @@ export const MoreMenu: React.FC = () => {
       label: "Compartir espacio",
       icon: <Share2 className="w-4 h-4" />,
       onSelect: () => useSocialStore.getState().setShareOpen(true),
+    },
+    {
+      id: "comments",
+      label: "Comentarios",
+      icon: <MessageSquare className="w-4 h-4" />,
+      onSelect: () => useCommentsStore.getState().openDrawer(null),
+      badge: openComments,
+    },
+    {
+      id: "calendar",
+      label: "Google Calendar",
+      icon: <CalendarDays className="w-4 h-4" />,
+      onSelect: () => useCalendarStore.getState().openModal(null),
     },
     {
       id: "export-plan",

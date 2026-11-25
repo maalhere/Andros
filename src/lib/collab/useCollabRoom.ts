@@ -34,22 +34,30 @@ import { useToastStore } from "@/store/useToastStore";
 import {
   SCREEN_NODE_DEFAULT_SIZE,
   colorForPeer,
+  isCanvasReadOnly,
   useCollabStore,
 } from "@/store/useCollabStore";
 import {
   openCloudWorkspace,
   openWorkspaceFromLink,
+  refreshCloudWorkspaceList,
   resumeCloudAfterCollabGuest,
   suspendCloudForCollabGuest,
 } from "@/hooks/useCloudSync";
+import { currentWorkspaceRole } from "@/lib/access/workspaceRole";
+import { ROLE_LABELS } from "@/lib/access/permissions";
 import {
   MAX_SPACE_PARTICIPANTS,
   MAX_VOICE_PARTICIPANTS,
+  type AccessChangedPayload,
   type AlertResolvePayload,
   AlertUpsertPayload,
   type CanvasRequestPayload,
   type CanvasSnapshotPayload,
   type CollabPresence,
+  type CommentDeletePayload,
+  type CommentResolvePayload,
+  type CommentUpsertPayload,
   type CursorPayload,
   type EdgeDeletePayload,
   type EdgeUpsertPayload,
@@ -71,8 +79,12 @@ import {
 import {
   CURSOR_SEND_INTERVAL_MS,
   SnapshotAssembler,
+  applyRemoteAccessChanged,
   applyRemoteAlertResolve,
   applyRemoteAlertUpsert,
+  applyRemoteCommentDelete,
+  applyRemoteCommentResolve,
+  applyRemoteCommentUpsert,
   applyRemoteEdgeDelete,
   applyRemoteEdgeUpsert,
   applyRemoteNodeDelete,
@@ -267,6 +279,34 @@ function send(event: string, payload: object): void {
 /** Hay alguien más en el espacio (si no, no se gastan mensajes de Realtime). */
 function hasPeers(): boolean {
   return Object.keys(collab().peers).length > 0;
+}
+
+/**
+ * (Sprint 16) Aviso en vivo que NO es un cambio del lienzo (comentarios,
+ * permisos): viaja aunque tu rol sea Comentarista. Sin nadie más, no se envía.
+ */
+export function broadcastCollabEvent(event: string, payload: object): void {
+  if (hasPeers()) send(event, payload);
+}
+
+/** Datos comunes de un aviso en vivo (`senderId`, `senderUserId`, `workspaceId`). */
+export function collabEventBase(): { senderId: string; senderUserId: string; workspaceId: string } | null {
+  const workspaceId = liveWorkspaceId();
+  const userId = useCloudStore.getState().user?.id;
+  if (!workspaceId || !userId) return null;
+  return { senderId: collab().selfPeerId, senderUserId: userId, workspaceId };
+}
+
+/** El dueño cambió tu permiso: se vuelve a leer tu rol REAL de la base. */
+async function refreshOwnAccess(): Promise<void> {
+  const before = currentWorkspaceRole();
+  await refreshCloudWorkspaceList();
+  const after = currentWorkspaceRole();
+  if (after === before) return;
+  useToastStore.getState().show({
+    message: `Tu permiso en este espacio ahora es: ${ROLE_LABELS[after]}.`,
+    tone: "neutral",
+  });
 }
 
 /** Publica de nuevo tu presencia (al silenciarte, compartir o cambiar de espacio). */
@@ -741,6 +781,20 @@ function connectPresence(target?: { roomId: string; label: string }): void {
     .on("broadcast", { event: "alert:resolve" }, ({ payload }) => {
       if (forLiveWorkspace(payload)) applyRemoteAlertResolve(payload as AlertResolvePayload);
     })
+    // (Sprint 16) Comentarios y permisos: la base (RLS) es la fuente de verdad.
+    .on("broadcast", { event: "comment:upsert" }, ({ payload }) => {
+      if (forLiveWorkspace(payload)) applyRemoteCommentUpsert(payload as CommentUpsertPayload);
+    })
+    .on("broadcast", { event: "comment:resolve" }, ({ payload }) => {
+      if (forLiveWorkspace(payload)) applyRemoteCommentResolve(payload as CommentResolvePayload);
+    })
+    .on("broadcast", { event: "comment:delete" }, ({ payload }) => {
+      if (forLiveWorkspace(payload)) applyRemoteCommentDelete(payload as CommentDeletePayload);
+    })
+    .on("broadcast", { event: "access:changed" }, ({ payload }) => {
+      if (!forLiveWorkspace(payload)) return;
+      if (applyRemoteAccessChanged(payload as AccessChangedPayload, selfUserId())) void refreshOwnAccess();
+    })
     .on("broadcast", { event: "canvas:request" }, ({ payload }) => {
       void answerSnapshotRequest(payload as CanvasRequestPayload);
     })
@@ -763,9 +817,10 @@ function connectPresence(target?: { roomId: string; label: string }): void {
             selfId,
             getUserId: selfUserId,
             getWorkspaceId: liveWorkspaceId,
-            // Sin nadie más en el espacio (o en modo lectura) no se envía nada.
+            // Sin nadie más en el espacio, en sala llena o con rol Comentarista /
+            // Solo lectura, no se envía ningún cambio del lienzo.
             send: (event, payload) => {
-              if (hasPeers() && !collab().capacity.readOnly) send(event, payload);
+              if (hasPeers() && !isCanvasReadOnly()) send(event, payload);
             },
           });
         }

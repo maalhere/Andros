@@ -13,6 +13,7 @@
     "verify:formulas": "esbuild scripts/verify-formulas.ts --bundle --platform=node --format=cjs --outfile=.next/cache/verify-formulas.cjs --log-level=warning && node .next/cache/verify-formulas.cjs",
     "verify:export": "esbuild scripts/verify-export.ts --bundle --platform=node --format=cjs --outfile=.next/cache/verify-export.cjs --log-level=warning && node .next/cache/verify-export.cjs",
     "verify:printers": "esbuild scripts/verify-printers.ts --bundle --platform=node --format=cjs --outfile=.next/cache/verify-printers.cjs --log-level=warning && node .next/cache/verify-printers.cjs",
+    "verify:collab": "esbuild scripts/verify-collab-calendar.ts --bundle --platform=node --format=cjs --outfile=.next/cache/verify-collab-calendar.cjs --log-level=warning && node .next/cache/verify-collab-calendar.cjs",
     "desktop:dev":"node electron/dev.cjs",
     "desktop:build": "node electron/build-printer.cjs && electron-builder --win --publish never"
   },

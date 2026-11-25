@@ -60,10 +60,30 @@ export default function PrivacidadPage() {
           cualquiera de las dos puede borrarla.
         </li>
         <li>
-          <strong>Espacios compartidos</strong>: si el dueño de un espacio te añade como miembro,
-          guardamos esa relación. Los miembros pueden ver y editar ese lienzo (nodos, cables,
-          dibujos y archivos adjuntos) y ver los nombres de los demás miembros. El dueño puede
-          quitar a cualquier miembro y cada miembro puede salir cuando quiera.
+          <strong>Espacios compartidos y permisos</strong>: si el dueño de un espacio te añade como
+          miembro, guardamos esa relación y el permiso que te asignó. Hay tres permisos:{" "}
+          <strong>Editor</strong> (ve y edita el lienzo: nodos, cables, dibujos y archivos
+          adjuntos), <strong>Comentarista</strong> (ve el lienzo y escribe comentarios, sin
+          editarlo) y <strong>Lector</strong> («Solo lectura»: ve el lienzo y lee los comentarios).
+          La base de datos impone estos permisos, no solo la app. Todos los miembros ven los
+          nombres de los demás. El dueño puede cambiar el permiso o quitar a cualquier miembro, y
+          cada miembro puede salir cuando quiera.
+        </li>
+        <li>
+          <strong>Comentarios del tablero</strong>: guardamos el texto de cada comentario, la
+          tarjeta a la que está anclado (si la hay), tu identificador, el nombre visible con el que
+          lo firmaste, la fecha y si está resuelto. Solo los ven el dueño y los miembros de ese
+          espacio, y se envían en tiempo real a quienes lo tienen abierto. El dueño, los editores y
+          la propia persona autora pueden marcarlo como resuelto o borrarlo; se borran también al
+          eliminar el espacio. No se incluyen en la Vista Invitado.
+        </li>
+        <li>
+          <strong>Aviso por correo al compartir</strong>: cuando el dueño te añade a un espacio o
+          cambia tu permiso, podemos enviarte un correo transaccional con el nombre de quien lo
+          compartió, el nombre del tablero, tu permiso y el enlace al espacio. Tu correo se lee
+          solo en nuestro servidor para hacer el envío y <strong>nunca se muestra</strong> al dueño
+          ni a otros miembros. El envío lo hace nuestro proveedor de correo (Resend). No es
+          publicidad: solo se envía por una acción de compartir.
         </li>
         <li>
           <strong>Enlace del espacio</strong>: el enlace que copias solo contiene el identificador
@@ -153,6 +173,31 @@ export default function PrivacidadPage() {
           recibimos el correo que decidas enviar.
         </li>
       </ul>
+      <h3>Google Calendar (opcional)</h3>
+      <ul>
+        <li>
+          <strong>Detección de fechas</strong>: las fechas y horas de tus fichas y cronogramas se
+          reconocen por completo en tu navegador, sin IA y sin enviar nada a nuestros servidores.
+        </li>
+        <li>
+          <strong>«Abrir en Google Calendar» y «Descargar .ics»</strong>: no necesitan ningún
+          permiso. El enlace abre Google Calendar con el título, la fecha, la descripción y el
+          enlace al tablero ya escritos (Google lo trata según su política); el archivo .ics se
+          genera en tu dispositivo y se descarga solo si lo permites.
+        </li>
+        <li>
+          <strong>Conexión directa</strong>: solo si pulsas «Conectar Google Calendar», Google te
+          pide el permiso adicional <code>calendar.events</code> (crear y leer eventos). El token
+          que Google devuelve se guarda temporalmente en el almacenamiento de sesión de esa pestaña
+          (<code>andros.calendar.token</code>, menos de una hora) y se borra al cerrarla o al pulsar
+          «Desconectar». Para enviar hitos o importar tus próximos 14 días, nuestro servidor
+          reenvía la petición a Google con ese token y te devuelve el resultado:{" "}
+          <strong>no guardamos tu calendario, tus eventos ni el token</strong> en nuestra base de
+          datos. Los eventos que importes pasan a ser una tarjeta del espacio, como cualquier otra.
+          Puedes retirar el permiso en cualquier momento desde la configuración de tu cuenta de
+          Google (Seguridad → Apps de terceros con acceso a tu cuenta).
+        </li>
+      </ul>
       <h3>Impresión 3D multi-impresora (Modo Experto)</h3>
       <ul>
         <li>
@@ -234,7 +279,8 @@ export default function PrivacidadPage() {
         <li>
           <strong>Cursor y cambios del lienzo</strong>: la posición de tu puntero y los nodos que
           editas se envían en tiempo real a las personas del espacio y se guardan en la nube del
-          espacio, al que solo acceden su dueño y sus miembros.
+          espacio, al que solo acceden su dueño y sus miembros. Con permiso de Comentarista o
+          Lector no se envían cambios del lienzo; los comentarios sí viajan en tiempo real.
         </li>
       </ul>
       <p>No pedimos teléfono, dirección, datos de pago ni documentos de identidad.</p>
@@ -261,6 +307,11 @@ export default function PrivacidadPage() {
           las salas en vivo.
         </li>
         <li>
+          <strong>Resend</strong>: envío de los correos transaccionales «te compartieron un
+          espacio» o «tu permiso cambió». Recibe tu correo, tu nombre, el nombre de quien compartió,
+          el nombre del tablero, el permiso y el enlace al espacio, solo para entregar ese mensaje.
+        </li>
+        <li>
           <strong>Participantes del canal de voz</strong>: para conectar la voz, la cámara y la
           pantalla directamente, los navegadores de quienes están en la voz intercambian sus
           direcciones IP de red. Para descubrirlas se consulta un servidor STUN público de Google,
@@ -285,7 +336,9 @@ export default function PrivacidadPage() {
           que pegas y el esquema de las fichas elegidas (sin fotos). Si usas «Generar fórmula con
           IA», se envían tu descripción y los nombres de los campos numéricos del tablero (sin sus
           valores). Si exportas con «Sintetizar y ordenar con IA», se envían el texto y los datos de
-          las tarjetas del espacio y tu instrucción opcional, nunca las fotos. Las
+          las tarjetas del espacio y tu instrucción opcional, nunca las fotos. Si conectas Google
+          Calendar, se envían los hitos que eliges enviar (título, fecha, hora, descripción y enlace
+          al tablero) y se leen tus eventos de los próximos 14 días cuando pulsas «Importar». Las
           plantillas que guardas desde «Guardar como plantilla» se quedan solo en el
           almacenamiento local de tu navegador.
         </li>
@@ -334,8 +387,13 @@ export default function PrivacidadPage() {
         <li>Descargar cualquier espacio como archivo .zip (menú ⋯ → Descargar / Importar .zip).</li>
         <li>Eliminar espacios y publicaciones desde la propia app.</li>
         <li>
-          Quitar amistades, cancelar solicitudes, quitar miembros de tus espacios o salir de un
-          espacio compartido desde ⋯ → Amigos y ⋯ → Compartir espacio.
+          Quitar amistades, cancelar solicitudes, quitar miembros de tus espacios, cambiar su
+          permiso o salir de un espacio compartido desde ⋯ → Amigos y ⋯ → Compartir espacio.
+        </li>
+        <li>Borrar tus comentarios desde ⋯ → Comentarios.</li>
+        <li>
+          Desconectar Google Calendar en la pestaña desde ⋯ → Google Calendar, y retirar el permiso
+          desde tu cuenta de Google.
         </li>
         <li>
           Desactivar un enlace público «Vista Invitado» o generar uno nuevo (el anterior deja de

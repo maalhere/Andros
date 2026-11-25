@@ -16,12 +16,13 @@ import { useTabsBarVisible } from "@/store/useTabsStore";
 import { useShortcutsGuideStore } from "@/store/useShortcutsGuideStore";
 import { CollabRoomButton } from "@/components/collab/VoiceRoomBar";
 import { ShareWorkspaceButton } from "@/components/social/ShareWorkspaceModal";
+import { CommentsButton } from "@/components/comments/CommentsDrawer";
 import { ExperienceModeToggle } from "./ExperienceModeToggle";
 
 // ============================================================================
 // ANDROS — BARRA SUPERIOR (mínima)
 //   Izquierda: logo + selector de proyecto/carpeta.
-//   Derecha:   Canal de voz · Compartir · Día/Noche · Instalar App · Cuenta de Google · ⋯ Más opciones.
+//   Derecha:   Canal de voz · Compartir · Comentarios · Día/Noche · Instalar App · Cuenta de Google · ⋯ Más opciones.
 // ============================================================================
 
 interface TopStatusBarProps {
@@ -108,6 +109,7 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({ isMobile }) => {
         <ExperienceModeToggle />
         <CollabRoomButton />
         <ShareWorkspaceButton />
+        <CommentsButton />
         <ThemeToggle />
         <InstallAppButton isMobile={isMobile} />
         <GoogleAuthButton isMobile={isMobile} />

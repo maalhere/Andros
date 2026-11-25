@@ -44,6 +44,10 @@ import { FriendsModal } from "@/components/social/FriendsModal";
 import { ShareWorkspaceModal } from "@/components/social/ShareWorkspaceModal";
 import { EmptyWorkspaceStarter } from "@/components/shared/EmptyWorkspaceStarter";
 import { ImpactAlertsBanner } from "@/components/shared/ImpactAlertsBanner";
+import { CommentsDrawer } from "@/components/comments/CommentsDrawer";
+import { useCommentsSync } from "@/lib/comments/useCommentsSync";
+import { useGoogleCalendarReturn } from "@/lib/calendar/googleCalendarClient";
+import { useCalendarStore } from "@/store/useCalendarStore";
 
 // Paneles pesados (Oráculo con Markdown + KaTeX, Biblioteca y Arena): fuera del
 // JavaScript inicial. Se descargan la primera vez que se abren.
@@ -69,6 +73,11 @@ const FormulaCreatorModal = dynamic(
   () => import("@/components/math/FormulaCreatorModal").then((m) => m.FormulaCreatorModal),
   { ssr: false }
 );
+// Google Calendar (extractor de fechas, .ics y conexión directa): al abrirse por 1.ª vez.
+const CalendarSyncModal = dynamic(
+  () => import("@/components/calendar/CalendarSyncModal").then((m) => m.CalendarSyncModal),
+  { ssr: false }
+);
 const ArenaModal = dynamic(
   () => import("@/components/arena/ArenaModal").then((m) => m.ArenaModal),
   { ssr: false }
@@ -86,6 +95,10 @@ export default function AndrosWorkspacePage() {
   useCollabRoom();
   // @usuario y amistades (espacios compartidos).
   useSocialSync();
+  // Comentarios del tablero y roles de los miembros del espacio abierto.
+  useCommentsSync();
+  // Vuelta de «Conectar Google Calendar» (token temporal en esta pestaña).
+  useGoogleCalendarReturn();
   const showLanding = useLandingStore((s) => s.phase !== "workspace");
   const oracleOpen = useWorkspaceStore((s) => s.isOracleModalOpen);
   const libraryMounted = useOpenedOnce(useLibraryStore((s) => s.open));
@@ -93,6 +106,7 @@ export default function AndrosWorkspacePage() {
   const formsMounted = useOpenedOnce(useFormsLibraryStore((s) => s.libraryOpen));
   const autofillMounted = useOpenedOnce(useFormsLibraryStore((s) => s.autofillOpen));
   const formulaMounted = useOpenedOnce(useFormulaCreatorStore((s) => s.open));
+  const calendarMounted = useOpenedOnce(useCalendarStore((s) => s.open));
   // ⌘K / Ctrl+K (paleta) en todas partes; atajos de letra solo en escritorio.
   useGlobalShortcuts(!isMobile);
 
@@ -135,6 +149,8 @@ export default function AndrosWorkspacePage() {
       <ExportDeliverableModal />
       <FriendsModal />
       <ShareWorkspaceModal />
+      <CommentsDrawer />
+      {calendarMounted && <CalendarSyncModal />}
       <UsernameSetupModal />
 
       {isMobile ? (

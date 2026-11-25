@@ -25,7 +25,7 @@ export const SITE_DESCRIPTION =
 export const CONTACT_EMAIL = "contacto.androshn@gmail.com";
 
 /** Fecha de la última revisión de los textos legales (se muestra en cada página). */
-export const LEGAL_LAST_UPDATED = "23 de noviembre de 2026";
+export const LEGAL_LAST_UPDATED = "24 de noviembre de 2026";
 
 export const LEGAL_LINKS = [
   { href: "/privacidad", label: "Privacidad" },

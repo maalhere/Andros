@@ -7,6 +7,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { BasicProfile, Friendship, FriendshipStatus, WorkspaceMember } from "@/types/social";
+import { normalizeMemberRole, type MemberRole } from "@/lib/access/permissions";
 
 export const SOCIAL_SETUP_HINT =
   "Los amigos y espacios compartidos necesitan tablas nuevas. Ejecuta de nuevo supabase/schema.sql en el SQL Editor de Supabase.";
@@ -239,7 +240,7 @@ export async function listWorkspaceMembers(
     if (row.user_id === ownerId) continue;
     members.push({
       userId: row.user_id,
-      role: row.role === "owner" ? "owner" : "editor",
+      role: normalizeMemberRole(row.role),
       profile: profiles.get(row.user_id) ?? unknownProfile(row.user_id),
     });
   }
@@ -250,17 +251,42 @@ export async function addWorkspaceMember(
   supabase: SupabaseClient,
   workspaceId: string,
   uid: string,
-  userId: string
+  userId: string,
+  role: MemberRole = "editor"
 ): Promise<void> {
   const { error } = await supabase
     .from("workspace_members")
-    .insert({ workspace_id: workspaceId, user_id: userId, role: "editor", added_by: uid });
+    .insert({ workspace_id: workspaceId, user_id: userId, role, added_by: uid });
   if (error) {
     if (error.code === "23505") return; // ya era miembro
+    if (error.code === "23514") throw new SocialSetupError(); // check antiguo sin los roles nuevos
     if (error.code === "42501") {
       throw new Error("Solo puedes añadir a amistades aceptadas en espacios que son tuyos.");
     }
     fail(error);
+  }
+}
+
+/** (Sprint 16) El dueño cambia el permiso de un miembro en 1 clic. */
+export async function updateWorkspaceMemberRole(
+  supabase: SupabaseClient,
+  workspaceId: string,
+  userId: string,
+  role: MemberRole
+): Promise<void> {
+  const { data, error } = await supabase
+    .from("workspace_members")
+    .update({ role })
+    .eq("workspace_id", workspaceId)
+    .eq("user_id", userId)
+    .select("user_id");
+  if (error) {
+    // Base sin la política nueva o con el check antiguo ('owner' | 'editor').
+    if (error.code === "23514" || error.code === "42501") throw new SocialSetupError();
+    fail(error);
+  }
+  if (!Array.isArray(data) || data.length === 0) {
+    throw new Error("No se pudo cambiar el permiso. Solo el dueño del espacio puede hacerlo.");
   }
 }
 

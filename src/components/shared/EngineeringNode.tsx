@@ -3,7 +3,8 @@
 import React from "react";
 import dynamic from "next/dynamic";
 import { motion } from "framer-motion";
-import { useCollabStore } from "@/store/useCollabStore";
+import { useCanvasReadOnly, useCollabStore } from "@/store/useCollabStore";
+import { NodeCalendarButton, NodeCommentButton } from "@/components/nodes/NodeHeaderActions";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { celebrate } from "@/lib/effects/celebrate";
 import { deleteNodeWithUndo } from "@/lib/canvas/undoable";
@@ -411,6 +412,9 @@ export const EngineeringNode = React.memo(function EngineeringNode({
       ).length
   );
 
+  // Sala llena o rol Comentarista / Solo lectura: sin botón de borrar.
+  const readOnly = useCanvasReadOnly();
+
   // Descuadre detectado tras un cambio en una tarjeta conectada.
   const hasAlert = useNodeAlertCount(node.id) > 0;
   const animations = useSettingsStore((s) => s.animations);
@@ -539,21 +543,26 @@ export const EngineeringNode = React.memo(function EngineeringNode({
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
+          {/* Sprint 16: fechas → Google Calendar y comentarios (también en solo lectura) */}
+          <NodeCalendarButton node={node} />
+          <NodeCommentButton node={node} variant={variant} />
           <span className="text-[10px] font-mono bg-andros-accent/10 text-andros-accent-ink px-1.5 py-0.5 rounded">
             {node.codeTag}
           </span>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              deleteNodeWithUndo(node.id);
-            }}
-            className="hit-slop p-1 max-md:p-2.5 rounded-lg text-andros-muted hover:text-andros-danger hover:bg-andros-border/40 active:scale-[0.96] spring-micro"
-            title="Eliminar nodo"
-            aria-label="Eliminar nodo"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
+          {!readOnly && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                deleteNodeWithUndo(node.id);
+              }}
+              className="hit-slop p-1 max-md:p-2.5 rounded-lg text-andros-muted hover:text-andros-danger hover:bg-andros-border/40 active:scale-[0.96] spring-micro"
+              title="Eliminar nodo"
+              aria-label="Eliminar nodo"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
 
