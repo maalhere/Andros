@@ -3,6 +3,10 @@
 // unificadas y Fichas de Resolución Rojo / Verde)
 // Ejecuta: npm run verify:cde   (sin navegador, sin red, sin Supabase)
 //
+// (Sprint 24) Secciones 7–9: edición directa de pendientes y «+ Alarma
+// rápida», llenado de fichas desde nodos conectados (sin sobrescribir) y
+// estado del tutorial de inicio por cuenta.
+//
 //   1. Parser de menciones @Área / @usuario / @IA, autocompletado y a quién
 //      notifica cada mención (bandeja interna).
 //   2. Canal de Alerta Unificada: duplicados exactos, agrupación por tarjetas
@@ -16,7 +20,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import type { EngineeringNodeData } from "@/types/workspace";
+import type { EngineeringNodeData, FormField, FormSheetEngineeringNode, NodeConnection } from "@/types/workspace";
 import type { ImpactAlertEntry } from "@/lib/canvas/impact";
 import { areaKey, canonicalArea, countPeopleByArea, normalizeAreaName, sanitizeAreaList } from "@/lib/cde/areas";
 import {
@@ -41,6 +45,7 @@ import {
   completeResolution,
   countResolutions,
   createResolution,
+  editResolution,
   listResolutions,
   nextResolutionCode,
   reopenResolution,
@@ -48,6 +53,44 @@ import {
   sanitizeResolution,
   trackedAlertIds,
 } from "@/lib/cde/resolution";
+import {
+  canvasAreas,
+  dueFromShortcut,
+  dueState,
+  formatDue,
+  fromLocalInputValue,
+  parseQuickAlarm,
+  shortcutOf,
+  toLocalInputValue,
+} from "@/lib/cde/pending";
+import {
+  appendReference,
+  applyFillSuggestions,
+  buildFillSuggestions,
+  connectedContextSummary,
+  defaultPicks,
+  extractNodeFacts,
+  fieldFactKind,
+  kindOfLabel,
+  neighborIds,
+  nodeReferenceOptions,
+  sheetIsBlank,
+  toIsoDay,
+  type NodeFact,
+} from "@/lib/forms/nodeFill";
+import {
+  INITIAL_TUTORIAL,
+  TUTORIAL_STEP_COUNT,
+  readTutorialStatus,
+  sanitizeTutorialStatus,
+  shouldAutoStartTutorial,
+  tutorialReducer,
+  tutorialStorageKey,
+  writeTutorialStatus,
+  type KeyValueStorage,
+  type TutorialMachine,
+  type TutorialStatus,
+} from "@/lib/onboarding/tutorialState";
 import { buildLocalSetupPlan, sanitizeSetupTemplates, splitRequestedKinds } from "@/lib/cde/setup";
 import { buildSetupBoard } from "@/lib/cde/setupBoard";
 import { sanitizeChatMessage } from "@/lib/cde/chatModel";
@@ -697,6 +740,282 @@ section("Portapapeles de fichas: copiar, cortar y pegar");
 
   store().clearClipboard();
   check("Sin portapapeles, pegar no hace nada", store().pasteCards().length === 0);
+}
+
+// ----------------------------------------------------------------------------
+section("7. Alerta de Pendientes editable y «+ Alarma rápida» (Sprint 24)");
+// ----------------------------------------------------------------------------
+{
+  // Jueves 26 nov 2026, 10:00 (hora local).
+  const NOW = new Date(2026, 10, 26, 10, 0);
+  const local = (d: number, h: number, m = 0) => new Date(2026, 10, d, h, m).toISOString();
+
+  check("Atajo «Hoy» vence hoy a las 18:00", dueFromShortcut("today", NOW) === local(26, 18));
+  check("«Hoy» pasadas las 18:00 vence a las 23:59", dueFromShortcut("today", new Date(2026, 10, 26, 19, 0)) === local(26, 23, 59));
+  check("«Mañana» → viernes 27 a las 18:00", dueFromShortcut("tomorrow", NOW) === local(27, 18));
+  check("«En 3 días» → domingo 29", dueFromShortcut("in3", NOW) === local(29, 18));
+  check("«Próxima semana» → jueves 3 dic", dueFromShortcut("nextWeek", NOW) === new Date(2026, 11, 3, 18).toISOString());
+  check("Se reconoce qué atajo produjo una fecha", shortcutOf(dueFromShortcut("in3", NOW), NOW) === "in3" && shortcutOf(null, NOW) === null);
+
+  const q1 = parseQuickAlarm("Confirmar proveedor de audio mañana a las 10 @Logística", AREAS, NOW);
+  check(
+    "Lenguaje natural: descripción, @Área y «mañana a las 10»",
+    q1.description === "Confirmar proveedor de audio" && q1.area === "Logística" && q1.dueAt === local(27, 10),
+    q1
+  );
+  const q2 = parseQuickAlarm("revisar cotización @Diseño gráfico en 3 días", AREAS, NOW);
+  check("Área de varias palabras y «en 3 días» (18:00 por defecto)", q2.area === "Diseño gráfico" && q2.dueAt === local(29, 18) && q2.description === "Revisar cotización", q2);
+  const q3 = parseQuickAlarm("Llamar al cliente el lunes 9:30", AREAS, NOW);
+  check("Día de la semana + hora", q3.dueAt === local(30, 9, 30) && q3.description === "Llamar al cliente", q3);
+  const q4 = parseQuickAlarm("Entregar planos 12/12", AREAS, NOW);
+  check("Fecha dd/mm del año en curso", q4.dueAt === new Date(2026, 11, 12, 18).toISOString() && q4.description === "Entregar planos", q4);
+  const q5 = parseQuickAlarm("Avisar a @desconocida", AREAS, NOW);
+  check("Sin área conocida ni fecha: no se inventa nada", q5.area === "" && q5.dueAt === null && q5.description === "Avisar a @desconocida", q5);
+  check("Solo hora ya pasada → mañana a esa hora", parseQuickAlarm("Pagar a las 8", AREAS, NOW).dueAt === local(27, 8));
+
+  check("Estado de la alarma: vencida / hoy / pronto / más adelante", [
+    dueState(local(25, 18), NOW),
+    dueState(local(26, 18), NOW),
+    dueState(local(29, 18), NOW),
+    dueState(new Date(2026, 11, 3, 18).toISOString(), NOW),
+    dueState(null, NOW),
+  ].join(",") === "overdue,today,soon,later,");
+  check("Texto corto: «Mañana 18:00» y «Vencida · ayer 18:00»", formatDue(local(27, 18), NOW) === "Mañana 18:00" && formatDue(local(25, 18), NOW) === "Vencida · ayer 18:00");
+  check("datetime-local ida y vuelta sin perder la hora", fromLocalInputValue(toLocalInputValue(local(28, 9, 45))) === local(28, 9, 45) && fromLocalInputValue("") === null);
+
+  // Edición directa de un pendiente ya creado.
+  const base = createResolution({
+    existingCodes: ["RES-001"],
+    description: "Proveedor de audio retrasado",
+    area: "Logística",
+    dueAt: dueFromShortcut("tomorrow", NOW),
+    by: "Ana (ejemplo)",
+    at: T0,
+  });
+  check("Nace en Rojo con su fecha límite", base.status === "pending" && base.dueAt === local(27, 18) && base.code === "RES-002");
+  const edited = editResolution(base, { dueAt: dueFromShortcut("in3", NOW), area: "presupuesto", status: "done" }, "Luis (ejemplo)", T1);
+  check(
+    "Editar fecha, área y estado sin borrar la ficha (mismo código)",
+    edited.code === base.code && edited.dueAt === local(29, 18) && edited.area === "Presupuesto" && edited.status === "done" && edited.completedBy === "Luis (ejemplo)",
+    edited
+  );
+  const lastTwo = edited.history.slice(-2);
+  check(
+    "Historial: «edited» con lo que cambió y el paso a Verde",
+    lastTwo[0].action === "edited" && /Fecha límite/.test(lastTwo[0].detail ?? "") && /Área/.test(lastTwo[0].detail ?? "") && lastTwo[1].action === "completed",
+    edited.history
+  );
+  check("La original no cambia (inmutable)", base.status === "pending" && base.area === "Logística" && base.history.length === 1);
+  check("Sin cambios devuelve la MISMA referencia (no se guarda nada)", editResolution(base, { area: "Logística", description: "  " }, "X", T1) === base);
+  const reopened = editResolution(edited, { status: "pending", dueAt: null }, "Ana (ejemplo)", T1);
+  check("Reabrir y quitar la fecha", reopened.status === "pending" && reopened.dueAt === null && reopened.completedAt === null);
+  const assigned = editResolution(base, { assigneeName: "Eva (ejemplo)", assigneeId: "u-eva", affectedNodeIds: ["n1", "n1", "n2"] }, "Ana (ejemplo)", T1);
+  check("Persona asignada y tarjetas vinculadas (sin repetir)", assigned.assigneeName === "Eva (ejemplo)" && assigned.assigneeId === "u-eva" && assigned.affectedNodeIds.join() === "n1,n2");
+
+  const roundTrip = sanitizeResolution(JSON.parse(JSON.stringify(edited)));
+  check("Persistencia limpia: nube / .zip / sala devuelven lo mismo", JSON.stringify(roundTrip) === JSON.stringify(edited), roundTrip);
+  check("Fecha inválida guardada → sin fecha", sanitizeResolution({ ...edited, dueAt: "mañana" })?.dueAt === null);
+  check("Evento desconocido del historial se descarta", sanitizeResolution({ ...edited, history: [{ at: T0, by: "x", action: "hack" }] })?.history[0].action === "created");
+  const editedFields = resolutionFields(edited, () => null);
+  const dueField = editedFields.find((f) => f.fieldKey === "fecha_limite");
+  check("Campo espejo «Fecha límite» para Vista Invitado, IA y exportación", Boolean(dueField?.value), dueField);
+  const sheetRound = sanitizeFormSheet({ templateId: "cde-resolution", category: "Resolución", fields: editedFields, attachments: [], area: edited.area, resolution: edited });
+  check("sanitizeFormSheet conserva la alarma editada", sheetRound?.resolution?.dueAt === edited.dueAt && sheetRound?.resolution?.history.length === edited.history.length);
+
+  const areaNodes = [
+    { id: "a", type: "sketch-note-node", title: "Área: Operaciones" },
+    { id: "b", type: "form-sheet-node", title: "Ficha", formSheetData: { area: "Logística", fields: [] } },
+  ] as unknown as EngineeringNodeData[];
+  check("Chips de áreas: las del espacio + las del lienzo, sin repetir", canvasAreas(areaNodes, ["Logística"]).join() === "Logística,Operaciones");
+}
+
+// ----------------------------------------------------------------------------
+section("8. Llenado rápido de fichas desde nodos conectados (Sprint 24)");
+// ----------------------------------------------------------------------------
+{
+  const note = (id: string, title: string, blocks: [("heading" | "paragraph" | "bullet"), string][]): EngineeringNodeData => ({
+    id,
+    type: "sketch-note-node",
+    title,
+    codeTag: "NOTE",
+    position: { x: 0, y: 0 },
+    updatedAt: "Ahora mismo",
+    sketchNoteData: {
+      richTextHtml: "",
+      textBlocks: blocks.map(([type, text], i) => ({ id: `${id}-${i}`, type, text })),
+      checklistItems: [],
+      strokes: [],
+      canvasMode: "text",
+      canvasSize: { width: 640, height: 400 },
+    },
+  });
+  const areaNote = note("area", "Área: Logística", [
+    ["heading", "Personas"],
+    ["bullet", "Ana (ejemplo) (@ana) · Editor · @Logística"],
+    ["bullet", "Eva (ejemplo) (@eva) · Lector · @Logística"],
+    ["heading", "Fichas del área"],
+    ["bullet", "Montaje"],
+  ]);
+  const coord = note("coord", "Coordinación: Feria 2026 (ejemplo)", [
+    ["heading", "Equipo"],
+    ["bullet", "Luis (ejemplo) (@luis_p) · Dueño · @Presupuesto"],
+  ]);
+  const resMeta = editResolution(
+    createResolution({ existingCodes: [], description: "Confirmar escenario", area: "Logística", by: "Ana (ejemplo)", at: T0 }),
+    { dueAt: new Date(2026, 11, 4, 18).toISOString(), assigneeName: "Eva (ejemplo)" },
+    "Ana (ejemplo)",
+    T0
+  );
+  const res: EngineeringNodeData = {
+    id: "res",
+    type: "form-sheet-node",
+    title: "RES-001 · Confirmar escenario",
+    codeTag: "RES-001",
+    position: { x: 0, y: 0 },
+    updatedAt: "Ahora mismo",
+    formSheetData: { templateId: "cde-resolution", category: "Resolución", fields: [], attachments: [], area: "Logística", resolution: resMeta },
+  };
+  const f = (id: string, label: string, type: FormField["type"], value: FormField["value"], extra: Partial<FormField> = {}): FormField => ({
+    id,
+    fieldKey: id,
+    label,
+    type,
+    value,
+    ...extra,
+  });
+  const target: FormSheetEngineeringNode = {
+    id: "sheet",
+    type: "form-sheet-node",
+    title: "Checklist de montaje",
+    codeTag: "FORM",
+    position: { x: 0, y: 0 },
+    updatedAt: "Ahora mismo",
+    formSheetData: {
+      templateId: "custom",
+      category: "Logística",
+      attachments: [],
+      fields: [
+        f("area", "Área", "text", ""),
+        f("responsable", "Responsable", "text", "Pedro (ejemplo)"),
+        f("equipo", "Equipo", "textarea", ""),
+        f("fecha_entrega", "Fecha de entrega", "date", ""),
+        f("estado", "Estado", "select", "", { options: ["Pendiente", "En curso", "Resuelto"] }),
+        f("proyecto", "Proyecto", "text", ""),
+        f("peso", "Peso", "number", null, { unit: "kg" }),
+      ],
+    },
+  };
+
+  check("«Área responsable» es un área; «Responsable del área», una persona", kindOfLabel("Área responsable") === "area" && kindOfLabel("Responsable del área") === "responsible");
+  check("Números, casillas y fotos no se llenan desde nodos", fieldFactKind(target.formSheetData.fields[6]) === null && fieldFactKind(f("x", "Firma", "checkbox", false)) === null);
+  check("Fechas «12/12/2026» → «2026-12-12»", toIsoDay("12/12/2026") === "2026-12-12" && toIsoDay("31/02/2026") === null);
+  const areaFacts = extractNodeFacts(areaNote);
+  const factOf = (facts: NodeFact[], kind: NodeFact["kind"]) => facts.find((x) => x.kind === kind)?.value;
+  check(
+    "Nodo «Área: Logística» → área, responsable y equipo",
+    factOf(areaFacts, "area") === "Logística" && factOf(areaFacts, "responsible") === "Ana (ejemplo)" && factOf(areaFacts, "team") === "Ana (ejemplo), Eva (ejemplo)",
+    areaFacts
+  );
+  check("Nodo de Coordinación → título del proyecto", factOf(extractNodeFacts(coord), "project") === "Feria 2026 (ejemplo)");
+  const resFacts = extractNodeFacts(res);
+  check(
+    "Ficha de Resolución → estado, asignado y fecha límite",
+    factOf(resFacts, "status") === "Pendiente" && factOf(resFacts, "responsible") === "Eva (ejemplo)" && factOf(resFacts, "date") === "2026-12-04",
+    resFacts
+  );
+  check("Notas con «Responsable: …» y «Fecha: …» también aportan", (() => {
+    const facts = extractNodeFacts(note("n", "Acta", [["paragraph", "Responsable: Marta (ejemplo)"], ["paragraph", "Fecha: 05/01/2027"]]));
+    return factOf(facts, "responsible") === "Marta (ejemplo)" && factOf(facts, "date") === "2027-01-05";
+  })());
+
+  const connections: NodeConnection[] = [
+    { id: "c1", fromNodeId: "area", toNodeId: "sheet", fromPort: "bottom", toPort: "top" },
+    { id: "c2", fromNodeId: "sheet", toNodeId: "res", fromPort: "right", toPort: "left" },
+    { id: "c3", fromNodeId: "coord", toNodeId: "sheet", fromPort: "right", toPort: "left" },
+    { id: "c4", fromNodeId: "coord", toNodeId: "area", fromPort: "right", toPort: "left" },
+  ];
+  check("Vecinos por cable en ambos sentidos (sin repetir)", neighborIds("sheet", connections).join() === "area,res,coord");
+
+  const plan = buildFillSuggestions(target, [res, coord, areaNote]);
+  const forField = (id: string) => plan.suggestions.filter((s) => s.fieldId === id);
+  check("Área de la ficha (vacía) sale del nodo de Área", plan.area?.value === "Logística" && plan.area.sourceNodeId === "area");
+  check("El nodo de Área tiene prioridad sobre las demás fuentes", forField("responsable")[0]?.sourceNodeId === "area", forField("responsable"));
+  check("Lo ya llenado se marca como «sobrescribe»", forField("responsable").every((s) => s.overwrites && s.currentValue === "Pedro (ejemplo)"));
+  check("Hay varias fuentes útiles (mini-selector)", plan.sourceCount === 3, plan.sourceCount);
+
+  const picks = defaultPicks(plan);
+  check("«Aplicar todo» no incluye campos ya llenados", picks.every((p) => !p.overwrites) && !picks.some((p) => p.fieldId === "responsable"));
+  const applied = applyFillSuggestions(target.formSheetData.fields, picks);
+  const val = (id: string) => applied.fields.find((x) => x.id === id)?.value;
+  check(
+    "Mapeo: área, equipo, fecha, estado (opción válida) y proyecto",
+    val("area") === "Logística" && val("equipo") === "Ana (ejemplo), Eva (ejemplo)" && val("fecha_entrega") === "2026-12-04" && val("estado") === "Pendiente" && val("proyecto") === "Feria 2026 (ejemplo)",
+    applied.fields
+  );
+  check("No sobrescribe lo que la persona ya llenó", val("responsable") === "Pedro (ejemplo)" && val("peso") === null);
+  check("Cuenta los campos aplicados", applied.applied === 5 && applied.skipped === 0, applied);
+  check("La ficha original no cambia (inmutable)", target.formSheetData.fields[0].value === "");
+  const forced = applyFillSuggestions(target.formSheetData.fields, [forField("responsable")[0]]);
+  check("Elegir un campo lleno sin confirmar → se salta", forced.applied === 0 && forced.skipped === 1);
+  const confirmed = applyFillSuggestions(target.formSheetData.fields, [forField("responsable")[0]], { overwrite: true });
+  check("Con confirmación sí sobrescribe", confirmed.fields.find((x) => x.id === "responsable")?.value === "Ana (ejemplo)");
+  check("Una ficha con datos no se considera vacía (no se autollena al conectar)", !sheetIsBlank(target) && sheetIsBlank({ ...target, formSheetData: { ...target.formSheetData, fields: [f("a", "Área", "text", "")] } }));
+
+  const summary = connectedContextSummary("sheet", [target, areaNote, coord, res], connections);
+  check("Contexto para «Llenar con IA»: áreas, responsables y fechas de los conectados", /Área: Logística/.test(summary) && /Responsable: Ana/.test(summary) && /Fecha: 2026-12-04/.test(summary) && /Proyecto: Feria 2026/.test(summary), summary);
+  const refs = nodeReferenceOptions(res);
+  check("Referencia rápida: nombre, estado y responsable de un nodo", refs[0].value === res.title && refs.some((r) => r.label === "Estado" && r.value === "Pendiente") && refs.some((r) => r.label === "Responsable"));
+  check("Insertar una referencia no borra lo escrito", appendReference("Ver con", "Eva (ejemplo)") === "Ver con Eva (ejemplo)" && appendReference("", "X") === "X");
+}
+
+// ----------------------------------------------------------------------------
+section("9. Tutorial de inicio por cuenta (Sprint 24)");
+// ----------------------------------------------------------------------------
+{
+  const mem = new Map<string, string>();
+  const storage: KeyValueStorage = {
+    getItem: (k) => mem.get(k) ?? null,
+    setItem: (k, v) => void mem.set(k, v),
+    removeItem: (k) => void mem.delete(k),
+  };
+  // "sin-leer" = la nube todavía no respondió (remote === undefined).
+  const auto = (userId: string | null, remote: TutorialStatus | null | "sin-leer" = null, cloud = true) =>
+    shouldAutoStartTutorial({ userId, local: readTutorialStatus(storage, userId), remote: remote === "sin-leer" ? undefined : remote, cloud });
+
+  check("Cuenta nueva (sin estado aquí ni en la nube) → se muestra sola", auto("u-new"));
+  check("Mientras la nube no se ha leído, espera", !auto("u-new", "sin-leer"));
+  check("Sin Supabase configurado, basta lo local", auto("u-new", "sin-leer", false));
+  check("Sin sesión no se lanza por cuenta", !auto(null));
+  check("Hecho en otro dispositivo (nube) → no se repite", !auto("u-new", "completed") && !auto("u-new", "skipped"));
+  check("Clave por cuenta", tutorialStorageKey("u-1") === "andros:tutorial:v2:u-1" && tutorialStorageKey(null) === "andros:tutorial:v2:local");
+
+  let m: TutorialMachine = tutorialReducer(INITIAL_TUTORIAL, { type: "start" });
+  check("Empieza abierto en el paso 1 de 5", m.open && m.step === 0 && TUTORIAL_STEP_COUNT === 5);
+  m = tutorialReducer(m, { type: "back" });
+  check("«Anterior» en el paso 1 no baja de 1", m.step === 0);
+  for (let i = 0; i < 4; i += 1) m = tutorialReducer(m, { type: "next" });
+  check("«Siguiente» llega al paso 5", m.open && m.step === 4 && m.status === null);
+  m = tutorialReducer(m, { type: "back" });
+  check("«Anterior» vuelve al paso 4", m.step === 3);
+  m = tutorialReducer(tutorialReducer(m, { type: "next" }), { type: "next" });
+  check("«Empezar» en el último paso lo completa y lo cierra", !m.open && m.status === "completed");
+  writeTutorialStatus(storage, "u-new", m.status);
+  check("Completado → deja de mostrarse", !auto("u-new"));
+  check("Otra cuenta en el mismo navegador sigue siendo nueva", auto("u-other"));
+
+  const skipped = tutorialReducer(tutorialReducer(INITIAL_TUTORIAL, { type: "start" }), { type: "finish", outcome: "skipped" });
+  writeTutorialStatus(storage, "u-other", skipped.status);
+  check("«Omitir tutorial» (o Esc) → cerrado y no vuelve a salir", !skipped.open && skipped.status === "skipped" && !auto("u-other"));
+
+  const replay = tutorialReducer(m, { type: "start" });
+  check("Repetirlo a mano funciona aunque ya se completó", replay.open && replay.step === 0 && replay.status === "completed");
+  const reset = tutorialReducer(replay, { type: "reset" });
+  writeTutorialStatus(storage, "u-new", reset.status);
+  check("Reiniciar el estado lo vuelve a lanzar como cuenta nueva", reset.status === null && !reset.open && auto("u-new"));
+  check(
+    "Preferencia de la nube válida o descartada",
+    sanitizeTutorialStatus({ status: "skipped", at: T0 }) === "skipped" && sanitizeTutorialStatus("completed") === "completed" && sanitizeTutorialStatus({ status: "x" }) === null
+  );
 }
 
 console.log(`\n${passed} correctas · ${failed} fallidas`);

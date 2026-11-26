@@ -13,6 +13,7 @@ import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import type { FormField, FormSheetEngineeringNode, FormSheetPayload } from "@/types/workspace";
 import type { FormTemplate } from "@/types/forms";
 import {
+  AUTOFILL_MAX_CONTEXT_CHARS,
   localIsoDate,
   type AutofillResponse,
   type AutofillSheetResult,
@@ -21,6 +22,7 @@ import {
 } from "./autofill";
 import { instantiateTemplate, isFieldFilled } from "./formSchema";
 import { insertSheetBatch, patchFormSheet } from "./formActions";
+import { connectedContextSummary } from "./nodeFill";
 
 export class AutofillError extends Error {
   constructor(
@@ -56,6 +58,21 @@ function schemaFor(source: AutofillSource, ref: string): AutofillSheetSchema {
         ...(f.type === "select" ? { options: f.options ?? [] } : {}),
       })),
   };
+}
+
+/**
+ * (Sprint 24) Resumen de los nodos conectados a las fichas del lienzo elegidas,
+ * para que la IA complete con datos reales del proyecto. Vacío si no hay.
+ */
+export function autofillContextFor(sources: readonly AutofillSource[]): string {
+  const { nodes, connections } = useWorkspaceStore.getState();
+  const parts: string[] = [];
+  for (const source of sources) {
+    if (source.kind !== "canvas") continue;
+    const summary = connectedContextSummary(source.node.id, nodes, connections);
+    if (summary) parts.push(`Ficha «${source.node.title.slice(0, 80)}» conectada a:\n${summary}`);
+  }
+  return parts.join("\n\n").slice(0, AUTOFILL_MAX_CONTEXT_CHARS);
 }
 
 export interface AutofillOutcome {
@@ -102,6 +119,7 @@ export async function runAutofill(
     throw new AutofillError("Las fichas elegidas no tienen campos vacíos que llenar.", "service");
   }
 
+  const context = autofillContextFor(sources);
   const apiKey = getUserAiKey("gemini");
   let res: Response;
   try {
@@ -111,6 +129,7 @@ export async function runAutofill(
       body: JSON.stringify({
         rawText,
         sheets: schemas.filter((s) => s.fields.length > 0),
+        ...(context ? { context } : {}),
         today: localIsoDate(),
         ...(apiKey ? { apiKey } : {}),
       }),

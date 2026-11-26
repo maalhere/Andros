@@ -10,6 +10,8 @@ import {
   useSettingsStore,
   type Preferences,
 } from "@/store/useSettingsStore";
+import { useOnboardingStore } from "@/store/useOnboardingStore";
+import { sanitizeTutorialStatus, tutorialPreference } from "@/lib/onboarding/tutorialState";
 
 // ============================================================================
 // ANDROS — PERSISTENCIA DE AJUSTES (localStorage + Supabase `profiles.preferences`)
@@ -18,6 +20,13 @@ import {
 
 const STORAGE_KEY = "andros:preferences:v1";
 const REMOTE_DEBOUNCE_MS = 1500;
+
+/** (Sprint 24) Estado del tutorial de inicio de ESTA cuenta para `profiles.preferences.tutorial`. */
+function tutorialFor(userId: string): { tutorial?: ReturnType<typeof tutorialPreference> } {
+  const t = useOnboardingStore.getState();
+  if (t.userId !== userId || !t.status) return {};
+  return { tutorial: tutorialPreference(t.status, t.statusAt ?? new Date().toISOString()) };
+}
 
 export function collectPreferences(): Preferences {
   const s = useSettingsStore.getState();
@@ -79,7 +88,7 @@ export function useSettingsSync() {
       if (!supabase || !userId || !remoteReady) return;
       const { error } = await supabase
         .from("profiles")
-        .update({ preferences: collectPreferences() })
+        .update({ preferences: { ...collectPreferences(), ...tutorialFor(userId) } })
         .eq("id", userId);
       if (error) console.warn("[Andros] No se pudieron guardar los ajustes en la nube:", error.message);
     };
@@ -111,8 +120,12 @@ export function useSettingsSync() {
       if (userId !== uid) return;
       if (error) {
         console.warn("[Andros] No se pudieron leer los ajustes de la nube:", error.message);
+        useOnboardingStore.getState().setRemoteStatus(uid, null);
         return;
       }
+      // (Sprint 24) Tutorial de inicio por cuenta (antes de permitir subir nada).
+      const rawPrefs = data?.preferences as Record<string, unknown> | null | undefined;
+      useOnboardingStore.getState().setRemoteStatus(uid, sanitizeTutorialStatus(rawPrefs?.tutorial));
       const remote = sanitizePreferences(data?.preferences);
       remoteReady = true;
       if (Object.keys(remote).length > 0) {
@@ -130,16 +143,25 @@ export function useSettingsSync() {
       if (id === userId) return;
       userId = id;
       remoteReady = false;
+      useOnboardingStore.getState().bindUser(id);
+      if (id && !getSupabaseBrowserClient()) useOnboardingStore.getState().setRemoteStatus(id, null);
       if (id) void loadRemote(id);
     };
     handleUser(useCloudStore.getState().user?.id ?? null);
     const unsubCloud = useCloudStore.subscribe((state) => handleUser(state.user?.id ?? null));
+    // Al completar u omitir el tutorial se sube a la nube (aunque nada más cambie).
+    const unsubTutorial = useOnboardingStore.subscribe((state, prev) => {
+      if (state.status === prev.status || !userId || state.userId !== userId || !remoteReady) return;
+      if (remoteTimer) clearTimeout(remoteTimer);
+      remoteTimer = setTimeout(() => void pushRemote(), REMOTE_DEBOUNCE_MS);
+    });
 
     return () => {
       if (remoteTimer) clearTimeout(remoteTimer);
       unsubSettings();
       unsubTheme();
       unsubCloud();
+      unsubTutorial();
     };
   }, []);
 }

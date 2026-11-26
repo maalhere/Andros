@@ -471,7 +471,7 @@ export const MoreMenu: React.FC = () => {
     {
       id: "tutorial",
       section: "config",
-      label: "Ver tutorial",
+      label: "Ver tutorial de inicio",
       icon: <GraduationCap className="w-4 h-4" />,
       onSelect: () => useOnboardingStore.getState().start(),
     },

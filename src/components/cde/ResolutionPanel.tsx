@@ -1,7 +1,7 @@
 "use client";
 
-import React from "react";
-import { CheckCircle2, History, Link2, RotateCcw } from "lucide-react";
+import React, { useState } from "react";
+import { CheckCircle2, History, Link2, Pencil, RotateCcw } from "lucide-react";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { useCanvasReadOnly } from "@/store/useCollabStore";
 import { focusNodeOnScreen } from "@/lib/canvas/focusNode";
@@ -9,6 +9,7 @@ import { formatResolutionDate } from "@/lib/cde/resolution";
 import { setResolutionDone } from "@/lib/cde/resolutionActions";
 import type { ResolutionMeta } from "@/types/workspace";
 import { AreaBadge, StatusLight } from "./CdeBits";
+import { DueLabel, PendingEditor } from "./PendingControls";
 
 // ============================================================================
 // ANDROS — BLOQUE DE TRAZABILIDAD DE UNA FICHA DE RESOLUCIÓN (Sprint 18)
@@ -21,12 +22,18 @@ const ACTIONS: Record<ResolutionMeta["history"][number]["action"], string> = {
   created: "Creada (Rojo)",
   completed: "Pasada a Verde",
   reopened: "Reabierta (Rojo)",
+  edited: "Editada",
 };
 
 export const ResolutionPanel: React.FC<{ nodeId: string; meta: ResolutionMeta }> = ({ nodeId, meta }) => {
   const readOnly = useCanvasReadOnly();
   const nodes = useWorkspaceStore((s) => s.nodes);
   const done = meta.status === "done";
+  const [editing, setEditing] = useState(false);
+
+  if (editing && !readOnly) {
+    return <PendingEditor nodeId={nodeId} meta={meta} onDone={() => setEditing(false)} />;
+  }
 
   return (
     <section aria-label={`Ficha de Resolución ${meta.code}`} className="space-y-2.5">
@@ -45,6 +52,14 @@ export const ResolutionPanel: React.FC<{ nodeId: string; meta: ResolutionMeta }>
       <dl className="grid grid-cols-[auto,1fr] gap-x-2 gap-y-1 text-[11px] leading-relaxed">
         <dt className="text-andros-muted">Asignado a</dt>
         <dd className="text-andros-primary">{meta.assigneeName || (meta.area ? `Equipo @${meta.area}` : "Sin asignar")}</dd>
+        {meta.dueAt && (
+          <>
+            <dt className="text-andros-muted">Fecha límite</dt>
+            <dd>
+              <DueLabel dueAt={meta.dueAt} done={done} />
+            </dd>
+          </>
+        )}
         <dt className="text-andros-muted">Creada</dt>
         <dd className="text-andros-primary">
           {formatResolutionDate(meta.createdAt)} · {meta.createdBy}
@@ -91,18 +106,27 @@ export const ResolutionPanel: React.FC<{ nodeId: string; meta: ResolutionMeta }>
         <ol className="mt-1 space-y-0.5 pl-4">
           {meta.history.map((e, i) => (
             <li key={`${e.at}-${i}`}>
-              {ACTIONS[e.action]} · {e.by} · {formatResolutionDate(e.at)}
+              {ACTIONS[e.action]}
+              {e.detail ? ` (${e.detail})` : ""} · {e.by} · {formatResolutionDate(e.at)}
             </li>
           ))}
         </ol>
       </details>
 
       {!readOnly && (
-        <div data-no-drag>
+        <div data-no-drag className="flex gap-1.5">
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="min-h-11 md:min-h-9 px-3 rounded-xl border border-andros-border text-xs font-medium text-andros-primary hover:bg-andros-border/40 flex items-center justify-center gap-1.5 active:scale-[0.96] spring-micro"
+          >
+            <Pencil className="w-3.5 h-3.5 text-andros-accent-ink" aria-hidden="true" />
+            Editar
+          </button>
           <button
             type="button"
             onClick={() => setResolutionDone(nodeId, !done)}
-            className={`w-full min-h-11 md:min-h-9 px-3 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 active:scale-[0.96] spring-micro ${
+            className={`flex-1 min-h-11 md:min-h-9 px-3 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 active:scale-[0.96] spring-micro ${
               done
                 ? "border-andros-border text-andros-primary hover:bg-andros-border/40"
                 : "border-andros-success/60 bg-andros-success/10 text-andros-success hover:bg-andros-success/15"

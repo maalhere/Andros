@@ -59,6 +59,8 @@ export interface NewResolutionInput {
   assigneeId?: string | null;
   affectedNodeIds?: readonly string[];
   sourceAlertIds?: readonly string[];
+  /** (Sprint 24) Alarma: fecha y hora límite (ISO 8601). */
+  dueAt?: string | null;
   by: string;
   at: string;
 }
@@ -82,8 +84,98 @@ export function createResolution(input: NewResolutionInput): ResolutionMeta {
     createdBy: by,
     completedAt: null,
     completedBy: null,
+    dueAt: validIso(input.dueAt),
     history: [{ at: input.at, by, action: "created" }],
   };
+}
+
+/** ISO 8601 válido o `null`. */
+function validIso(value: unknown): string | null {
+  if (typeof value !== "string" || value.length > 40) return null;
+  return Number.isFinite(Date.parse(value)) ? value : null;
+}
+
+// ----------------------------------------------------------------------------
+// (Sprint 24) Edición directa de un pendiente / alarma (sin borrarlo)
+// ----------------------------------------------------------------------------
+
+export interface ResolutionEdit {
+  description?: string;
+  area?: string;
+  assigneeName?: string;
+  assigneeId?: string | null;
+  /** `null` quita la fecha límite. */
+  dueAt?: string | null;
+  status?: ResolutionStatus;
+  affectedNodeIds?: readonly string[];
+}
+
+const EDIT_LABELS: Record<keyof ResolutionEdit, string> = {
+  description: "Descripción",
+  area: "Área",
+  assigneeName: "Asignado a",
+  assigneeId: "Asignado a",
+  dueAt: "Fecha límite",
+  status: "Estado",
+  affectedNodeIds: "Tarjetas vinculadas",
+};
+
+/**
+ * Aplica una edición y la deja en el historial («edited» con lo que cambió).
+ * El cambio de estado usa el mismo registro que Rojo ⇄ Verde. Si nada cambia
+ * devuelve la MISMA referencia (no se guarda ni se emite nada).
+ */
+export function editResolution(meta: ResolutionMeta, edit: ResolutionEdit, by: string, at: string): ResolutionMeta {
+  const who = oneLine(by, 120) || "Persona de Andros";
+  const next: ResolutionMeta = { ...meta };
+  const changed = new Set<string>();
+
+  if (edit.description !== undefined) {
+    const description = edit.description.trim().slice(0, RESOLUTION_DESCRIPTION_MAX);
+    if (description && description !== meta.description) {
+      next.description = description;
+      changed.add(EDIT_LABELS.description);
+    }
+  }
+  if (edit.area !== undefined) {
+    const area = normalizeAreaName(edit.area);
+    if (area !== meta.area) {
+      next.area = area;
+      changed.add(EDIT_LABELS.area);
+    }
+  }
+  if (edit.assigneeName !== undefined) {
+    const name = oneLine(edit.assigneeName, 120);
+    const id = edit.assigneeId !== undefined ? edit.assigneeId || null : name === meta.assigneeName ? meta.assigneeId : null;
+    if (name !== meta.assigneeName || id !== meta.assigneeId) {
+      next.assigneeName = name;
+      next.assigneeId = name ? id : null;
+      changed.add(EDIT_LABELS.assigneeName);
+    }
+  }
+  if (edit.dueAt !== undefined) {
+    const due = validIso(edit.dueAt);
+    if (due !== (meta.dueAt ?? null)) {
+      next.dueAt = due;
+      changed.add(EDIT_LABELS.dueAt);
+    }
+  }
+  if (edit.affectedNodeIds !== undefined) {
+    const ids = uniq(edit.affectedNodeIds, RESOLUTION_MAX_AFFECTED);
+    if (ids.join("|") !== meta.affectedNodeIds.join("|")) {
+      next.affectedNodeIds = ids;
+      changed.add(EDIT_LABELS.affectedNodeIds);
+    }
+  }
+
+  let result: ResolutionMeta = next;
+  if (changed.size > 0) {
+    result = { ...next, history: withEvent(meta, { at, by: who, action: "edited", detail: [...changed].join(", ").slice(0, 120) }) };
+  }
+  if (edit.status && edit.status !== meta.status) {
+    result = edit.status === "done" ? completeResolution(result, who, at) : reopenResolution(result, who, at);
+  }
+  return changed.size === 0 && result.status === meta.status ? meta : result;
 }
 
 function withEvent(meta: ResolutionMeta, event: ResolutionEvent): ResolutionEvent[] {
@@ -154,6 +246,7 @@ export function resolutionFields(meta: ResolutionMeta, titleOf: (nodeId: string)
     field("creada", "Creada", `${formatResolutionDate(meta.createdAt)} · ${meta.createdBy}`),
     field("completada_por", "Completada por", meta.completedBy ?? ""),
     field("completada_el", "Completada el", formatResolutionDate(meta.completedAt)),
+    field("fecha_limite", "Fecha límite", formatResolutionDate(meta.dueAt ?? null)),
   ];
 }
 
@@ -181,8 +274,10 @@ export function sanitizeResolution(raw: unknown): ResolutionMeta | undefined {
       if (!e || typeof e !== "object") return null;
       const o = e as Record<string, unknown>;
       const at = iso(o.at);
-      const action = o.action === "completed" || o.action === "reopened" || o.action === "created" ? o.action : null;
-      return at && action ? { at, by: str(o.by, 120) || "Persona de Andros", action } : null;
+      const action =
+        o.action === "completed" || o.action === "reopened" || o.action === "created" || o.action === "edited" ? o.action : null;
+      const detail = str(o.detail, 120).trim();
+      return at && action ? { at, by: str(o.by, 120) || "Persona de Andros", action, ...(detail ? { detail } : {}) } : null;
     })
     .filter((e): e is ResolutionEvent => e !== null)
     .slice(-RESOLUTION_MAX_HISTORY);
@@ -201,6 +296,7 @@ export function sanitizeResolution(raw: unknown): ResolutionMeta | undefined {
     createdBy: str(r.createdBy, 120).trim() || "Persona de Andros",
     completedAt,
     completedBy: status === "done" ? str(r.completedBy, 120).trim() || null : null,
+    dueAt: validIso(r.dueAt),
     history: history.length > 0 ? history : [{ at: createdAt, by: str(r.createdBy, 120) || "Persona de Andros", action: "created" }],
   };
 }

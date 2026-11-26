@@ -247,7 +247,7 @@ export const ShortcutsGuideModal: React.FC = () => {
                 className="w-full min-h-[44px] md:min-h-[40px] rounded-xl border border-andros-border text-[13px] font-medium text-andros-primary hover:bg-andros-border/40 flex items-center justify-center gap-2 active:scale-[0.98] spring-micro"
               >
                 <GraduationCap className="w-4 h-4 text-andros-accent-ink" aria-hidden="true" />
-                Repetir tutorial guiado
+                Ver tutorial de inicio
               </button>
             </div>
           </motion.div>

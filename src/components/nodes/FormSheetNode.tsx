@@ -53,6 +53,7 @@ import { AreaBadge } from "@/components/cde/CdeBits";
 import { parseMentions } from "@/lib/cde/mentions";
 import { useMentionDirectory, useMyArea, useMyUserId } from "@/lib/cde/hooks";
 import { areaKey } from "@/lib/cde/areas";
+import { NodeFillButton, NodeReferencePicker, NodeReferenceToggle } from "@/components/forms/NodeFillControls";
 
 /**
  * (Sprint 18) Menciones @Área / @usuario escritas en los campos de la ficha:
@@ -445,6 +446,8 @@ const FieldRow: React.FC<{ node: FormSheetEngineeringNode; field: FormField; dis
   disabled,
 }) => {
   const inputId = `form-${node.id}-${field.id}`;
+  const [refOpen, setRefOpen] = useState(false);
+  const canReference = !disabled && (field.type === "text" || field.type === "textarea");
   const commitDiscrete = (patch: Partial<FormField>) =>
     commitWithImpact(node.id, () => updateFormField(node.id, field.id, { ...patch, needsReview: undefined }));
 
@@ -528,6 +531,7 @@ const FieldRow: React.FC<{ node: FormSheetEngineeringNode; field: FormField; dis
         >
           {field.label}
         </label>
+        {canReference && <NodeReferenceToggle open={refOpen} label={field.label} onToggle={() => setRefOpen((v) => !v)} />}
         {field.needsReview && (
           <span className="shrink-0 flex items-center gap-1 text-[10px] text-andros-warning">
             <TriangleAlert className="w-3 h-3" aria-hidden="true" />
@@ -547,6 +551,7 @@ const FieldRow: React.FC<{ node: FormSheetEngineeringNode; field: FormField; dis
         )}
       </div>
       {control}
+      {canReference && refOpen && <NodeReferencePicker sheetId={node.id} field={field} onClose={() => setRefOpen(false)} />}
     </li>
   );
 };
@@ -808,6 +813,22 @@ export const FormSheetNodeView: React.FC<{ node: FormSheetEngineeringNode; varia
             max={FORM_MAX_ATTACHMENTS}
             disabled={readOnly}
           />
+        </div>
+      )}
+
+      {!readOnly && !structure && data.fields.length > 0 && (
+        <div data-no-drag className="flex flex-wrap gap-1.5">
+          <NodeFillButton node={node} />
+          {data.fields.some((f) => f.type !== "photo" && !isFieldFilled(f)) && (
+            <button
+              type="button"
+              onClick={() => useFormsLibraryStore.getState().openAutofillForSheets([node.id])}
+              className="min-h-11 md:min-h-8 px-3 rounded-xl border border-andros-border text-xs font-medium text-andros-primary hover:bg-andros-border/40 flex items-center gap-1.5 active:scale-[0.96] spring-micro"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-andros-accent-ink" aria-hidden="true" />
+              Llenar con IA
+            </button>
+          )}
         </div>
       )}
 

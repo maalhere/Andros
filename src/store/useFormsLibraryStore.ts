@@ -36,10 +36,14 @@ interface FormsLibraryState {
   libraryTab: FormsLibraryTab;
   /** Formatos preseleccionados al abrir «Llenar con IA». */
   preselectTemplateIds: string[];
+  /** (Sprint 24) Fichas del lienzo preseleccionadas (botón «Llenar con IA» de una ficha). */
+  preselectSheetIds: string[];
   /** Diálogo independiente de auto-llenado (desde el Oráculo). */
   autofillOpen: boolean;
 
   openLibrary: (tab?: FormsLibraryTab, preselect?: string[]) => void;
+  /** Abre «Llenar con IA» con estas fichas del lienzo ya elegidas. */
+  openAutofillForSheets: (sheetIds: string[]) => void;
   closeLibrary: () => void;
   setLibraryTab: (tab: FormsLibraryTab) => void;
   setAutofillOpen: (open: boolean) => void;
@@ -72,11 +76,14 @@ export const useFormsLibraryStore = create<FormsLibraryState>((set, get) => ({
   libraryOpen: false,
   libraryTab: "library",
   preselectTemplateIds: [],
+  preselectSheetIds: [],
   autofillOpen: false,
 
   openLibrary: (tab = "catalog", preselect = []) =>
-    set({ libraryOpen: true, libraryTab: tab, preselectTemplateIds: preselect }),
-  closeLibrary: () => set({ libraryOpen: false, preselectTemplateIds: [] }),
+    set({ libraryOpen: true, libraryTab: tab, preselectTemplateIds: preselect, preselectSheetIds: [] }),
+  openAutofillForSheets: (sheetIds) =>
+    set({ libraryOpen: true, libraryTab: "autofill", preselectTemplateIds: [], preselectSheetIds: sheetIds }),
+  closeLibrary: () => set({ libraryOpen: false, preselectTemplateIds: [], preselectSheetIds: [] }),
   setLibraryTab: (tab) => set({ libraryTab: tab }),
   setAutofillOpen: (open) => set({ autofillOpen: open }),
 

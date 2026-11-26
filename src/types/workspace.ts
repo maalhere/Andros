@@ -529,7 +529,9 @@ export interface ResolutionEvent {
   at: string;
   /** Nombre visible de quien hizo el cambio. */
   by: string;
-  action: "created" | "completed" | "reopened";
+  action: "created" | "completed" | "reopened" | "edited";
+  /** (Sprint 24) Qué cambió en una edición («Fecha límite, Área»). */
+  detail?: string;
 }
 
 export interface ResolutionMeta {
@@ -549,6 +551,8 @@ export interface ResolutionMeta {
   createdBy: string;
   completedAt: string | null;
   completedBy: string | null;
+  /** (Sprint 24) Alarma: fecha y hora límite (ISO 8601) o `null` sin fecha. */
+  dueAt?: string | null;
   history: ResolutionEvent[];
 }
 

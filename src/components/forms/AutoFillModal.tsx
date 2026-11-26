@@ -10,7 +10,7 @@ import { freeQueriesLeft, hasOwnGeminiKey, useAiQuotaStore } from "@/store/useAi
 import { useCanvasReadOnly } from "@/store/useCollabStore";
 import { toast } from "@/store/useToastStore";
 import { useSubmitGuard } from "@/hooks/useSubmitGuard";
-import { AutofillError, runAutofill, type AutofillSource } from "@/lib/forms/autofillClient";
+import { AutofillError, autofillContextFor, runAutofill, type AutofillSource } from "@/lib/forms/autofillClient";
 import { AUTOFILL_MAX_RAW_CHARS, AUTOFILL_MAX_REQUEST_SHEETS } from "@/lib/forms/autofill";
 import { isFieldFilled } from "@/lib/forms/formSchema";
 import { findCatalogTemplate } from "@/lib/forms/templateCatalog";
@@ -46,6 +46,7 @@ const EXAMPLE_TEXT =
 export const AutoFillPanel: React.FC<{ onDone?: () => void }> = ({ onDone }) => {
   const ownTemplates = useFormsLibraryStore((s) => s.templates);
   const preselect = useFormsLibraryStore((s) => s.preselectTemplateIds);
+  const preselectSheets = useFormsLibraryStore((s) => s.preselectSheetIds);
   // (Sprint 23) Una plantilla del catálogo elegida con «Llenar con IA» se suma
   // a la lista sin guardarse en la librería personal.
   const templates = useMemo<FormTemplate[]>(() => {
@@ -61,8 +62,10 @@ export const AutoFillPanel: React.FC<{ onDone?: () => void }> = ({ onDone }) => 
   useAiProvidersStore((s) => s.keys);
 
   const [rawText, setRawText] = useState("");
-  const [picked, setPicked] = useState<Set<string>>(() => new Set(preselect.map((id) => `tpl:${id}`)));
-  const [touched, setTouched] = useState(preselect.length > 0);
+  const [picked, setPicked] = useState<Set<string>>(
+    () => new Set([...preselect.map((id) => `tpl:${id}`), ...preselectSheets.map((id) => `can:${id}`)])
+  );
+  const [touched, setTouched] = useState(preselect.length + preselectSheets.length > 0);
   const [error, setError] = useState<string | null>(null);
   const { pending, run } = useSubmitGuard();
   const abortRef = useRef<AbortController | null>(null);
@@ -105,10 +108,6 @@ export const AutoFillPanel: React.FC<{ onDone?: () => void }> = ({ onDone }) => 
     run(async () => {
       setError(null);
       const text = rawText.trim();
-      if (!text) {
-        setError("Escribe o pega la información que quieres pasar a las fichas.");
-        return;
-      }
       const sources: AutofillSource[] = [];
       for (const key of selection) {
         const [kind, id] = [key.slice(0, 3), key.slice(4)];
@@ -122,6 +121,11 @@ export const AutoFillPanel: React.FC<{ onDone?: () => void }> = ({ onDone }) => 
       }
       if (sources.length === 0) {
         setError("Elige al menos un formato o una ficha del lienzo.");
+        return;
+      }
+      // (Sprint 24) Una ficha conectada a otros nodos puede llenarse solo con ese contexto.
+      if (!text && !autofillContextFor(sources)) {
+        setError("Escribe o pega la información que quieres pasar a las fichas.");
         return;
       }
       abortRef.current = new AbortController();
@@ -238,6 +242,10 @@ export const AutoFillPanel: React.FC<{ onDone?: () => void }> = ({ onDone }) => 
             <ul className="flex flex-wrap gap-1.5" aria-label="Fichas del lienzo con campos vacíos">
               {canvasSheets.slice(0, 12).map((n) => chip(`can:${n.id}`, n.title.slice(0, 40), "en el lienzo"))}
             </ul>
+            <p className="text-[11px] leading-relaxed text-andros-muted">
+              Si una ficha está conectada a otros nodos, la IA recibe también su resumen (áreas, responsables, fechas y
+              pendientes) y puedes llenarla aunque no pegues texto.
+            </p>
           </>
         )}
       </div>

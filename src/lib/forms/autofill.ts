@@ -20,6 +20,8 @@ export const AUTOFILL_MAX_REQUEST_SHEETS = 6;
 /** Fichas que puede devolver (un mismo formato puede repetirse: p. ej. 2 pacientes). */
 export const AUTOFILL_MAX_RESULT_SHEETS = 8;
 export const AUTOFILL_MAX_FIELDS = 40;
+/** (Sprint 24) Resumen de los nodos conectados a las fichas del lienzo. */
+export const AUTOFILL_MAX_CONTEXT_CHARS = 3000;
 
 export interface AutofillFieldSchema {
   key: string;
@@ -44,6 +46,8 @@ export interface AutofillRequestBody {
   sheets: AutofillSheetSchema[];
   /** Fecha local del usuario (AAAA-MM-DD) para resolver «mañana», «en 1 semana»… */
   today: string;
+  /** (Sprint 24) Resumen de los nodos conectados (también son datos válidos). */
+  context?: string;
   apiKey?: string;
 }
 

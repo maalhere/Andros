@@ -56,6 +56,7 @@ export const ChatButton: React.FC = () => {
       onClick={() => openWorkspaceChat(inbox > 0 ? "inbox" : "chat")}
       aria-label={badge > 0 ? `Chat del lienzo (${badge} sin leer)` : "Chat del lienzo"}
       title="Chat del lienzo"
+      data-tour="chat"
       className="relative w-11 h-11 md:w-9 md:h-9 rounded-xl bg-andros-surface backdrop-blur-md border border-andros-border text-andros-muted hover:text-andros-primary shadow-sm active:scale-[0.96] spring-micro flex items-center justify-center"
     >
       <MessagesSquare className="w-4 h-4" aria-hidden="true" />

@@ -53,6 +53,7 @@ import { CommentsDrawer } from "@/components/comments/CommentsDrawer";
 import { useCommentsSync } from "@/lib/comments/useCommentsSync";
 import { useExternalCalendarReturn } from "@/lib/calendar/calendarReturn";
 import { useCalendarStore } from "@/store/useCalendarStore";
+import { useNodeAutoFillOnConnect } from "@/lib/forms/nodeFillActions";
 
 // Paneles pesados (Oráculo con Markdown + KaTeX, Biblioteca y Arena): fuera del
 // JavaScript inicial. Se descargan la primera vez que se abren.
@@ -109,6 +110,8 @@ export default function AndrosWorkspacePage() {
   useCdeSync();
   // Vuelta de «Conectar Google Calendar» o «Conectar cuenta de Microsoft» (token temporal en esta pestaña).
   useExternalCalendarReturn();
+  // (Sprint 24) Al conectar por primera vez una ficha vacía, se llena con los datos del nodo (sin IA).
+  useNodeAutoFillOnConnect();
   const showLanding = useLandingStore((s) => s.phase !== "workspace");
   const oracleOpen = useWorkspaceStore((s) => s.isOracleModalOpen);
   const libraryMounted = useOpenedOnce(useLibraryStore((s) => s.open));
@@ -195,7 +198,7 @@ export default function AndrosWorkspacePage() {
       <Toaster />
       <ShortcutsGuideModal />
 
-      {/* Tutorial guiado de 5 pasos (en Modo Simple solo desde ? / ⋯ → Ver tutorial; en Experto, también la 1.ª vez en un lienzo vacío) */}
+      {/* Tutorial de inicio de 5 pasos: solo para cada cuenta nueva (o que aún no lo hizo); se repite desde ⋯, ? o ⌘K */}
       <OnboardingTour isMobile={isMobile} />
 
       {/* Portada: entrada para quien no tiene sesión, o al pulsar el logo de Andros */}

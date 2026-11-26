@@ -4,7 +4,9 @@ import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
+  AlarmClockPlus,
   Bot,
+  GraduationCap,
   CalendarDays,
   ClipboardList,
   ClipboardPaste,
@@ -41,6 +43,8 @@ import {
   Terminal,
 } from "lucide-react";
 import { useFormulaCreatorStore } from "@/store/useFormulaCreatorStore";
+import { usePendingStore } from "@/store/usePendingStore";
+import { useOnboardingStore } from "@/store/useOnboardingStore";
 import { useCommandPaletteStore } from "@/store/useCommandPaletteStore";
 import { focusNodeOnScreen } from "@/lib/canvas/focusNode";
 import { NODE_ARCHETYPE_LABELS, useWorkspaceStore } from "@/store/useWorkspaceStore";
@@ -117,6 +121,7 @@ const WRITE_COMMAND_IDS = new Set([
   "new-formula",
   "cut-card",
   "paste-card",
+  "quick-alarm",
 ]);
 
 /** Herramientas técnicas que no se muestran en Modo Simple (Sprint 19). */
@@ -422,6 +427,24 @@ const PaletteDialog: React.FC<{ reduced: boolean; onClose: () => void }> = ({ re
         icon: <CircleHelp className="w-4 h-4" />,
         shortcut: "?",
         run: () => useShortcutsGuideStore.getState().openGuide(),
+      },
+      {
+        id: "quick-alarm",
+        group: "Acciones",
+        label: "+ Alarma rápida",
+        hint: "Pendiente en Rojo con vencimiento, @Área y nodo vinculado",
+        keywords: "alarma pendiente recordatorio vencimiento tarea rojo verde acuerdo",
+        icon: <AlarmClockPlus className="w-4 h-4" />,
+        run: () => usePendingStore.getState().setMode("new"),
+      },
+      {
+        id: "tutorial",
+        group: "Acciones",
+        label: "Ver tutorial de inicio",
+        hint: "Recorrido guiado de 5 pasos (menos de 1 minuto)",
+        keywords: "tutorial ayuda recorrido guia inicio demostracion aprender",
+        icon: <GraduationCap className="w-4 h-4" />,
+        run: () => useOnboardingStore.getState().start(),
       },
       {
         id: "plans",
