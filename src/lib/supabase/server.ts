@@ -19,6 +19,8 @@ export interface RequestUser {
   /** Cliente con la sesión de quien llama (RLS activa). */
   supabase: SupabaseClient;
   userId: string;
+  /** Correo de la cuenta (para precargar el pago); `null` si no hay. */
+  email: string | null;
 }
 
 const NO_PERSIST = { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } as const;
@@ -37,7 +39,7 @@ export async function getRequestUser(request: NextRequest): Promise<RequestUser 
     // `getUser` valida el JWT contra Supabase Auth (no basta con decodificarlo).
     const { data, error } = await supabase.auth.getUser(bearer);
     if (error || !data.user) return null;
-    return { supabase, userId: data.user.id };
+    return { supabase, userId: data.user.id, email: data.user.email ?? null };
   }
 
   const supabase = createServerClient(env.url, env.anonKey, {
@@ -49,7 +51,7 @@ export async function getRequestUser(request: NextRequest): Promise<RequestUser 
   });
   const { data, error } = await supabase.auth.getUser();
   if (error || !data.user) return null;
-  return { supabase, userId: data.user.id };
+  return { supabase, userId: data.user.id, email: data.user.email ?? null };
 }
 
 /** Cliente de servicio (salta la RLS). `null` si falta la clave en el servidor. */

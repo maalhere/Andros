@@ -169,7 +169,7 @@ export const AiChatNodeView: React.FC<AiChatNodeProps> = ({ node }) => {
         <button
           type="button"
           onClick={() => useAiProvidersStore.getState().setKeysModalOpen(true)}
-          title={hasUserKey ? "Usando tu clave propia" : data.provider === "gemini" ? "Usando el Gemini del servidor" : "Añade tu clave"}
+          title={hasUserKey ? "Usando tu clave propia" : data.provider === "gemini" ? "Usando la IA incluida en Andros" : "Añade tu clave"}
           aria-label="Claves IA"
           className={`h-7 w-7 shrink-0 rounded-lg border flex items-center justify-center spring-micro ${
             hasUserKey
@@ -232,7 +232,7 @@ export const AiChatNodeView: React.FC<AiChatNodeProps> = ({ node }) => {
         {messages.length === 0 && !thinking ? (
           <p className="px-3 py-3 text-[12px] leading-relaxed text-andros-muted">
             Pregunta algo: la IA leerá el contenido de los nodos que conectes a este (notas, piezas 3D, código, enlaces u
-            otras IA). También puedes importar un chat de ChatGPT, Claude o Gemini.
+            otras IA). También puedes importar un chat de IA externo.
           </p>
         ) : expanded ? (
           <div className="max-h-80 overflow-y-auto px-3 py-2.5 space-y-2.5">
@@ -323,7 +323,7 @@ export const AiChatNodeView: React.FC<AiChatNodeProps> = ({ node }) => {
           type="button"
           className={smallBtn}
           onClick={() => setImportOpen((v) => !v)}
-          title={data.source ? "Actualizar o añadir mensajes de la conversación externa" : "Importar un chat de ChatGPT, Claude o Gemini"}
+          title={data.source ? "Actualizar o añadir mensajes de la conversación externa" : "Importar un chat de IA externo"}
         >
           {data.source ? <RefreshCw className="w-3.5 h-3.5" /> : <FileUp className="w-3.5 h-3.5" />}
           {data.source ? "Actualizar" : "Importar"}
@@ -432,7 +432,7 @@ const ImportPanel: React.FC<{
     const result = parseChatImport(raw, name);
     if (!result) {
       setParsed(null);
-      setMessage("No encontré mensajes. Pega la conversación con sus turnos (por ejemplo «You said:» / «ChatGPT said:») o sube el JSON exportado.");
+      setMessage("No encontré mensajes. Pega la conversación con sus turnos (por ejemplo «You said:» / «Assistant said:») o sube el JSON exportado.");
       return null;
     }
     setParsed(result);
@@ -500,7 +500,7 @@ const ImportPanel: React.FC<{
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && void importLink()}
-            placeholder="https://chatgpt.com/share/… · claude.ai/share/… · gemini.google.com/share/…"
+            placeholder="Enlace público compartido de la conversación (https://…/share/…)"
             className="w-full h-8 px-2.5 rounded-lg bg-andros-card border border-andros-border focus:border-andros-accent outline-none text-[11px] font-mono text-andros-primary placeholder:text-andros-muted"
           />
           <button
@@ -523,7 +523,7 @@ const ImportPanel: React.FC<{
               setParsed(null);
             }}
             rows={4}
-            placeholder={"Pega aquí la conversación (texto o Markdown)…\n\nYou said: …\nChatGPT said: …"}
+            placeholder={"Pega aquí la conversación (texto o Markdown)…\n\nYou said: …\nAssistant said: …"}
             className="w-full resize-none rounded-lg bg-andros-card border border-andros-border focus:border-andros-accent outline-none px-2.5 py-2 text-[11px] font-mono text-andros-primary placeholder:text-andros-muted"
           />
           {parsed && parsed.conversations.length > 1 && (
@@ -569,7 +569,7 @@ const ImportPanel: React.FC<{
             </button>
           </div>
           <p className="text-[10px] leading-snug text-andros-muted">
-            Acepta texto copiado, Markdown o el JSON exportado de ChatGPT, Claude o Gemini (Google Takeout).
+            Acepta texto copiado, Markdown o el JSON de exportación oficial de tu asistente de IA.
           </p>
         </div>
       )}

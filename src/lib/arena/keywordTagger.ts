@@ -79,7 +79,7 @@ const SKILL_PATTERNS: Record<string, string[]> = {
   ETABS: ["etabs"],
   "Machine Learning": ["machine learning", "aprendizaje automatico", "deep learning", "redes neuronales"],
   LaTeX: ["latex"],
-  Excel: ["excel", "hoja de calculo", "spreadsheet"],
+  "Hoja de cálculo": ["hoja de calculo", "hojas de calculo", "spreadsheet", "excel"],
   SQL: ["sql", "postgres", "postgresql"],
   ROS: ["ros", "ros2"],
   PLC: ["plc"],

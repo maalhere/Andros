@@ -73,13 +73,14 @@ function announceAccess(workspaceId: string, userId: string, role: MemberRole | 
 }
 
 /** Botón de la barra superior (escritorio). */
-export const ShareWorkspaceButton: React.FC = () => (
+/** `showOnMobile` (Modo Simple): también en la barra del teléfono, con 44 px táctiles. */
+export const ShareWorkspaceButton: React.FC<{ showOnMobile?: boolean }> = ({ showOnMobile = false }) => (
   <button
     type="button"
     onClick={() => useSocialStore.getState().setShareOpen(true)}
     aria-label="Compartir espacio"
     title="Compartir espacio"
-    className="hidden md:flex w-9 h-9 rounded-xl bg-andros-surface backdrop-blur-md border border-andros-border text-andros-muted hover:text-andros-primary shadow-sm active:scale-[0.96] spring-micro items-center justify-center"
+    className={`${showOnMobile ? "flex w-11 h-11" : "hidden md:flex"} md:w-9 md:h-9 rounded-xl bg-andros-surface backdrop-blur-md border border-andros-border text-andros-muted hover:text-andros-primary shadow-sm active:scale-[0.96] spring-micro items-center justify-center`}
   >
     <Share2 className="w-4 h-4" aria-hidden="true" />
   </button>
@@ -188,7 +189,7 @@ const GuestLinkSection: React.FC<{ workspaceId: string; workspaceName: string }>
           </h3>
           <p className="mt-0.5 text-[11px] leading-relaxed text-andros-muted">
             Cualquiera con el enlace ve el tablero en solo lectura, sin cuenta: ideal para
-            voluntarios, clientes o directivos. Función Pro, abierta durante el acceso anticipado.
+            voluntarios, clientes o directivos. Incluido en todos los planes.
           </p>
         </div>
         {!setupMissing && (
@@ -468,7 +469,7 @@ export const ShareWorkspaceModal: React.FC = () => {
     >
       {!user || !workspaceId ? (
         <p className="text-sm text-andros-muted">
-          Inicia sesión con Google y abre un espacio en la nube para compartirlo.
+          Inicia sesión y abre un espacio en la nube para compartirlo.
         </p>
       ) : (
         <div className="space-y-5">
@@ -499,14 +500,14 @@ export const ShareWorkspaceModal: React.FC = () => {
           {/* Vista Invitado: solo el dueño la activa */}
           {isOwner && <GuestLinkSection workspaceId={workspaceId} workspaceName={workspaceName} />}
 
-          {/* Estudio de exportación: PDF, Word, PowerPoint y WhatsApp */}
+          {/* Estudio de exportación: PDF, .docx, .pptx y resumen para mensajería */}
           <section aria-labelledby="andros-share-export" className="space-y-1.5 pt-4 border-t border-andros-border">
             <h3 id="andros-share-export" className="text-xs font-semibold text-andros-primary">
               Exportar como documento
             </h3>
             <p className="text-[11px] leading-relaxed text-andros-muted">
-              PDF imprimible, Word / Google Docs, PowerPoint / Google Slides o un resumen listo para
-              pegar en un grupo de WhatsApp, con o sin síntesis de IA.
+              PDF imprimible, documento .docx, presentación .pptx o un resumen listo para pegar en
+              el grupo de mensajería de tu equipo, con o sin síntesis de IA.
             </p>
             <button
               type="button"

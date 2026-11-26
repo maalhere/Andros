@@ -13,6 +13,7 @@ import { checkFreeQuota, recordFreeQuery } from "@/store/useAiQuotaStore";
 import { collectUpstreamContext } from "@/lib/canvas/contextGraph";
 import { AI_PROVIDER_LABELS, type NodeChatResponse } from "@/lib/ai/providers";
 import { PLATFORM_LABELS, turnKey, type ImportedTurn } from "@/lib/ai/chatImport";
+import { sessionAuthHeader } from "@/lib/supabase/authHeader";
 import type {
   AiChatEngineeringNode,
   AiChatMessage,
@@ -93,7 +94,7 @@ export async function sendAiNodeTurn(nodeId: string, text: string, opts: { resyn
   try {
     const res = await fetch("/api/ai/node-chat", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(await sessionAuthHeader()) },
       body: JSON.stringify({
         provider,
         model,

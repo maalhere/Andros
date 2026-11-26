@@ -30,7 +30,7 @@ const MAX_DEPTH = 6;
 
 export const MODEL_3D_EXTENSIONS = new Set(["stl", "obj", "3mf"]);
 
-export const AI_PROVIDER_NAMES = { gemini: "Gemini", openai: "ChatGPT", anthropic: "Claude" } as const;
+export const AI_PROVIDER_NAMES = { gemini: "Gemini", openai: "OpenAI", anthropic: "Claude" } as const;
 
 /** Recorta a `max` caracteres en un salto de línea (o espacio) limpio y añade «…». */
 export function clipCleanly(text: string, max: number): string {

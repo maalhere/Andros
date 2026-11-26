@@ -69,7 +69,30 @@ export function buildGuestLink(token: string): string {
   return `${origin}/ver/${encodeURIComponent(token)}`;
 }
 
+/** La función RPC aún no existe (base sin ejecutar el Sprint 17B de schema.sql). */
+function isMissingFunction(error: { code?: string } | null): boolean {
+  return error?.code === "PGRST202" || error?.code === "42883";
+}
+
+/** `{ enabled, token }` devuelto por las RPC del dueño (NULL = no eres el dueño). */
+function shareFromRpc(data: unknown): PublicShareState | null {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+  const row = data as { enabled?: unknown; token?: unknown };
+  return { enabled: row.enabled === true, token: typeof row.token === "string" ? row.token : null };
+}
+
+/**
+ * (Sprint 17B) Solo el DUEÑO lee el token: la columna está oculta para los
+ * miembros y se pide con `get_workspace_public_share` (SECURITY DEFINER).
+ */
 export async function readPublicShare(supabase: SupabaseClient, workspaceId: string): Promise<PublicShareState> {
+  const rpc = await supabase.rpc("get_workspace_public_share", { ws_id: workspaceId });
+  if (!rpc.error) return shareFromRpc(rpc.data) ?? { enabled: false, token: null };
+  if (!isMissingFunction(rpc.error)) {
+    if (isSetupError(rpc.error)) throw new PublicShareSetupError();
+    throw new Error(rpc.error.message);
+  }
+  // Base anterior al Sprint 17B: lectura directa (sigue funcionando hasta migrar).
   const { data, error } = await supabase
     .from("workspaces")
     .select("public_share_token, public_share_enabled")
@@ -84,7 +107,7 @@ export async function readPublicShare(supabase: SupabaseClient, workspaceId: str
 /**
  * Activa, desactiva o renueva el enlace. Al activar sin token (o con
  * `rotate`) se genera uno nuevo; al desactivar se conserva para poder
- * reactivarlo con la misma dirección.
+ * reactivarlo con la misma dirección. Solo el dueño (`set_workspace_public_share`).
  */
 export async function updatePublicShare(
   supabase: SupabaseClient,
@@ -93,6 +116,21 @@ export async function updatePublicShare(
   next: { enabled: boolean; rotate?: boolean }
 ): Promise<PublicShareState> {
   const token = next.rotate || (next.enabled && !current.token) ? generateShareToken() : current.token;
+  const rpc = await supabase.rpc("set_workspace_public_share", {
+    ws_id: workspaceId,
+    share_enabled: next.enabled,
+    share_token: token,
+  });
+  if (!rpc.error) {
+    const state = shareFromRpc(rpc.data);
+    if (!state) throw new Error("Solo el dueño del espacio puede cambiar su enlace público.");
+    return state;
+  }
+  if (!isMissingFunction(rpc.error)) {
+    if (isSetupError(rpc.error)) throw new PublicShareSetupError();
+    throw new Error(rpc.error.message);
+  }
+  // Base anterior al Sprint 17B: escritura directa (sigue funcionando hasta migrar).
   const { data, error } = await supabase
     .from("workspaces")
     .update({ public_share_enabled: next.enabled, public_share_token: token })

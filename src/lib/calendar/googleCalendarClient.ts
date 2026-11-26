@@ -16,8 +16,6 @@
 // momento el Nivel 1: enlace «Abrir en Google Calendar» y archivo .ics.
 // ============================================================================
 
-import { useEffect } from "react";
-import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { signInWithGoogle } from "@/hooks/useCloudSync";
 import { useCalendarStore } from "@/store/useCalendarStore";
 import { useCloudStore } from "@/store/useCloudStore";
@@ -33,6 +31,7 @@ import { visibleSpawnPoint } from "@/lib/canvas/quickAdd";
 import { focusNodeOnScreen } from "@/lib/canvas/focusNode";
 import { FORM_MAX_FIELDS, FORM_SHEET_CODE_TAG, newFormId, toFieldKey, uniqueFieldKeys } from "@/lib/forms/formSchema";
 import { formatEventDate, formatEventTime, type CalendarEvent } from "./extractEvents";
+import { CALENDAR_RETURN_PARAM, markCalendarPending, type CalendarProvider } from "./calendarPending";
 import {
   GOOGLE_CALENDAR_SCOPE,
   IMPORT_WINDOW_DAYS,
@@ -40,13 +39,10 @@ import {
   type ImportedCalendarEvent,
 } from "./googleEvents";
 
-const PENDING_KEY = "andros.calendar.pending";
 const TOKEN_KEY = "andros.calendar.token";
 /** Los tokens de Google duran 60 min: se usan como mucho 50 por seguridad. */
 const TOKEN_TTL_MS = 50 * 60_000;
-const PENDING_TTL_MS = 10 * 60_000;
-/** Parámetro con el que /auth/callback devuelve al lienzo tras conectar. */
-export const CALENDAR_RETURN_PARAM = "calendario";
+export { CALENDAR_RETURN_PARAM } from "./calendarPending";
 
 export const ISSUE_MESSAGES: Record<GoogleCalendarIssue | "not_connected", string> = {
   not_connected: "Conecta Google Calendar para enviar o importar eventos.",
@@ -87,7 +83,8 @@ function readToken(): { token: string; expiresAt: number } | null {
   }
 }
 
-function saveToken(token: string): void {
+/** Guarda el token de Google recibido al volver de «Conectar» (lo llama calendarReturn). */
+export function saveGoogleToken(token: string): void {
   const expiresAt = Date.now() + TOKEN_TTL_MS;
   try {
     sessionStorage.setItem(TOKEN_KEY, JSON.stringify({ token, expiresAt }));
@@ -99,6 +96,12 @@ function saveToken(token: string): void {
 }
 
 let memoryToken: { token: string; expiresAt: number } | null = null;
+
+/** Al montar la página: refleja en el estado un permiso que siga vigente en esta pestaña. */
+export function restoreGoogleConnection(): void {
+  const stored = readToken();
+  if (stored) useCalendarStore.getState().setConnection(stored.expiresAt);
+}
 
 export function getCalendarToken(): string | null {
   const stored = readToken() ?? (memoryToken && memoryToken.expiresAt > Date.now() ? memoryToken : null);
@@ -120,84 +123,14 @@ export function forgetCalendarToken(): void {
   useCalendarStore.getState().setConnection(null);
 }
 
-function markPending(): void {
-  try {
-    localStorage.setItem(PENDING_KEY, String(Date.now()));
-  } catch {
-    /* sin almacenamiento: se acepta igualmente el token si llega */
-  }
-}
-
-function takePending(): boolean {
-  try {
-    const at = Number(localStorage.getItem(PENDING_KEY));
-    localStorage.removeItem(PENDING_KEY);
-    return Number.isFinite(at) && Date.now() - at < PENDING_TTL_MS;
-  } catch {
-    return false;
-  }
-}
-
 /** Pide el permiso incremental de Google Calendar (sale a Google y vuelve). */
 export async function connectGoogleCalendar(): Promise<void> {
   if (!useCloudStore.getState().user) {
     toast({ message: "Inicia sesión con Google para conectar tu calendario.", tone: "error" });
     return;
   }
-  markPending();
+  markCalendarPending("google");
   await signInWithGoogle({ scopes: GOOGLE_CALENDAR_SCOPE, next: `/?${CALENDAR_RETURN_PARAM}=1` });
-}
-
-/**
- * Montar UNA vez (page.tsx): recoge el token al volver de Google (web o app
- * de Windows) y abre el panel de calendario si se volvió desde «Conectar».
- */
-export function useGoogleCalendarReturn(): void {
-  useEffect(() => {
-    const supabase = getSupabaseBrowserClient();
-    if (readToken()) useCalendarStore.getState().setConnection(readToken()?.expiresAt ?? null);
-
-    const url = new URL(window.location.href);
-    const returned = url.searchParams.has(CALENDAR_RETURN_PARAM);
-    if (returned) {
-      url.searchParams.delete(CALENDAR_RETURN_PARAM);
-      window.history.replaceState(null, "", url.pathname + url.search + url.hash);
-    }
-    if (!supabase) return;
-
-    const accept = (providerToken: string | null | undefined): boolean => {
-      if (!providerToken || !/^[\w.~+/=-]{20,4096}$/.test(providerToken)) return false;
-      saveToken(providerToken);
-      return true;
-    };
-
-    let cancelled = false;
-    void supabase.auth.getSession().then(({ data }) => {
-      if (cancelled || !returned) return;
-      const pending = takePending();
-      if (pending && accept(data.session?.provider_token)) {
-        toast({ message: "Google Calendar conectado en esta pestaña.", tone: "success" });
-      } else if (pending) {
-        toast({ message: ISSUE_MESSAGES.scope_missing, tone: "error" });
-      }
-      useCalendarStore.getState().openModal(null);
-    });
-
-    // App de Windows: la sesión llega por exchangeCodeForSession en esta ventana.
-    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event !== "SIGNED_IN" || !session?.provider_token) return;
-      if (!takePending()) return;
-      if (accept(session.provider_token)) {
-        toast({ message: "Google Calendar conectado en esta ventana.", tone: "success" });
-        useCalendarStore.getState().openModal(null);
-      }
-    });
-
-    return () => {
-      cancelled = true;
-      sub.subscription.unsubscribe();
-    };
-  }, []);
 }
 
 // ----------------------------------------------------------------------------
@@ -274,18 +207,28 @@ function lineFor(event: ImportedCalendarEvent): string {
   return `- ${when} — ${event.title}${event.location ? ` (${event.location})` : ""}`;
 }
 
-export function insertImportedEvents(events: ImportedCalendarEvent[], as: "timeline" | "sheet"): string | null {
+const PROVIDER_NAMES: Record<CalendarProvider, string> = {
+  google: "Google Calendar",
+  microsoft: "Microsoft Calendar",
+};
+
+export function insertImportedEvents(
+  events: ImportedCalendarEvent[],
+  as: "timeline" | "sheet",
+  provider: CalendarProvider = "google"
+): string | null {
   if (events.length === 0) return null;
+  const providerName = PROVIDER_NAMES[provider];
   const ws = useWorkspaceStore.getState();
   const position = visibleSpawnPoint();
   let id: string;
 
   if (as === "timeline") {
-    const text = [`# Próximos ${IMPORT_WINDOW_DAYS} días (Google Calendar)`, ...events.map(lineFor)].join("\n");
+    const text = [`# Próximos ${IMPORT_WINDOW_DAYS} días (${providerName})`, ...events.map(lineFor)].join("\n");
     const { textBlocks, checklistItems } = parseAiTextContent(text);
     id = ws.aiCreateNode({
       type: "sketch-note-node",
-      title: "Cronograma · Google Calendar",
+      title: `Cronograma · ${providerName}`,
       codeTag: "CRONOGRAMA",
       position,
       sketchNoteData: {
@@ -312,7 +255,7 @@ export function insertImportedEvents(events: ImportedCalendarEvent[], as: "timel
     );
     id = ws.aiCreateNode({
       type: "form-sheet-node",
-      title: "Agenda · Google Calendar",
+      title: `Agenda · ${providerName}`,
       codeTag: FORM_SHEET_CODE_TAG,
       position,
       formSheetData: { templateId: "custom", category: "Agenda", fields, attachments: [] },
@@ -323,7 +266,7 @@ export function insertImportedEvents(events: ImportedCalendarEvent[], as: "timel
   ws.setActiveMobileSheet("none");
   requestAnimationFrame(() => focusNodeOnScreen(id));
   toast({
-    message: `${events.length} ${events.length === 1 ? "evento importado" : "eventos importados"} de Google Calendar.`,
+    message: `${events.length} ${events.length === 1 ? "evento importado" : "eventos importados"} de ${providerName}.`,
     tone: "success",
     action: { label: "Deshacer", onAction: () => useWorkspaceStore.getState().removeNode(id) },
   });

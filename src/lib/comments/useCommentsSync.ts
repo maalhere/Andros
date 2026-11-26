@@ -3,7 +3,8 @@
 // ============================================================================
 // ANDROS — CARGA DE COMENTARIOS Y ROLES DEL ESPACIO ABIERTO (Sprint 16)
 // Al abrir un espacio de la nube lee sus comentarios y los roles de sus
-// miembros. Después, la sala en vivo los mantiene al día (canvasSync); por si
+// miembros. Después, cada aviso de la sala en vivo (`comment:*`,
+// `access:changed`) provoca una nueva lectura con tu RLS (Sprint 17B); por si
 // no hay sala (Realtime apagado) se vuelve a leer al volver a la pestaña y
 // cada 2 minutos mientras está visible. Sin sesión: cajón en modo «idle».
 // ============================================================================
@@ -13,7 +14,7 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { useCloudStore } from "@/store/useCloudStore";
 import { useCommentsStore } from "@/store/useCommentsStore";
 import { setKnownMemberRoles } from "@/lib/access/memberRoles";
-import { CommentsSetupError, listComments, listMemberRoles } from "./repository";
+import { CommentsSetupError, listComments, loadWorkspaceAccess } from "./repository";
 
 const REFRESH_MS = 120_000;
 
@@ -36,13 +37,18 @@ export async function refreshComments(options: { quiet?: boolean } = {}): Promis
     setKnownMemberRoles(workspaceId, []);
   }
   if (!options.quiet || store.status !== "ready") store.setStatus("loading", null);
+  // (Sprint 17B) Dueño y roles verificados: se leen aunque la tabla de
+  // comentarios aún no exista, así la sala en vivo no depende de ella.
+  const accessPromise = loadWorkspaceAccess(supabase, workspaceId)
+    .then((access) => {
+      if (token !== loadToken || useCloudStore.getState().workspaceId !== workspaceId) return;
+      setKnownMemberRoles(workspaceId, access.roles, access.ownerId);
+    })
+    .catch(() => undefined);
   try {
-    const [comments, roles] = await Promise.all([
-      listComments(supabase, workspaceId),
-      listMemberRoles(supabase, workspaceId),
-    ]);
+    const comments = await listComments(supabase, workspaceId);
+    await accessPromise;
     if (token !== loadToken || useCloudStore.getState().workspaceId !== workspaceId) return;
-    setKnownMemberRoles(workspaceId, roles);
     useCommentsStore.getState().hydrate(workspaceId, comments);
     useCommentsStore.getState().setStatus("ready", null);
   } catch (error) {

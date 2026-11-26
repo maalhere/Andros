@@ -509,6 +509,47 @@ export interface FormSheetPayload {
   batchLabel?: string;
   /** `true` si la llenó el auto-llenado IA (se muestra «Llenada con IA»). */
   aiFilled?: boolean;
+  /** (Sprint 18) Área de trabajo nominal responsable de la ficha («Logística»…). */
+  area?: string;
+  /** (Sprint 18) Presente solo en las Fichas de Resolución (semáforo Rojo / Verde). */
+  resolution?: ResolutionMeta;
+}
+
+// ----------------------------------------------------------------------------
+// 6e-bis. (Sprint 18) FICHA DE RESOLUCIÓN — trazabilidad estilo CDE
+//     Una `form-sheet-node` con `resolution`: código correlativo (RES-001),
+//     estado Rojo «Pendiente» / Verde «Completado», área y persona responsable,
+//     tarjetas afectadas e historial de quién y cuándo la pasó a Verde.
+// ----------------------------------------------------------------------------
+
+export type ResolutionStatus = "pending" | "done";
+
+export interface ResolutionEvent {
+  /** ISO 8601. */
+  at: string;
+  /** Nombre visible de quien hizo el cambio. */
+  by: string;
+  action: "created" | "completed" | "reopened";
+}
+
+export interface ResolutionMeta {
+  /** Código correlativo del espacio: «RES-001». */
+  code: string;
+  status: ResolutionStatus;
+  /** Área nominal responsable («Logística») o cadena vacía. */
+  area: string;
+  assigneeName: string;
+  assigneeId: string | null;
+  description: string;
+  /** Tarjetas a las que afecta (también unidas con cables «Afecta a»). */
+  affectedNodeIds: string[];
+  /** Alertas unificadas que esta ficha pasó a seguir (dejan de mostrarse como alerta). */
+  sourceAlertIds: string[];
+  createdAt: string;
+  createdBy: string;
+  completedAt: string | null;
+  completedBy: string | null;
+  history: ResolutionEvent[];
 }
 
 // ----------------------------------------------------------------------------

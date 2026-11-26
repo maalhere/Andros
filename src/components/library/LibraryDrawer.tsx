@@ -54,8 +54,8 @@ type Tab = LibraryScope | "saved";
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: "papers", label: "Papers", icon: <BookOpen className="w-3.5 h-3.5" /> },
   { id: "codes", label: "Normas", icon: <Scale className="w-3.5 h-3.5" /> },
-  { id: "youtube", label: "YouTube", icon: <Play className="w-3.5 h-3.5" /> },
-  { id: "linkedin", label: "LinkedIn", icon: <User className="w-3.5 h-3.5" /> },
+  { id: "youtube", label: "Videos", icon: <Play className="w-3.5 h-3.5" /> },
+  { id: "linkedin", label: "Red profesional", icon: <User className="w-3.5 h-3.5" /> },
   { id: "saved", label: "Guardadas", icon: <BookmarkCheck className="w-3.5 h-3.5" /> },
 ];
 
@@ -79,7 +79,7 @@ const KIND_LABELS: Record<LibrarySource["kind"], string> = {
   regulation: "Regulación",
   standard: "Norma técnica",
   video: "Video",
-  linkedin: "LinkedIn",
+  linkedin: "Publicación profesional",
 };
 
 // ----------------------------------------------------------------------------
@@ -277,7 +277,7 @@ const LibraryContent: React.FC<{ handleProps: React.HTMLAttributes<HTMLDivElemen
             <div className="min-w-0">
               <h2 className="text-[13px] font-semibold text-andros-primary leading-tight">Biblioteca de fuentes</h2>
               <p className="text-[10px] font-mono text-andros-muted truncate">
-                OpenAlex · arXiv · eCFR · Crossref · YouTube — gratis y citable
+                Fuentes abiertas: OpenAlex · arXiv · eCFR · Crossref — gratis y citable
               </p>
             </div>
           </div>
@@ -335,7 +335,7 @@ const LibraryContent: React.FC<{ handleProps: React.HTMLAttributes<HTMLDivElemen
                     ? "Tema, título o DOI (en inglés da más resultados)"
                     : tab === "codes"
                       ? "Ej: machine guarding, lockout, drones, ASTM D638"
-                      : "Pega un enlace de YouTube o escribe un tema"
+                      : "Pega el enlace de un video o escribe un tema"
                 }
                 aria-label="Buscar fuentes"
                 className="flex-1 min-w-0 bg-transparent text-xs text-andros-primary placeholder:text-andros-muted outline-none"

@@ -233,7 +233,18 @@ export function baseBlueprintFor(phrase: string): BoardBlueprint {
 // ----------------------------------------------------------------------------
 
 export const CUSTOM_TEMPLATES_KEY = "andros_custom_templates";
-export const MAX_CUSTOM_TEMPLATES = 12;
+/**
+ * Tope TÉCNICO del almacenamiento local (no del plan): protege el espacio de
+ * localStorage. El tope del plan (1 en Plan Básico, ilimitadas en Pro) se
+ * aplica antes de guardar con `canSaveCustomTemplate` / `guardTemplateSave`.
+ */
+export const MAX_CUSTOM_TEMPLATES = 500;
+
+/** ¿Guardar con este nombre reemplaza una plantilla propia existente? */
+export function replacesCustomTemplate(name: string, current: LocalTemplate[] = loadCustomTemplates()): boolean {
+  const key = name.trim().slice(0, 80).toLowerCase();
+  return Boolean(key) && current.some((t) => t.name.toLowerCase() === key);
+}
 
 export function loadCustomTemplates(): LocalTemplate[] {
   try {

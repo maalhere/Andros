@@ -15,8 +15,8 @@ export const ThemeToggle: React.FC = () => {
       aria-label={theme === "dark" ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
       title={
         theme === "dark"
-          ? "Cambiar a Paper Modernist (Claro)"
-          : "Cambiar a Obsidian Monolith (Oscuro)"
+          ? "Cambiar a modo claro (Papel)"
+          : "Cambiar a modo oscuro (Monolito)"
       }
       className="w-11 h-11 md:w-9 md:h-9 rounded-xl bg-andros-surface backdrop-blur-md border border-andros-border text-andros-muted hover:text-andros-primary shadow-sm active:scale-[0.96] spring-micro flex items-center justify-center"
     >

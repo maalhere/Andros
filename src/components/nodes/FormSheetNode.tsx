@@ -48,6 +48,49 @@ import {
 } from "@/lib/forms/formActions";
 import { formatPhotoBytes, imagesFromClipboard } from "@/lib/forms/imageCompress";
 import type { FormField, FormFieldType, FormPhoto, FormSheetEngineeringNode } from "@/types/workspace";
+import { ResolutionPanel } from "@/components/cde/ResolutionPanel";
+import { AreaBadge } from "@/components/cde/CdeBits";
+import { parseMentions } from "@/lib/cde/mentions";
+import { useMentionDirectory, useMyArea, useMyUserId } from "@/lib/cde/hooks";
+import { areaKey } from "@/lib/cde/areas";
+
+/**
+ * (Sprint 18) Menciones @Área / @usuario escritas en los campos de la ficha:
+ * se resaltan aquí y avisan en la bandeja interna a quien corresponde.
+ */
+const CardMentions: React.FC<{ fields: FormField[] }> = ({ fields }) => {
+  const dir = useMentionDirectory();
+  const uid = useMyUserId();
+  const myArea = useMyArea();
+  const text = fields.map((f) => (typeof f.value === "string" ? f.value : "")).join("\n");
+  if (!text.includes("@")) return null;
+  const { mentions } = parseMentions(text, dir);
+  const people = mentions.filter((m) => m.kind !== "ai");
+  if (people.length === 0) return null;
+  return (
+    <ul aria-label="Menciones en esta ficha" className="flex flex-wrap gap-1">
+      {people.map((m) => {
+        const mine =
+          (m.kind === "user" && m.id === uid) || (m.kind === "area" && Boolean(myArea) && areaKey(m.value) === areaKey(myArea ?? ""));
+        return (
+          <li key={`${m.kind}-${m.value}`}>
+            {m.kind === "area" ? (
+              <AreaBadge area={m.value} className={mine ? "ring-1 ring-andros-accent/50" : ""} />
+            ) : (
+              <span
+                className={`inline-flex px-1.5 py-0.5 rounded-md text-[11px] font-medium text-andros-accent-ink ${
+                  mine ? "bg-andros-accent/20 ring-1 ring-andros-accent/40" : "bg-andros-accent/10"
+                }`}
+              >
+                @{m.value}
+              </span>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+};
 
 // ============================================================================
 // ANDROS — NODO «FICHA ESTRUCTURADA CON FOTOS» (`form-sheet-node`)
@@ -654,10 +697,20 @@ export const FormSheetNodeView: React.FC<{ node: FormSheetEngineeringNode; varia
     void addPhotosToSheet(node.id, "attachments", images);
   };
 
+  // (Sprint 18) Ficha de Resolución: semáforo Rojo/Verde + trazabilidad CDE.
+  if (data.resolution) {
+    return (
+      <div className="py-3" {...presence}>
+        <ResolutionPanel nodeId={node.id} meta={data.resolution} />
+      </div>
+    );
+  }
+
   return (
     <div className="py-3 space-y-3" onPaste={onPaste} {...presence}>
       {/* Resumen de la ficha */}
       <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+        {data.area && <AreaBadge area={data.area} />}
         <span className="px-1.5 py-0.5 rounded bg-andros-border/50 text-andros-primary">{data.category}</span>
         {data.aiFilled && (
           <span className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-andros-border text-andros-muted">
@@ -680,6 +733,8 @@ export const FormSheetNodeView: React.FC<{ node: FormSheetEngineeringNode; varia
           Expediente: <span className="text-andros-primary font-medium">{data.batchLabel}</span>
         </p>
       )}
+      <CardMentions fields={data.fields} />
+
 
       {/* Campos */}
       {data.fields.length === 0 ? (

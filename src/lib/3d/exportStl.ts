@@ -107,7 +107,7 @@ export function downloadPreparedStl(options: {
     blobOrUrl: bytes,
     mimeType: "model/stl",
     description: withSupports
-      ? "Pieza escalada con soportes automáticos fusionados, lista para FlashPrint 5 u otro laminador."
-      : "Pieza escalada y apoyada en la cama, lista para FlashPrint 5 u otro laminador.",
+      ? "Pieza escalada con soportes automáticos fusionados, lista para tu laminador."
+      : "Pieza escalada y apoyada en la cama, lista para tu laminador.",
   });
 }

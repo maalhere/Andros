@@ -46,7 +46,7 @@ export interface TelemetryProps {
   blueprint_generated: { source: "ai" | "template" | "base" };
   form_autofilled: { created?: number; updated?: number; fields?: number };
   formula_created: { source: "preset" | "ai" };
-  deliverable_exported: { type: "pdf" | "docx" | "pptx" | "whatsapp"; ai?: boolean };
+  deliverable_exported: { type: "pdf" | "docx" | "pptx" | "summary"; ai?: boolean };
   guest_link_enabled: { rotated?: boolean };
   voice_joined: { mode: "cloud" | "local" };
   printer_selected: { printer: string; ecosystem: string };

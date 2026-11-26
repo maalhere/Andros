@@ -8,6 +8,7 @@ import { useWorkspaceManagerStore } from "@/store/useWorkspaceManagerStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useTabsBarVisible, useTabsStore } from "@/store/useTabsStore";
 import { createCloudWorkspace, openCloudWorkspace } from "@/hooks/useCloudSync";
+import { useStarterStore } from "@/store/useStarterStore";
 import { SPRING_SNAPPY } from "@/lib/motion";
 import { Kbd } from "@/components/shared/Kbd";
 
@@ -75,7 +76,10 @@ export const WorkspaceTabsBar: React.FC<{ isMobile: boolean }> = ({ isMobile }) 
   }, [activeId, openTabIds.length]);
 
   const addTab = useCallback(() => {
-    void createCloudWorkspace("Nuevo espacio", "");
+    // (Sprint 18) Espacio nuevo = arranque guiado en 3 pasos otra vez.
+    void createCloudWorkspace("Nuevo espacio", "").then((id) => {
+      if (id) useStarterStore.getState().reopen();
+    });
   }, []);
 
   if (!visible) return null;

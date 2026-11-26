@@ -70,8 +70,8 @@ import type {
 // ============================================================================
 
 const ENGINE_LABELS: Record<OracleEngine, string> = {
-  gemini: "Gemini",
-  openai: "OpenAI",
+  gemini: "Gemini", // brand-ok: selector del motor de IA (proveedor real de la respuesta)
+  openai: "OpenAI", // brand-ok: selector del motor de IA (proveedor real de la respuesta)
   local: "Modo local",
 };
 

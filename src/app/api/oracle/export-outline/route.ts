@@ -20,8 +20,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { callGeminiHedged, ProviderFailure, type ModelRequest } from "@/lib/ai/gemini";
-import { DAILY_LIMIT_MESSAGE } from "@/lib/ai/freeQuota";
-import { clientIp, serverQuotaAllows, serverQuotaConsume } from "@/lib/ai/serverQuota";
+import { resolveQuotaCaller, serverQuotaAllows, serverQuotaConsume } from "@/lib/ai/serverQuota";
 import { parseJsonText } from "@/lib/ai/jsonText";
 import {
   INSTRUCTION_MAX_CHARS,
@@ -52,7 +51,7 @@ const COMMON_RULES = `Reglas comunes:
 - Responde SOLO con un objeto JSON válido, sin texto antes ni después.`;
 
 const DOCUMENT_SYSTEM = `Eres el redactor ejecutivo de Andros, un tablero donde las personas organizan proyectos, eventos, consultas e investigaciones con tarjetas (notas, fichas, presupuestos, fórmulas, fotos).
-Convierte las tarjetas en un DOCUMENTO ejecutivo listo para Word / Google Docs / PDF, con esta forma exacta:
+Convierte las tarjetas en un DOCUMENTO ejecutivo listo para exportarse a .docx y PDF, con esta forma exacta:
 {"title": "…", "subtitle": "…", "executiveSummary": ["párrafo", "…"], "sections": [{"heading": "…", "kicker": "…", "paragraphs": ["…"], "bullets": ["…"], "tableRefs": ["C2"], "formulaRefs": ["C4"], "photoIds": ["F1"]}], "keyFindings": ["…"]}
 - "title": título claro del documento (máx. 90 caracteres). "subtitle": una línea de contexto (máx. 140).
 - "executiveSummary": 1 a 3 párrafos breves con el propósito, el estado y las cifras clave.
@@ -64,7 +63,7 @@ Convierte las tarjetas en un DOCUMENTO ejecutivo listo para Word / Google Docs /
 ${COMMON_RULES}`;
 
 const SLIDES_SYSTEM = `Eres el diseñador de presentaciones de Andros, un tablero donde las personas organizan proyectos, eventos, consultas e investigaciones con tarjetas (notas, fichas, presupuestos, fórmulas, fotos).
-Convierte las tarjetas en una PRESENTACIÓN limpia para PowerPoint / Google Slides de ${SLIDES_MIN} a ${SLIDES_MAX} diapositivas, con esta forma exacta:
+Convierte las tarjetas en una PRESENTACIÓN .pptx limpia de ${SLIDES_MIN} a ${SLIDES_MAX} diapositivas, con esta forma exacta:
 {"title": "…", "subtitle": "…", "slides": [{"layout": "cover", "title": "…", "subtitle": "…", "bullets": [], "tableRef": null, "formulaRef": null, "photoId": null}]}
 - Orden: 1 portada ("cover"), 1 de resumen/objetivo ("summary"), de 3 a 6 de contenido ("content"), y 1 de cierre ("closing") con próximos pasos.
 - Para mostrar una tabla usa "tableRef": "C2" (la diapositiva será de tabla); para un cálculo usa "formulaRef": "C4". Incluye la tabla o el cálculo más importante si existe.
@@ -108,10 +107,11 @@ export async function POST(request: NextRequest): Promise<NextResponse<ExportOut
   const apiKey = userKey || process.env.GEMINI_API_KEY?.trim();
   if (!apiKey) return reply({ ok: false, issue: MISSING_KEY });
 
-  const ip = clientIp(request.headers);
+  // (Sprint 21) Tope del plan de quien llama (15 o 150 al día con sesión; por IP sin ella).
   const usingServerKey = !userKey;
-  if (usingServerKey && !serverQuotaAllows(ip)) {
-    return reply({ ok: false, issue: { code: "daily_limit", message: DAILY_LIMIT_MESSAGE } });
+  const quota = usingServerKey ? await resolveQuotaCaller(request) : null;
+  if (quota && !serverQuotaAllows(quota.key, quota.limit)) {
+    return reply({ ok: false, issue: { code: "daily_limit", message: quota.message } });
   }
 
   const refs = photoRefMap(cards);
@@ -144,7 +144,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<ExportOut
       thinkingLevel: "low",
     });
     const json = typeof raw === "string" ? parseJsonText(raw) : raw;
-    if (usingServerKey) serverQuotaConsume(ip);
+    if (quota) serverQuotaConsume(quota.key);
     const { outline, usedFallback } = outlineFromAi(json, mode, title, cards, refs);
     if (usedFallback) console.warn("[export-outline] respuesta de IA vacía o inválida: se usó la estructura local");
     return reply({ ok: true, outline, model: usedFallback ? "local" : model });

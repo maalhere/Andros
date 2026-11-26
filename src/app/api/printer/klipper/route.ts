@@ -14,6 +14,9 @@
 //   · En hosting remoto (Vercel) la ruta se desactiva por completo: el
 //     servidor no está en el Wi-Fi del usuario y no debe tocar redes internas.
 //     Allí Andros ofrece abrir el archivo en Creality Print / OrcaSlicer.
+//   · (Sprint 17B) Apagada por defecto: solo con ANDROS_LOCAL_PRINTER_BRIDGE=1.
+//     Exige `X-Andros-Bridge: 1` y `Origin` = `Host` (bridgeGuard): ninguna
+//     web ajena puede usarla a través de tu navegador (CSRF).
 // ============================================================================
 
 import { NextRequest, NextResponse } from "next/server";
@@ -25,9 +28,7 @@ import {
   readKlipperStatus,
   uploadAndPrintKlipper,
 } from "@/lib/printers/moonrakerNet";
-
-/** En Vercel el servidor no está en el Wi-Fi del usuario. */
-const IS_REMOTE_HOST = Boolean(process.env.VERCEL);
+import { bridgeRequestInfo, checkPrinterBridgeRequest } from "@/lib/printer/bridgeGuard";
 
 /** La subida de un .gcode grande por Wi-Fi puede tardar minutos. */
 export const maxDuration = 300;
@@ -39,14 +40,23 @@ function fail(error: string, status: number) {
   return NextResponse.json({ ok: false, error }, { status });
 }
 
-function remoteRefusal() {
+/** Puente apagado, en Vercel o petición de otro sitio: se rechaza sin tocar la red. */
+function bridgeRefusal(request: NextRequest) {
+  const check = checkPrinterBridgeRequest(bridgeRequestInfo(request), {
+    VERCEL: process.env.VERCEL,
+    ANDROS_LOCAL_PRINTER_BRIDGE: process.env.ANDROS_LOCAL_PRINTER_BRIDGE,
+  });
+  if (check.ok) return null;
   return NextResponse.json(
     {
       ok: false,
-      remote: true,
-      error: "La versión web no puede ver tu Wi-Fi. Usa la app de Windows o abre el archivo en Creality Print / OrcaSlicer.",
+      error: check.remote
+        ? "La versión web no puede ver tu Wi-Fi. Usa la app de Windows o abre el archivo en Creality Print / OrcaSlicer."
+        : check.error,
+      ...(check.remote ? { remote: true } : {}),
+      ...(check.disabled ? { disabled: true } : {}),
     },
-    { status: 409 }
+    { status: check.status }
   );
 }
 
@@ -59,7 +69,8 @@ function connectionError(ip: string, port: number, e: unknown) {
 }
 
 export async function GET(request: NextRequest) {
-  if (IS_REMOTE_HOST) return remoteRefusal();
+  const refusal = bridgeRefusal(request);
+  if (refusal) return refusal;
   const params = request.nextUrl.searchParams;
   const target = parseKlipperTarget(params.get("ip"), params.get("port"));
   if (typeof target === "string") return fail(target, 400);
@@ -74,7 +85,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  if (IS_REMOTE_HOST) return remoteRefusal();
+  const refusal = bridgeRefusal(request);
+  if (refusal) return refusal;
   const params = request.nextUrl.searchParams;
   if (params.get("action") !== "print") return fail('Acción no soportada (usa action=print).', 400);
   const target = parseKlipperTarget(params.get("ip"), params.get("port"));

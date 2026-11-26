@@ -15,19 +15,9 @@
 // ============================================================================
 
 import { KLIPPER_PORTS } from "./registry";
+import { isRfc1918IPv4 } from "../printer/rfc1918";
 
-const OCTET = /^(0|[1-9]\d{0,2})$/;
-
-/** `true` solo para IPv4 literales dentro de RFC 1918 (sin red ni difusión). */
-export function isRfc1918IPv4(raw: string): boolean {
-  if (typeof raw !== "string" || raw.length > 15) return false;
-  const parts = raw.split(".");
-  if (parts.length !== 4 || !parts.every((p) => OCTET.test(p))) return false;
-  const [a, b, c, d] = parts.map(Number);
-  if ([a, b, c, d].some((n) => n > 255)) return false;
-  if (d === 0 || d === 255) return false;
-  return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
-}
+export { isRfc1918IPv4 };
 
 export interface LocalTarget {
   ip: string;

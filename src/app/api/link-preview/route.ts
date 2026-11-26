@@ -8,9 +8,23 @@
 //   etiquetas <title> / <meta citation_*> / og:* de la página.
 // Todo corre en el servidor: nunca se expone una clave ni se hace la petición
 // desde el navegador del usuario (evita problemas de CORS).
+//
+// (Sprint 17B) Anti-SSRF y abuso:
+//   · Exige sesión (getRequestUser). Sin sesión solo se devuelve el id de un
+//     video de YouTube (sin ninguna petición de red).
+//   · Solo http/https, puertos 80/443, sin credenciales en la URL.
+//   · DNS resuelto ANTES de conectar y revalidado al conectar (safeFetch):
+//     se bloquean RFC 1918, loopback, enlace local (169.254/16, fe80::/10),
+//     ULA (fc00::/7) y demás rangos no públicos.
+//   · Redirecciones manuales (máx. 3), cada salto revalidado.
+//   · Límite de tasa por usuario.
 // ============================================================================
 
 import { NextRequest, NextResponse } from "next/server";
+import { getRequestUser } from "@/lib/supabase/server";
+import { checkPreviewUrl } from "@/lib/net/publicAddress";
+import { safeFetch, type SafeFetchResponse } from "@/lib/net/safeFetch";
+import { createRateLimiter } from "@/lib/net/rateLimit";
 import type {
   ResourceGitHubData,
   ResourceLinkPlatform,
@@ -19,6 +33,11 @@ import type {
 
 const FETCH_TIMEOUT_MS = 8000;
 const MAX_HTML_BYTES = 400_000;
+/** Respuestas JSON de YouTube / GitHub: pequeñas. */
+const MAX_JSON_BYTES = 200_000;
+
+/** (Sprint 17B) Máx. 30 vistas previas por minuto y usuario. */
+const previewLimiter = createRateLimiter({ max: 30, windowMs: 60_000 });
 
 interface LinkPreviewResult {
   platform: ResourceLinkPlatform;
@@ -62,32 +81,13 @@ function extractYoutubeVideoId(url: URL): string | null {
   return null;
 }
 
-async function fetchWithTimeout(url: string, headers?: Record<string, string>): Promise<Response> {
-  return fetch(url, {
-    headers,
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    redirect: "follow",
-  });
+/** GET anti-SSRF (safeFetch): DNS validado, redirecciones revalidadas y tamaño limitado. */
+function fetchWithTimeout(url: string, headers?: Record<string, string>, maxBytes = MAX_JSON_BYTES): Promise<SafeFetchResponse> {
+  return safeFetch(url, { headers, timeoutMs: FETCH_TIMEOUT_MS, maxBytes });
 }
 
-/** Lee como máximo `MAX_HTML_BYTES` del cuerpo (páginas de papers pueden ser enormes). */
-async function readLimitedText(res: Response): Promise<string> {
-  const reader = res.body?.getReader();
-  if (!reader) return "";
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  while (total < MAX_HTML_BYTES) {
-    const { done, value } = await reader.read();
-    if (done || !value) break;
-    chunks.push(value);
-    total += value.byteLength;
-  }
-  try {
-    await reader.cancel();
-  } catch {
-    // Ignorado: ya tenemos lo que necesitamos.
-  }
-  return Buffer.concat(chunks.map((c) => Buffer.from(c))).toString("utf-8");
+function parseJson<T>(res: SafeFetchResponse): T {
+  return JSON.parse(res.text) as T;
 }
 
 function decodeHtmlEntities(text: string): string {
@@ -143,11 +143,11 @@ async function previewYoutube(url: URL): Promise<LinkPreviewResult> {
       )}&format=json`
     );
     if (!res.ok) throw new Error(`oEmbed respondió ${res.status}`);
-    const data = (await res.json()) as {
+    const data = parseJson<{
       title?: string;
       author_name?: string;
       thumbnail_url?: string;
-    };
+    }>(res);
     return {
       platform: "youtube",
       title: data.title,
@@ -170,7 +170,8 @@ async function previewGithub(url: URL): Promise<LinkPreviewResult> {
   const parts = url.pathname.split("/").filter(Boolean);
   const [owner, repoRaw] = parts;
   const repo = repoRaw?.replace(/\.git$/, "");
-  if (!owner || !repo) {
+  const safeSegment = (v: string | undefined) => Boolean(v && /^[A-Za-z0-9_.-]{1,100}$/.test(v) && v !== "." && v !== "..");
+  if (!owner || !repo || !safeSegment(owner) || !safeSegment(repo)) {
     return { platform: "github", errorMessage: "Pega la URL de un repositorio: github.com/usuario/repo" };
   }
   try {
@@ -181,13 +182,13 @@ async function previewGithub(url: URL): Promise<LinkPreviewResult> {
     if (!res.ok) {
       throw new Error(res.status === 404 ? "Repositorio no encontrado" : `GitHub respondió ${res.status}`);
     }
-    const data = (await res.json()) as {
+    const data = parseJson<{
       full_name: string;
       description: string | null;
       stargazers_count: number;
       language: string | null;
       html_url: string;
-    };
+    }>(res);
     const github: ResourceGitHubData = {
       owner,
       repo,
@@ -222,12 +223,16 @@ async function scrapeHtmlMeta(targetUrl: string): Promise<{
   siteName?: string;
   imageUrl?: string;
 }> {
-  const res = await fetchWithTimeout(targetUrl, {
-    "User-Agent": "Mozilla/5.0 (compatible; AndrosLinkPreview/1.0; +https://andros.app)",
-    Accept: "text/html,application/xhtml+xml",
-  });
+  const res = await fetchWithTimeout(
+    targetUrl,
+    {
+      "User-Agent": "Mozilla/5.0 (compatible; AndrosLinkPreview/1.0; +https://andros.app)",
+      Accept: "text/html,application/xhtml+xml",
+    },
+    MAX_HTML_BYTES
+  );
   if (!res.ok) throw new Error(`La página respondió ${res.status}`);
-  const html = await readLimitedText(res);
+  const html = res.text;
   return {
     html,
     title: metaOne(html, "og:title") || metaOne(html, "twitter:title") || extractTitleTag(html),
@@ -291,15 +296,30 @@ async function previewGeneric(targetUrl: string, platform: ResourceLinkPlatform)
 export async function GET(request: NextRequest): Promise<NextResponse<LinkPreviewResult>> {
   const rawUrl = request.nextUrl.searchParams.get("url") ?? "";
 
-  let url: URL;
-  try {
-    url = new URL(rawUrl);
-    if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("protocolo inválido");
-  } catch {
-    return NextResponse.json({ platform: "generic", errorMessage: "URL inválida" }, { status: 400 });
+  // Primera barrera (sin red): esquema, puerto, credenciales y hosts locales.
+  const check = checkPreviewUrl(rawUrl);
+  if (!check.ok) {
+    return NextResponse.json({ platform: "generic", errorMessage: check.error }, { status: 400 });
   }
-
+  const url = check.url;
   const platform = detectPlatform(url);
+
+  const caller = await getRequestUser(request);
+  if (!caller) {
+    // Sin sesión: el reproductor de YouTube funciona igual (no hace falta red).
+    const videoId = platform === "youtube" ? extractYoutubeVideoId(url) : null;
+    if (videoId) return NextResponse.json({ platform, youtube: { videoId }, siteName: "YouTube" });
+    return NextResponse.json(
+      { platform, errorMessage: "Inicia sesión para ver la vista previa de este enlace." },
+      { status: 401 }
+    );
+  }
+  if (!previewLimiter.take(caller.userId)) {
+    return NextResponse.json(
+      { platform, errorMessage: "Demasiadas vistas previas seguidas. Espera un minuto e inténtalo de nuevo." },
+      { status: 429 }
+    );
+  }
 
   try {
     let result: LinkPreviewResult;

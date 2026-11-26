@@ -24,6 +24,8 @@ import {
   type LocalTemplate,
 } from "@/lib/templates/localTemplates";
 import { toast } from "@/store/useToastStore";
+import { useWorkspaceRole } from "@/lib/access/workspaceRole";
+import { SpaceSetupWizard } from "@/components/cde/SpaceSetupWizard";
 
 // ============================================================================
 // ANDROS — TARJETA DE ARRANQUE (adiós lienzo en blanco)
@@ -34,7 +36,9 @@ import { toast } from "@/store/useToastStore";
 //   2. Un chip de ejemplo (1 clic, genera al instante).
 //   3. Una plantilla local (0 ms, sin IA, sin cuota): incluidas o propias.
 // Si la IA falla o se agotó la cuota, «Usar plantilla base sin IA» deja a la
-// persona trabajando igual. «o empezar en blanco» la descarta.
+// persona trabajando igual. «Entrar a un lienzo vacío» la descarta.
+// (Sprint 18) Para el dueño, el primer contacto es el arranque guiado en 3
+// pasos (`SpaceSetupWizard`); esta tarjeta queda como «plantillas rápidas».
 // ============================================================================
 
 const EXAMPLES_SIMPLE = [
@@ -65,7 +69,7 @@ export function useStarterVisible(): boolean {
   return isEmpty && landingDone && !tourOpen && !cloudBusy && !dismissed;
 }
 
-const StarterCard: React.FC<Props> = ({ variant }) => {
+const StarterCard: React.FC<Props & { onBackToWizard?: () => void }> = ({ variant, onBackToWizard }) => {
   const expert = useIsExpert();
   const reduced = useSettingsStore((s) => s.animations) === "reduced";
   const dismiss = useStarterStore((s) => s.dismiss);
@@ -275,14 +279,24 @@ const StarterCard: React.FC<Props> = ({ variant }) => {
         </ul>
       </div>
 
-      <div className="mt-3 flex justify-center">
+      <div className="mt-3 flex flex-wrap justify-center gap-x-4">
+        {onBackToWizard && (
+          <button
+            type="button"
+            onClick={onBackToWizard}
+            disabled={pending}
+            className="min-h-11 md:min-h-9 px-3 text-xs text-andros-muted underline underline-offset-2 hover:text-andros-primary active:scale-[0.96] spring-micro disabled:opacity-50"
+          >
+            Volver al arranque en 3 pasos
+          </button>
+        )}
         <button
           type="button"
           onClick={dismiss}
           disabled={pending}
           className="min-h-11 md:min-h-9 px-3 text-xs text-andros-muted underline underline-offset-2 hover:text-andros-primary active:scale-[0.96] spring-micro disabled:opacity-50"
         >
-          o empezar en blanco
+          Entrar a un lienzo vacío
         </button>
       </div>
     </>
@@ -312,8 +326,20 @@ const StarterCard: React.FC<Props> = ({ variant }) => {
   );
 };
 
-/** Muestra la tarjeta solo mientras el espacio está de verdad vacío. */
+/**
+ * Muestra el arranque solo mientras el espacio está de verdad vacío.
+ * (Sprint 18) Primer contacto = arranque guiado en 3 pasos (equipo, áreas y
+ * fichas con IA) si eres el dueño; «Ver plantillas rápidas» abre la tarjeta
+ * anterior y «Entrar a un lienzo vacío» la descarta.
+ */
 export const EmptyWorkspaceStarter: React.FC<Props> = ({ variant }) => {
   const visible = useStarterVisible();
-  return visible ? <StarterCard variant={variant} /> : null;
+  const role = useWorkspaceRole();
+  const dismiss = useStarterStore((s) => s.dismiss);
+  const [mode, setMode] = useState<"wizard" | "templates">("wizard");
+  if (!visible) return null;
+  if (role === "owner" && mode === "wizard") {
+    return <SpaceSetupWizard variant={variant} onSkip={dismiss} onShowTemplates={() => setMode("templates")} />;
+  }
+  return <StarterCard variant={variant} onBackToWizard={role === "owner" ? () => setMode("wizard") : undefined} />;
 };

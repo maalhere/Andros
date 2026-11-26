@@ -17,7 +17,7 @@ import type { EngineeringNodeData } from "@/types/workspace";
 //     comentarios). Funciona también en solo lectura (`pointer-events-auto`
 //     sobre una capa bloqueada).
 //   · Calendario: solo en tarjetas con fechas reconocibles; abre el panel de
-//     Google Calendar enfocado en esa tarjeta.
+//     Calendarios externos (Google / Microsoft) enfocado en esa tarjeta.
 // ============================================================================
 
 const BASE =
@@ -72,8 +72,8 @@ export const NodeCalendarButton: React.FC<{ node: EngineeringNodeData }> = ({ no
         e.stopPropagation();
         useCalendarStore.getState().openModal(node.id);
       }}
-      aria-label={`Llevar las fechas de «${node.title}» a Google Calendar`}
-      title="Llevar a Google Calendar"
+      aria-label={`Llevar las fechas de «${node.title}» a tu calendario externo`}
+      title="Llevar a tu calendario externo"
       className={BASE}
     >
       <CalendarDays className="w-3.5 h-3.5" aria-hidden="true" />

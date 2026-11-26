@@ -12,6 +12,8 @@
 //      y normalización de la importación a hora local.
 //   5. Matriz de permisos owner / editor / commenter / viewer, el filtro de
 //      ediciones en vivo y su coherencia con supabase/schema.sql.
+//      (Sprint 17B) Rol desconocido bloqueado por defecto, broadcast remoto
+//      aplicado con `persist: false`, sala siempre privada y blindaje SQL.
 //   6. Comentarios (saneado y contadores) y correo de «te compartieron» (HTML
 //      escapado, asunto en una línea).
 // ============================================================================
@@ -45,7 +47,15 @@ import {
   normalizeMemberRole,
   type WorkspaceRole,
 } from "@/lib/access/permissions";
-import { isReadOnlySender, setKnownMemberRole, setKnownMemberRoles } from "@/lib/access/memberRoles";
+import { canSenderEditCanvas, isReadOnlySender, setKnownMemberRole, setKnownMemberRoles } from "@/lib/access/memberRoles";
+import {
+  REMOTE_APPLY_OPTIONS,
+  applyRemoteNodeDelete,
+  applyRemoteNodeUpsert,
+  isRefreshNotice,
+} from "@/lib/collab/canvasSync";
+import { isApplyingRemoteCollab, shouldSkipAutosaveForRemote } from "@/lib/collab/remoteFlag";
+import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { COMMENT_MAX_CHARS, openCountsByNode, sanitizeComment, sortComments } from "@/lib/comments/commentModel";
 import { buildShareEmail, buildWorkspaceShareLink } from "@/lib/share/shareEmail";
 
@@ -312,18 +322,75 @@ check("Roles asignables: Editor, Comentarista, Solo lectura", MEMBER_ROLES.join(
 check("normalizeMemberRole: 'owner' antiguo → editor; desconocido → editor", normalizeMemberRole("owner") === "editor" && normalizeMemberRole(42) === "editor" && normalizeMemberRole("viewer") === "viewer");
 
 const WS = "11111111-1111-4111-8111-111111111111";
-setKnownMemberRoles(WS, [
-  ["u-editor", "editor"],
-  ["u-commenter", "commenter"],
-  ["u-viewer", "viewer"],
-]);
+// (Sprint 17B) Denegar por defecto: sin datos verificados nadie edita en vivo.
+setKnownMemberRoles(null, []);
+check("En vivo (17B): sin roles cargados, nadie edita (ni el dueño)", isReadOnlySender(WS, "u-owner") && isReadOnlySender(WS, "u-editor"));
+setKnownMemberRoles(WS, [["u-editor", "editor"]]);
+check("En vivo (17B): sin dueño verificado, el dueño también queda en solo lectura", isReadOnlySender(WS, "u-owner") && !isReadOnlySender(WS, "u-editor"));
+setKnownMemberRoles(
+  WS,
+  [
+    ["u-editor", "editor"],
+    ["u-commenter", "commenter"],
+    ["u-viewer", "viewer"],
+  ],
+  "u-owner"
+);
 check("En vivo: se ignoran cambios de lienzo de Comentarista y Solo lectura", isReadOnlySender(WS, "u-commenter") && isReadOnlySender(WS, "u-viewer"));
-check("En vivo: se aceptan los de Editor y los del dueño (sin fila)", !isReadOnlySender(WS, "u-editor") && !isReadOnlySender(WS, "u-owner"));
-check("En vivo: otro espacio no se filtra", !isReadOnlySender("otro-espacio", "u-viewer"));
+check("En vivo: se aceptan los de Editor y los del dueño verificado", !isReadOnlySender(WS, "u-editor") && !isReadOnlySender(WS, "u-owner"));
+check("En vivo (17B): rol desconocido (sin fila) → bloqueado por defecto", isReadOnlySender(WS, "u-desconocido") && !canSenderEditCanvas(WS, "u-desconocido"));
+check("En vivo (17B): remitente vacío → bloqueado", isReadOnlySender(WS, ""));
+check("En vivo (17B): otro espacio (sin roles verificados) → bloqueado", isReadOnlySender("otro-espacio", "u-editor") && isReadOnlySender("otro-espacio", "u-owner"));
 setKnownMemberRole(WS, "u-viewer", "editor");
-check("En vivo: «access:changed» a Editor deja de filtrar", !isReadOnlySender(WS, "u-viewer"));
+check("En vivo: el dueño sube a Editor desde «Compartir» → deja de filtrar", !isReadOnlySender(WS, "u-viewer"));
 setKnownMemberRole(WS, "u-editor", "viewer");
-check("En vivo: «access:changed» a Solo lectura empieza a filtrar", isReadOnlySender(WS, "u-editor"));
+check("En vivo: el dueño baja a Solo lectura → empieza a filtrar", isReadOnlySender(WS, "u-editor"));
+setKnownMemberRole(WS, "u-viewer", null);
+check("En vivo (17B): quitado del espacio → bloqueado", isReadOnlySender(WS, "u-viewer"));
+
+// (Sprint 17B) Lo recibido por la sala se aplica SOLO en memoria (persist: false).
+setKnownMemberRoles(WS, [["u-editor", "editor"], ["u-viewer", "viewer"]], "u-owner");
+useWorkspaceStore.setState({ nodes: [], connections: [] });
+const remoteFlags: { applying: boolean; skipAutosave: boolean }[] = [];
+const stopSpy = useWorkspaceStore.subscribe((state, prev) => {
+  if (state.nodes !== prev.nodes || state.connections !== prev.connections) {
+    remoteFlags.push({ applying: isApplyingRemoteCollab(), skipAutosave: shouldSkipAutosaveForRemote() });
+  }
+});
+const remoteNode = note("remoto-1", "Nota remota (ejemplo)", "NOTA", ["Hola"]);
+const wire = (senderUserId: string, node: EngineeringNodeData) => ({ senderId: "peer-1", senderUserId, workspaceId: WS, node });
+applyRemoteNodeUpsert(wire("u-desconocido", remoteNode));
+applyRemoteNodeUpsert(wire("u-viewer", remoteNode));
+check("Broadcast de rol desconocido o Solo lectura → NO se aplica", useWorkspaceStore.getState().nodes.length === 0 && remoteFlags.length === 0);
+applyRemoteNodeUpsert(wire("u-editor", remoteNode));
+check("Broadcast de Editor verificado → se aplica en el lienzo", useWorkspaceStore.getState().nodes.some((n) => n.id === "remoto-1"));
+check(
+  "Broadcast remoto → persist: false (marca remota activa y autoguardado omitido)",
+  remoteFlags.length === 1 && remoteFlags[0].applying && remoteFlags[0].skipAutosave,
+  remoteFlags
+);
+applyRemoteNodeDelete({ senderId: "peer-1", senderUserId: "u-editor", workspaceId: WS, id: "remoto-1" });
+check("Borrado remoto → también persist: false", remoteFlags.length === 2 && remoteFlags[1].skipAutosave && useWorkspaceStore.getState().nodes.length === 0);
+applyRemoteNodeUpsert({ ...wire("u-editor", remoteNode), workspaceId: "otro-espacio" });
+check("Broadcast de otro espacio → no se aplica", useWorkspaceStore.getState().nodes.length === 0);
+stopSpy();
+check("REMOTE_APPLY_OPTIONS es { persist: false }", REMOTE_APPLY_OPTIONS.persist === false);
+check("Aviso de comentario/permiso solo vale para el espacio abierto", isRefreshNotice({ workspaceId: WS, role: "editor" }, WS) && !isRefreshNotice({ workspaceId: "otro" }, WS) && !isRefreshNotice(null, WS));
+
+const canvasSyncSrc = fs.readFileSync(path.join(process.cwd(), "src", "lib", "collab", "canvasSync.ts"), "utf8");
+check("canvasSync ya no tiene persistFor ni persist: true", !canvasSyncSrc.includes("persistFor") && !/persist:\s*true/.test(canvasSyncSrc));
+check("canvasSync ya no aplica comentarios ni roles del mensaje", !canvasSyncSrc.includes("useCommentsStore") && !canvasSyncSrc.includes("setKnownMemberRole"));
+const roomSrc = fs.readFileSync(path.join(process.cwd(), "src", "lib", "collab", "useCollabRoom.ts"), "utf8");
+check("Sala SIEMPRE privada, sin vuelta al canal público", /private: true/.test(roomSrc) && !roomSrc.includes("privateChannelsAvailable") && !/private: isPrivate/.test(roomSrc));
+check("Sala sin entrega del lienzo completo (canvas:request / canvas:snapshot)", !roomSrc.includes('"canvas:request"') && !roomSrc.includes('"canvas:snapshot"') && !roomSrc.includes("buildSnapshotParts"));
+check(
+  "access:changed y comment:* → nueva lectura de Supabase (refreshComments / refreshOwnAccess)",
+  /scheduleVerifiedRefresh\(true\)/.test(roomSrc) && (roomSrc.match(/scheduleVerifiedRefresh\(false\)/g) ?? []).length === 3 && /refreshComments\(\{ quiet: true \}\)/.test(roomSrc)
+);
+const cloudSrc = fs.readFileSync(path.join(process.cwd(), "src", "hooks", "useCloudSync.ts"), "utf8");
+check("useCloudSync: lo remoto se anota como guardado (absorbRemoteChange), nunca se reescribe", /if \(isApplyingRemoteCollab\(\)\) \{\s*absorbRemoteChange\(state, prev\);\s*return;/.test(cloudSrc));
+check("useCloudSync: borrado en Storage confirmado antes de olvidar la ruta", /\.remove\(orphanPaths\)[\s\S]{0,120}\.then\(\(\{ error \}\) => \{[\s\S]{0,80}if \(ep !== epoch \|\| error\) return;/.test(cloudSrc));
+check("Google Calendar sin access_type offline", !cloudSrc.includes("access_type"));
 
 // Coherencia con la base de datos: la RLS es la que manda.
 const sql = fs.readFileSync(path.join(process.cwd(), "supabase", "schema.sql"), "utf8").replace(/\r\n/g, "\n");
@@ -341,6 +408,40 @@ check("SQL: crear comentarios exige can_comment_workspace y autor = uno mismo", 
 check("SQL: leer comentarios = miembros (incluye Solo lectura)", policy("workspace_comments_select").includes("is_workspace_member"));
 check("SQL: resolver/borrar = can_edit_workspace o el autor", ["workspace_comments_update", "workspace_comments_delete"].every((p) => policy(p).includes("can_edit_workspace") && policy(p).includes("author_id = (select auth.uid())")));
 check("SQL: solo el dueño cambia roles", policy("workspace_members_update_owner").includes("workspace_owner_id(workspace_id) = (select auth.uid())"));
+
+// (Sprint 17B) Blindaje SQL.
+const realtimeSelect = sql.match(/create policy "andros_collab_receive"[\s\S]*?;/)?.[0] ?? "";
+const realtimeInsert = sql.match(/create policy "andros_collab_send"[\s\S]*?;/)?.[0] ?? "";
+const topicFn = sql.match(/function public\.can_use_collab_topic[\s\S]*?\$\$([\s\S]*?)\$\$/)?.[1] ?? "";
+check("SQL (17B): Realtime ya no acepta cualquier tema 'andros-collab:%'", !/like 'andros-collab:%'/.test(realtimeSelect + realtimeInsert));
+check("SQL (17B): leer la sala exige ser miembro (can_use_collab_topic → is_workspace_member)", realtimeSelect.includes("can_use_collab_topic") && /is_workspace_member\(ws\)/.test(topicFn));
+check("SQL (17B): emitir cambios de lienzo exige can_edit_workspace", realtimeInsert.includes("realtime.messages.event") && /'node:upsert'[\s\S]*can_edit_workspace\(ws\)/.test(topicFn));
+check("SQL (17B): access:changed solo lo emite el dueño", /'access:changed'[\s\S]{0,80}workspace_owner_id\(ws\) = auth\.uid\(\)/.test(topicFn));
+check("SQL (17B): sala de carpeta = dueño o miembro de un espacio de ese dueño", /can_join_collab_folder\(owner\)/.test(topicFn) && /w\.owner_id = owner and m\.user_id = auth\.uid\(\)/.test(sql));
+check(
+  "SQL (17B): el id del espacio se extrae del tema w-<uuid> (y el dueño de f-<uuid>-<hash>)",
+  /'\^andros-collab:w-\[0-9a-fA-F\]\{8\}/.test(sql) && /substring\(topic from 17\)::uuid/.test(sql) && /substring\(topic from 17 for 36\)::uuid/.test(sql)
+);
+const revoked = ["workspace_owner_id(uuid)", "is_workspace_member(uuid)", "are_friends(uuid, uuid)", "can_read_workspace_file(text)"].filter(
+  (fn) => sql.includes(`revoke execute on function public.${fn} from public, anon;`) && sql.includes(`grant execute on function public.${fn} to authenticated;`)
+);
+check("SQL (17B): REVOKE de public/anon y GRANT a authenticated en las 4 funciones auxiliares", revoked.length === 4, revoked);
+check(
+  "SQL (17B): Arena fuerza needs_review + keywords + autor del perfil al insertar",
+  /new\.moderation_status := 'needs_review'/.test(sql) && /new\.ai_engine := 'keywords'/.test(sql) && /arena_posts_guard_insert[\s\S]*before insert on public\.arena_posts/.test(sql) && /new\.author_name := public\.profile_display_name\(auth\.uid\(\)\)/.test(sql)
+);
+check("SQL (17B): comentarios con autor y nombre del perfil (trigger BEFORE INSERT)", /workspace_comments_fill_author[\s\S]*before insert on public\.workspace_comments/.test(sql) && /new\.author_id := auth\.uid\(\)/.test(sql));
+const columnGrant = sql.match(/grant select \(([\s\S]*?)\) on public\.workspaces to authenticated;/)?.[1] ?? "";
+check(
+  "SQL (17B): public_share_token oculto (SELECT por columnas sin el token) y RPC solo para el dueño",
+  /revoke select on public\.workspaces from anon, authenticated;/.test(sql) &&
+    columnGrant.includes("owner_id") &&
+    !columnGrant.includes("public_share_token") &&
+    /function public\.get_workspace_public_share[\s\S]*?w\.owner_id = auth\.uid\(\)/.test(sql) &&
+    /function public\.set_workspace_public_share[\s\S]*?w\.owner_id = auth\.uid\(\)/.test(sql)
+);
+const shareSrc = fs.readFileSync(path.join(process.cwd(), "src", "lib", "share", "publicShare.ts"), "utf8");
+check("Cliente (17B): el enlace público se lee y cambia por las RPC del dueño", shareSrc.includes('rpc("get_workspace_public_share"') && shareSrc.includes('rpc("set_workspace_public_share"'));
 
 // ----------------------------------------------------------------------------
 // 6. Comentarios y correo

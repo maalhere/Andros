@@ -43,6 +43,7 @@ import { focusNodeOnScreen } from "@/lib/canvas/focusNode";
 import { NODE_ARCHETYPE_LABELS, useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { useLibraryStore } from "@/store/useLibraryStore";
 import { useMarketStore } from "@/store/useMarketStore";
+import { chooseExperienceMode } from "@/lib/billing/entitlements";
 import { useIsExpert, useSettingsStore } from "@/store/useSettingsStore";
 import { useCanvasReadOnly, useCollabStore } from "@/store/useCollabStore";
 import { useSocialStore } from "@/store/useSocialStore";
@@ -112,6 +113,9 @@ const WRITE_COMMAND_IDS = new Set([
   "new-formula",
 ]);
 
+/** Herramientas técnicas que no se muestran en Modo Simple (Sprint 19). */
+const EXPERT_ONLY_COMMAND_IDS = new Set(["library", "codelab", "new-formula"]);
+
 /** Centra la cámara del lienzo en el nodo (escritorio) o lo muestra (teléfono). */
 const jumpToNode = focusNodeOnScreen;
 
@@ -176,10 +180,10 @@ const PaletteDialog: React.FC<{ reduced: boolean; onClose: () => void }> = ({ re
         id: "mode",
         group: "Acciones",
         label: expert ? "Cambiar a Modo Simple" : "Cambiar a Modo Experto",
-        hint: expert ? "Oculta 3D, CodeLab y Biblioteca" : "Muestra 3D, CodeLab y Biblioteca",
+        hint: expert ? "Oculta 3D, CodeLab, fórmulas y Biblioteca" : "Muestra 3D, CodeLab, fórmulas y Biblioteca",
         keywords: "modo simple experto avanzado herramientas ingenieria",
         icon: <Gauge className="w-4 h-4" />,
-        run: () => useSettingsStore.getState().setExperienceMode(expert ? "simple" : "expert"),
+        run: () => void chooseExperienceMode(expert ? "simple" : "expert"),
       },
       {
         id: "voice-room",
@@ -232,8 +236,8 @@ const PaletteDialog: React.FC<{ reduced: boolean; onClose: () => void }> = ({ re
         id: "export-plan",
         group: "Acciones",
         label: "Estudio de exportación",
-        hint: "PDF, Word / Google Docs, PowerPoint / Google Slides y WhatsApp",
-        keywords: "pdf imprimir whatsapp resumen exportar documento plan del dia word docx google docs powerpoint pptx google slides presentacion diapositivas informe",
+        hint: "PDF, documento .docx, presentación .pptx y resumen para mensajería",
+        keywords: "pdf imprimir mensajeria chat grupo resumen exportar documento plan del dia docx texto pptx presentacion diapositivas informe",
         icon: <FileText className="w-4 h-4" />,
         run: () => usePlanExportStore.getState().setOpen(true),
       },
@@ -256,9 +260,10 @@ const PaletteDialog: React.FC<{ reduced: boolean; onClose: () => void }> = ({ re
       {
         id: "google-calendar",
         group: "Acciones",
-        label: "Google Calendar",
-        hint: "Fechas del tablero a tu calendario, .ics e importar agenda",
-        keywords: "calendario agenda fechas cita evento ics outlook apple cronograma recordatorio",
+        label: "Calendarios externos",
+        // brand-ok: interoperabilidad (la persona conecta su propia cuenta de calendario)
+        hint: "Fechas del tablero a Google Calendar u Outlook, .ics e importar agenda",
+        keywords: "calendario agenda fechas cita evento ics outlook microsoft 365 office apple google cronograma recordatorio",
         icon: <CalendarDays className="w-4 h-4" />,
         run: () => useCalendarStore.getState().openModal(null),
       },
@@ -361,7 +366,7 @@ const PaletteDialog: React.FC<{ reduced: boolean; onClose: () => void }> = ({ re
         id: "keys",
         group: "Acciones",
         label: "Claves IA",
-        keywords: "gemini claude chatgpt api key",
+        keywords: "gemini claude openai anthropic api key clave propia",
         icon: <KeyRound className="w-4 h-4" />,
         run: () => useAiProvidersStore.getState().setKeysModalOpen(true),
       },
@@ -392,8 +397,8 @@ const PaletteDialog: React.FC<{ reduced: boolean; onClose: () => void }> = ({ re
       icon: NODE_ICONS[n.type],
       run: () => jumpToNode(n.id),
     }));
-    // Biblioteca Científica y CodeLab son del Modo Experto.
-    const byMode = expert ? actions : actions.filter((c) => c.id !== "library" && c.id !== "codelab");
+    // Biblioteca Científica, CodeLab y fórmulas LaTeX son del Modo Experto.
+    const byMode = expert ? actions : actions.filter((c) => !EXPERT_ONLY_COMMAND_IDS.has(c.id));
     const visible = readOnly ? byMode.filter((c) => !WRITE_COMMAND_IDS.has(c.id)) : byMode;
     return [...visible, ...nodeCommands];
   }, [nodes, theme, expert, readOnly]);

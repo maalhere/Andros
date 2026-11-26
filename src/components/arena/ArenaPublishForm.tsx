@@ -19,6 +19,7 @@ import { publishArenaPost } from "@/lib/arena/repository";
 import { useCloudStore } from "@/store/useCloudStore";
 import { useSubmitGuard } from "@/hooks/useSubmitGuard";
 import { ConsentCheckbox } from "@/components/legal/ConsentCheckbox";
+import { sessionAuthHeader } from "@/lib/supabase/authHeader";
 
 // ============================================================================
 // ANDROS ARENA — FORMULARIO DE PUBLICACIÓN
@@ -123,7 +124,7 @@ export const ArenaPublishForm: React.FC<{
     try {
       const res = await fetch("/api/arena/analyze-post", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...(await sessionAuthHeader()) },
         body: JSON.stringify(draft),
       });
       const data = (await res.json()) as ArenaAnalyzeResponse | { error: string };
@@ -297,7 +298,7 @@ export const ArenaPublishForm: React.FC<{
             )}
             <span className="ml-auto text-[10px] font-mono text-andros-muted flex items-center gap-1">
               <Sparkles className="w-3 h-3 text-andros-accent-ink" />
-              {analysis.engine === "gemini" ? `Gemini${analysis.model ? ` · ${analysis.model}` : ""}` : "Analizador local"}
+              {analysis.engine === "gemini" ? "Escáner IA" : "Analizador local"}
             </span>
           </div>
 

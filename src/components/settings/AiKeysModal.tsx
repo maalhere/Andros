@@ -14,6 +14,7 @@ import {
   type NodeChatResponse,
 } from "@/lib/ai/providers";
 import type { AiProvider } from "@/types/workspace";
+import { sessionAuthHeader } from "@/lib/supabase/authHeader";
 
 // ============================================================================
 // ANDROS — CLAVES IA (BYOK)
@@ -43,7 +44,7 @@ const ProviderRow: React.FC<{ provider: AiProvider }> = ({ provider }) => {
     try {
       const res = await fetch("/api/ai/node-chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...(await sessionAuthHeader()) },
         body: JSON.stringify({
           provider,
           model: defaultModel,

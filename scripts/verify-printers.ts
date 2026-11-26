@@ -16,6 +16,12 @@
 //      las propiedades descartan texto libre.
 //   6. Carga diferida: el registro solo vive en fragmentos diferidos (Modo
 //      Experto) y nunca en el JS inicial de `/` (lee `.next`).
+//   7. (Sprint 17B) FlashForge: validador común RFC 1918 (bloquea 169.254/16)
+//      y SOLO el puerto 8899 en la ruta web, el navegador y Electron.
+//   8. (Sprint 17B) Rutas HTTP de impresora: apagadas por defecto, nunca en
+//      Vercel, cabecera `X-Andros-Bridge: 1` y `Origin` = `Host` (anti-CSRF).
+//   9. (Sprint 17B) Anti-SSRF de /api/link-preview: esquemas, puertos, IPs
+//      privadas/locales (v4 y v6), DNS de localhost, sesión y límite de tasa.
 // ============================================================================
 
 import fs from "node:fs";
@@ -36,6 +42,17 @@ import { isRfc1918IPv4, parseKlipperTarget } from "@/lib/printers/network";
 import { readKlipperStatus, safeGcodeFileName, uploadAndPrintKlipper } from "@/lib/printers/moonrakerNet";
 import { inspectGcode, matchPrinterModel } from "@/lib/printers/gcodeCheck";
 import { TELEMETRY_EVENTS, isTelemetryConfigured, sanitizeProps, track } from "@/lib/analytics/telemetry";
+import { FLASHFORGE_DEFAULT_PORT, isPrivateIPv4, parseFlashforgeTarget } from "@/lib/printer/flashforgeShared";
+import {
+  PRINTER_BRIDGE_HEADER,
+  PRINTER_BRIDGE_HEADERS,
+  checkPrinterBridgeRequest,
+  isLocalBridgeHost,
+  type BridgeRequestInfo,
+} from "@/lib/printer/bridgeGuard";
+import { checkPreviewUrl, isPublicIpAddress, parseIPv6 } from "@/lib/net/publicAddress";
+import { BlockedTargetError, safeFetch } from "@/lib/net/safeFetch";
+import { createRateLimiter } from "@/lib/net/rateLimit";
 
 let passed = 0;
 let failed = 0;
@@ -247,7 +264,10 @@ async function main(): Promise<void> {
 
   const route = read("src/app/api/printer/klipper/route.ts");
   check("la ruta valida con parseKlipperTarget (GET y POST)", (route.match(/parseKlipperTarget\(/g) ?? []).length >= 2);
-  check("la ruta se desactiva en hosting remoto (Vercel)", /IS_REMOTE_HOST\)\s*return remoteRefusal\(\)/.test(route) && (route.match(/remoteRefusal\(\)/g) ?? []).length >= 3);
+  check(
+    "la ruta pasa por el guardián del puente (Vercel, apagado por defecto, CSRF) en GET y POST",
+    route.includes("checkPrinterBridgeRequest") && (route.match(/bridgeRefusal\(request\)/g) ?? []).length >= 2
+  );
   check("la ruta no usa la validación laxa de FlashForge (169.254)", !route.includes("isPrivateIPv4"));
   const main = read("electron/main.cjs");
   check(
@@ -349,6 +369,163 @@ async function main(): Promise<void> {
     );
     check("el registro vive en un fragmento diferido (se descarga al abrir «Imprimir en 3D»)", lazyRegistry.length > 0);
   }
+
+  // --------------------------------------------------------------------------
+  console.log("\n7) FlashForge: validador común RFC 1918 y solo el puerto 8899 (Sprint 17B)");
+  const ffOk = parseFlashforgeTarget("192.168.1.45", 8899);
+  check("192.168.1.45:8899 → aceptada", typeof ffOk !== "string" && ffOk.ip === "192.168.1.45" && ffOk.port === 8899, ffOk);
+  const ffDefault = parseFlashforgeTarget("10.0.0.7", "");
+  check("sin puerto → 8899 por defecto", typeof ffDefault !== "string" && ffDefault.port === FLASHFORGE_DEFAULT_PORT, ffDefault);
+  for (const [ip, why] of [
+    ["169.254.169.254", "metadatos de la nube"],
+    ["169.254.10.20", "enlace local 169.254/16"],
+    ["127.0.0.1", "loopback"],
+    ["8.8.8.8", "IP pública"],
+    ["192.168.1.255", "difusión"],
+    ["impresora.local", "nombre de host"],
+  ] as const) {
+    check(`bloquea ${ip} (${why})`, typeof parseFlashforgeTarget(ip, 8899) === "string");
+  }
+  for (const port of [80, 443, 7125, 8898, 8900, 22, 0, 65535]) {
+    check(`bloquea el puerto ${port} (solo 8899)`, typeof parseFlashforgeTarget("192.168.1.45", port) === "string");
+  }
+  check("isPrivateIPv4 ya no acepta 169.254/16 (alias de isRfc1918IPv4)", !isPrivateIPv4("169.254.1.1") && isPrivateIPv4("172.16.0.9"));
+  const ffRoute = read("src/app/api/printer/flashforge/route.ts");
+  check("la ruta FlashForge valida con parseFlashforgeTarget (sin la validación laxa)", ffRoute.includes("parseFlashforgeTarget") && !ffRoute.includes("isPrivateIPv4"));
+  check("Electron usa el mismo validador (parseFlashforgeTarget)", /function parseTarget[\s\S]{0,120}printer\.parseFlashforgeTarget\(/.test(main) && !main.includes("port < 1 || port > 65535"));
+  const generated = path.join(ROOT, "electron", "generated", "flashforge.cjs");
+  check(
+    "el núcleo compilado de Electron exporta parseFlashforgeTarget (node electron/build-printer.cjs)",
+    fs.existsSync(generated) && fs.readFileSync(generated, "utf8").includes("parseFlashforgeTarget")
+  );
+
+  // --------------------------------------------------------------------------
+  console.log("\n8) Rutas HTTP de impresora: apagadas por defecto y anti-CSRF (Sprint 17B)");
+  const ON = { ANDROS_LOCAL_PRINTER_BRIDGE: "1" };
+  const req = (over: Partial<BridgeRequestInfo> = {}): BridgeRequestInfo => ({
+    method: "GET",
+    host: "localhost:3000",
+    origin: null,
+    bridgeHeader: "1",
+    secFetchSite: "same-origin",
+    ...over,
+  });
+  const offCheck = checkPrinterBridgeRequest(req(), {});
+  check("sin ANDROS_LOCAL_PRINTER_BRIDGE=1 → desactivada (403)", !offCheck.ok && offCheck.status === 403 && offCheck.disabled === true);
+  const vercelCheck = checkPrinterBridgeRequest(req(), { ...ON, VERCEL: "1" });
+  check("en Vercel siempre desactivada (409), aunque esté la variable", !vercelCheck.ok && vercelCheck.status === 409 && vercelCheck.remote === true);
+  check("sin la cabecera X-Andros-Bridge → 403", !checkPrinterBridgeRequest(req({ bridgeHeader: null }), ON).ok);
+  check("cabecera con otro valor → 403", !checkPrinterBridgeRequest(req({ bridgeHeader: "true" }), ON).ok);
+  check("GET del mismo origen con cabecera → permitido", checkPrinterBridgeRequest(req(), ON).ok);
+  check(
+    "POST con Origin = Host → permitido",
+    checkPrinterBridgeRequest(req({ method: "POST", origin: "http://localhost:3000" }), ON).ok
+  );
+  check(
+    "POST desde otro sitio (Origin ≠ Host) → 403",
+    !checkPrinterBridgeRequest(req({ method: "POST", origin: "https://sitio-ajeno.example" }), ON).ok
+  );
+  check("Origin con otro puerto → 403", !checkPrinterBridgeRequest(req({ method: "POST", origin: "http://localhost:4000" }), ON).ok);
+  check("POST sin Origin → 403", !checkPrinterBridgeRequest(req({ method: "POST" }), ON).ok);
+  check("GET entre sitios sin Origin (sec-fetch-site: cross-site) → 403", !checkPrinterBridgeRequest(req({ secFetchSite: "cross-site" }), ON).ok);
+  check(
+    "DNS rebinding (Host público aunque Origin coincida) → 403",
+    !checkPrinterBridgeRequest(req({ method: "POST", host: "rebind.example:3000", origin: "http://rebind.example:3000" }), ON).ok
+  );
+  check(
+    "Host local válido: localhost, [::1], 127.0.0.1, 192.168.x.x y *.local",
+    ["localhost:3000", "[::1]:3000", "127.0.0.1:3000", "192.168.1.20:3000", "taller.local"].every(isLocalBridgeHost) &&
+      !isLocalBridgeHost("8.8.8.8:3000") &&
+      !isLocalBridgeHost(null)
+  );
+  check(`el cliente añade ${PRINTER_BRIDGE_HEADER}: 1`, PRINTER_BRIDGE_HEADERS[PRINTER_BRIDGE_HEADER] === "1");
+  const ffClient = read("src/lib/printer/printerClient.ts");
+  const kpClient = read("src/lib/printers/adapters/klipperMoonraker.ts");
+  check("printerClient: las 3 peticiones a /api/printer/flashforge llevan la cabecera", (ffClient.match(/PRINTER_BRIDGE_HEADERS/g) ?? []).length >= 4);
+  check("adaptador Klipper: las 2 peticiones a /api/printer/klipper llevan la cabecera", (kpClient.match(/PRINTER_BRIDGE_HEADERS/g) ?? []).length >= 3);
+  check(
+    "ruta FlashForge: guardián en GET y POST",
+    ffRoute.includes("checkPrinterBridgeRequest") && (ffRoute.match(/bridgeRefusal\(request\)/g) ?? []).length >= 2
+  );
+
+  // --------------------------------------------------------------------------
+  console.log("\n9) Anti-SSRF de /api/link-preview (Sprint 17B)");
+  for (const raw of ["https://github.com/vercel/next.js", "http://example.com/a?b=1", "https://example.com:443/x"]) {
+    check(`URL pública aceptada: ${raw}`, checkPreviewUrl(raw).ok);
+  }
+  for (const [raw, why] of [
+    ["ftp://example.com/x", "esquema ftp"],
+    ["file:///etc/passwd", "esquema file"],
+    ["javascript:alert(1)", "esquema javascript"],
+    ["http://example.com:8080/", "puerto 8080"],
+    ["https://example.com:22/", "puerto 22"],
+    ["http://user:pass@example.com/", "credenciales en la URL"],
+    ["http://localhost/", "localhost"],
+    ["http://intranet.local/", "*.local"],
+    ["http://127.0.0.1/", "loopback IPv4"],
+    ["http://127.1/", "loopback abreviado"],
+    ["http://2130706433/", "loopback en decimal"],
+    ["http://0x7f000001/", "loopback en hex"],
+    ["http://10.0.0.5/", "RFC 1918 10/8"],
+    ["http://172.20.1.1/", "RFC 1918 172.16/12"],
+    ["http://192.168.0.1/", "RFC 1918 192.168/16"],
+    ["http://169.254.169.254/latest/meta-data/", "metadatos de la nube"],
+    ["http://100.64.0.1/", "CGNAT"],
+    ["http://0.0.0.0/", "0.0.0.0"],
+    ["http://[::1]/", "loopback IPv6"],
+    ["http://[fe80::1]/", "enlace local IPv6"],
+    ["http://[fd12:3456::1]/", "IPv6 ULA fc00::/7"],
+    ["http://[::ffff:127.0.0.1]/", "IPv4 mapeada a IPv6"],
+    ["http://[::ffff:a9fe:a9fe]/", "metadatos mapeados a IPv6"],
+    ["http://[64:ff9b::a00:1]/", "NAT64 hacia 10.0.0.1"],
+  ] as const) {
+    check(`bloquea ${why}: ${raw}`, !checkPreviewUrl(raw).ok);
+  }
+  check(
+    "IPs públicas v4/v6 se aceptan",
+    isPublicIpAddress("93.184.216.34") && isPublicIpAddress("2606:2800:220:1:248:1893:25c8:1946") && isPublicIpAddress("8.8.8.8")
+  );
+  check(
+    "IPs privadas v4/v6 se rechazan",
+    !isPublicIpAddress("192.168.1.1") && !isPublicIpAddress("fc00::1") && !isPublicIpAddress("fe80::abcd") && !isPublicIpAddress("::") && !isPublicIpAddress("2002:c0a8:0101::1")
+  );
+  check("parseIPv6 expande :: y rechaza basura", parseIPv6("::1")?.[7] === 1 && parseIPv6("1:2:3:4:5:6:7:8:9") === null && parseIPv6("1::2::3") === null && parseIPv6("1:2:3:4::5:6:7:8") === null);
+
+  // safeFetch: NINGUNA conexión a destinos locales (ni literales ni por DNS).
+  for (const target of ["http://127.0.0.1/", "http://169.254.169.254/latest/meta-data/", "http://[::1]/", "http://localhost:80/"]) {
+    let blocked = false;
+    try {
+      await safeFetch(target, { timeoutMs: 2000, maxBytes: 1000 });
+    } catch (error) {
+      blocked = error instanceof BlockedTargetError;
+    }
+    check(`safeFetch rechaza ${target} antes de conectar`, blocked);
+  }
+  const { assertPublicHost } = await import("@/lib/net/safeFetch");
+  const dnsBlocked = await assertPublicHost("localhost").then(
+    () => false,
+    (error: unknown) => error instanceof BlockedTargetError
+  );
+  check("DNS: «localhost» resuelve a loopback → bloqueado tras resolver", dnsBlocked);
+
+  const limiter = createRateLimiter({ max: 3, windowMs: 60_000 });
+  const t0 = 1_000_000;
+  const takes = [limiter.take("u1", t0), limiter.take("u1", t0 + 1), limiter.take("u1", t0 + 2), limiter.take("u1", t0 + 3)];
+  check("límite de tasa: 3 por minuto y usuario (el 4.º se rechaza)", takes.join(",") === "true,true,true,false", takes);
+  check("límite de tasa: otro usuario no se ve afectado", limiter.take("u2", t0 + 3));
+  check("límite de tasa: tras la ventana se libera", limiter.take("u1", t0 + 61_000));
+
+  const lp = read("src/app/api/link-preview/route.ts");
+  const sf = read("src/lib/net/safeFetch.ts");
+  check("la ruta exige sesión (getRequestUser) y limita por userId", lp.includes("getRequestUser(request)") && /previewLimiter\.take\(caller\.userId\)/.test(lp));
+  check("la ruta valida la URL (checkPreviewUrl) y descarga con safeFetch", lp.includes("checkPreviewUrl(rawUrl)") && lp.includes("safeFetch("));
+  check("la ruta ya no usa fetch directo ni redirect: \"follow\"", !/\bfetch\(/.test(lp.replace(/safeFetch\(|fetchWithTimeout\(/g, "")) && !lp.includes('redirect: "follow"'));
+  check(
+    "safeFetch: redirecciones manuales (máx. 3) revalidando URL y DNS en cada salto",
+    /SAFE_FETCH_MAX_REDIRECTS = 3/.test(sf) &&
+      /for \(let hop = 0;[\s\S]*checkPreviewUrl\(current\)[\s\S]*assertPublicHost\([\s\S]*hop >= maxRedirects/.test(sf)
+  );
+  check("safeFetch: la IP se revalida al conectar (lookup propio, anti DNS rebinding)", /lookup: guardedLookup/.test(sf));
 
   console.log(`\n${passed} correctas, ${failed} fallidas.`);
   if (failed > 0) process.exit(1);

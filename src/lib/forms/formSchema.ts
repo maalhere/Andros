@@ -19,6 +19,8 @@ import type {
   FormSheetPayload,
 } from "@/types/workspace";
 import type { FormFieldDef, FormTemplate } from "@/types/forms";
+import { normalizeAreaName } from "@/lib/cde/areas";
+import { sanitizeResolution } from "@/lib/cde/resolution";
 
 export const FORM_FIELD_TYPES: FormFieldType[] = [
   "text",
@@ -383,6 +385,8 @@ export function sanitizeFormSheet(raw: unknown): FormSheetPayload {
       .slice(0, FORM_MAX_FIELDS)
   );
   const batchLabel = str(r.batchLabel, 80).trim();
+  const area = normalizeAreaName(r.area);
+  const resolution = sanitizeResolution(r.resolution);
   return {
     templateId: str(r.templateId, 80) || "custom",
     category: str(r.category, 40).trim() || "General",
@@ -390,6 +394,8 @@ export function sanitizeFormSheet(raw: unknown): FormSheetPayload {
     attachments: sanitizePhotos(r.attachments, FORM_MAX_ATTACHMENTS),
     ...(batchLabel ? { batchLabel } : {}),
     ...(r.aiFilled === true ? { aiFilled: true } : {}),
+    ...(area ? { area } : {}),
+    ...(resolution ? { resolution } : {}),
   };
 }
 

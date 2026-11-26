@@ -77,9 +77,18 @@ interface ViewerApi {
   getSoup: () => Promise<Float32Array>;
 }
 
+/** Libera el material y TODAS sus texturas (map, normalMap, roughnessMap…). */
 function disposeMaterial(material: Material | Material[]) {
-  if (Array.isArray(material)) material.forEach((m) => m.dispose());
-  else material.dispose();
+  const list = Array.isArray(material) ? material : [material];
+  for (const m of list) {
+    for (const value of Object.values(m)) {
+      const texture = value as { isTexture?: boolean; dispose?: () => void } | null;
+      if (texture && typeof texture === "object" && texture.isTexture && typeof texture.dispose === "function") {
+        texture.dispose();
+      }
+    }
+    m.dispose();
+  }
 }
 
 function cssColor(name: string, fallback: string): string {
@@ -150,13 +159,15 @@ export const Model3DPreview: React.FC<Model3DPreviewProps> = ({
 
     let cancelled = false;
     let cleanup: () => void = () => {};
+    // Al desmontar o cambiar de archivo, la descarga en curso se cancela.
+    const download = new AbortController();
 
     const load = async () => {
       const THREE = await import("three");
       const { OrbitControls } = await import("three/examples/jsm/controls/OrbitControls.js");
       const { createSupportMesh } = await import("@/lib/3d/autoSupports");
 
-      const response = await fetch(url);
+      const response = await fetch(url, { signal: download.signal });
       if (!response.ok) throw new Error("download");
 
       const partMaterial = new THREE.MeshStandardMaterial({
@@ -390,6 +401,7 @@ export const Model3DPreview: React.FC<Model3DPreviewProps> = ({
 
     return () => {
       cancelled = true;
+      download.abort();
       cleanup();
     };
   }, [key, url, ext, shouldLoad]);

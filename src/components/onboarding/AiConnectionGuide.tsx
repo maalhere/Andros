@@ -7,7 +7,7 @@ import { ArrowRight, BookOpen, Box, Code2, FileText, KeyRound, RefreshCw, Sparkl
 // ANDROS — CÓMO CONECTAR MODELOS DE IA (contenido compartido)
 // Lo usan el tutorial (paso 4) y la guía de atajos (pestaña «Cómo conectar
 // modelos de IA»). Todo lo que se afirma aquí existe en la app:
-//   · ⋯ → «Claves IA (Gemini, Claude, ChatGPT)»  → AiKeysModal
+//   · ⋯ → «Claves IA propias»  → AiKeysModal
 //   · + Agregar → «Nuevo Nodo IA» / «Importar chat»  → quickAdd
 //   · Cables de entrada (from → to) → contextGraph (aguas arriba, con ciclos
 //     controlados) y pastilla «Contexto actualizado · Resincronizar».
@@ -16,11 +16,11 @@ import { ArrowRight, BookOpen, Box, Code2, FileText, KeyRound, RefreshCw, Sparkl
 export const AI_CONNECTION_STEPS: { title: string; body: string }[] = [
   {
     title: "Claves IA (opcional)",
-    body: "En ⋯ → Claves IA añade tu clave de Claude, ChatGPT o Gemini. Gemini puede funcionar sin clave propia si esta instalación la incluye; Claude y ChatGPT piden la tuya. Las claves se quedan en tu navegador.",
+    body: "En ⋯ → Claves IA propias añade la clave del proveedor de IA que uses. La IA incluida en Andros funciona sin clave propia si esta instalación la trae; los demás proveedores piden la tuya. Las claves se quedan en tu navegador.",
   },
   {
     title: "Crea un Nodo IA o importa un chat",
-    body: "En + Agregar elige «Nuevo Nodo IA» y escoge el modelo, o «Importar chat» para traer una conversación de ChatGPT, Claude o Gemini.",
+    body: "En + Agregar elige «Nuevo Nodo IA» y escoge el modelo, o «Importar chat» para traer una conversación de un chat de IA externo.",
   },
   {
     title: "Cablea en dirección de entrada",
@@ -53,7 +53,7 @@ const Arrow: React.FC = () => (
   <ArrowRight className="w-3.5 h-3.5 shrink-0 text-andros-muted" aria-hidden="true" />
 );
 
-/** Mini-diagrama: fuentes → Nodo IA (Claude) → Nodo IA (ChatGPT / Gemini). */
+/** Mini-diagrama: fuentes → Nodo IA (modelo A) → Nodo IA (modelo B). */
 export const AiConnectionDiagram: React.FC = () => (
   <figure
     className="rounded-2xl border border-andros-border bg-andros-canvas p-3"
@@ -68,11 +68,11 @@ export const AiConnectionDiagram: React.FC = () => (
       </div>
       <Arrow />
       <Chip tone="ai" icon={<Sparkles className="w-3 h-3" />}>
-        Nodo IA · Claude
+        Nodo IA · modelo A
       </Chip>
       <Arrow />
       <Chip tone="ai" icon={<Sparkles className="w-3 h-3" />}>
-        Nodo IA · ChatGPT o Gemini
+        Nodo IA · modelo B
       </Chip>
     </div>
     <figcaption className="mt-2.5 flex flex-wrap items-center gap-1.5 text-[11px] text-andros-muted">

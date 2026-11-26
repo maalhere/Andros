@@ -10,12 +10,19 @@
 //   · openai    → API de OpenAI con la clave del usuario.
 // La clave del usuario solo vive durante esta petición: no se guarda ni se
 // registra en los logs.
+//
+// (Sprint 17B) La clave de Gemini DEL SERVIDOR solo se usa con sesión
+// iniciada y con el mismo tope diario por persona que el Oráculo
+// (serverQuota, clave `user:<id>`). Con tu propia clave (BYOK) no aplica.
 // ============================================================================
 
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { callGemini, ProviderFailure } from "@/lib/ai/gemini";
 import { parseJsonText } from "@/lib/ai/jsonText";
+import { quotaForUser, serverQuotaAllows, serverQuotaConsume } from "@/lib/ai/serverQuota";
+import { getUserPlan } from "@/lib/billing/serverPlan";
+import { getRequestUser } from "@/lib/supabase/server";
 import type {
   NodeChatErrorCode,
   NodeChatRequest,
@@ -52,7 +59,7 @@ class ChatError extends Error {
   }
 }
 
-const PROVIDER_NAMES: Record<AiProvider, string> = { gemini: "Gemini", anthropic: "Claude", openai: "ChatGPT" };
+const PROVIDER_NAMES: Record<AiProvider, string> = { gemini: "Gemini", anthropic: "Claude", openai: "OpenAI" };
 
 function clip(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max)}…` : text;
@@ -255,7 +262,7 @@ async function chatClaude(req: NodeChatRequest, system: string, turns: NodeChatT
 async function chatOpenAI(req: NodeChatRequest, system: string, turns: NodeChatTurn[]) {
   const apiKey = req.apiKey?.trim();
   if (!apiKey) {
-    throw new ChatError("missing_key", "Para usar ChatGPT añade tu clave de OpenAI en Claves IA.", 400);
+    throw new ChatError("missing_key", "Para usar los modelos de OpenAI añade tu clave de OpenAI en Claves IA.", 400);
   }
   const model = req.model?.trim() || "gpt-5-mini";
   let res: Response;
@@ -290,7 +297,7 @@ async function chatOpenAI(req: NodeChatRequest, system: string, turns: NodeChatT
       );
     }
     if (res.status === 404 || /model_not_found|does not exist/i.test(detail)) {
-      throw new ChatError("model_not_found", `Tu clave no tiene acceso al modelo "${model}". Elige otro modelo de ChatGPT.`, 404);
+      throw new ChatError("model_not_found", `Tu clave no tiene acceso al modelo "${model}". Elige otro modelo de OpenAI.`, 404);
     }
     if (res.status >= 500) {
       throw new ChatError("overloaded", `OpenAI no está disponible ahora mismo (${res.status}). Vuelve a intentarlo.`);
@@ -346,6 +353,30 @@ export async function POST(request: NextRequest): Promise<NextResponse<NodeChatR
   }
   const system = req.test ? SYSTEM_PROMPT : buildSystem(req.upstreamContext ?? "", req.nodeTitle ?? "");
 
+  // (Sprint 17B) Clave de Gemini del servidor: exige sesión y cuenta por persona.
+  const usingServerKey = provider === "gemini" && !req.apiKey?.trim() && Boolean(process.env.GEMINI_API_KEY?.trim());
+  let quotaKey: string | null = null;
+  if (usingServerKey) {
+    const caller = await getRequestUser(request);
+    if (!caller) {
+      return NextResponse.json(
+        {
+          error: {
+            code: "missing_key",
+            message: "Inicia sesión para usar la IA gratuita de Andros, o añade tu propia clave de Gemini en Claves IA.",
+          },
+        },
+        { status: 401 }
+      );
+    }
+    // (Sprint 21) Tope del plan de la persona, leído de Supabase: 15 o 150 al día.
+    const quota = quotaForUser(caller.userId, await getUserPlan(caller.supabase, caller.userId));
+    quotaKey = quota.key;
+    if (!serverQuotaAllows(quota.key, quota.limit)) {
+      return NextResponse.json({ error: { code: "daily_limit", message: quota.message } }, { status: 429 });
+    }
+  }
+
   try {
     const result =
       provider === "gemini"
@@ -353,6 +384,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<NodeChatR
         : provider === "anthropic"
           ? await chatClaude(req, system, turns)
           : await chatOpenAI(req, system, turns);
+    if (quotaKey) serverQuotaConsume(quotaKey);
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof ChatError) {

@@ -13,8 +13,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { callGemini, ProviderFailure, type ModelRequest } from "@/lib/ai/gemini";
-import { DAILY_LIMIT_MESSAGE } from "@/lib/ai/freeQuota";
-import { clientIp, serverQuotaAllows, serverQuotaConsume } from "@/lib/ai/serverQuota";
+import { resolveQuotaCaller, serverQuotaAllows, serverQuotaConsume } from "@/lib/ai/serverQuota";
 import { parseJsonText } from "@/lib/ai/jsonText";
 import { blueprintFromAi, type BoardBlueprint } from "@/lib/templates/blueprint";
 import type { OracleIssue } from "@/types/oracle";
@@ -74,10 +73,11 @@ export async function POST(request: NextRequest): Promise<NextResponse<Blueprint
   if (!apiKey) return reply({ ok: false, issue: MISSING_KEY });
 
   // Respaldo anti-abuso: la clave del servidor tiene tope diario por IP.
-  const ip = clientIp(request.headers);
+  // (Sprint 21) Tope del plan de quien llama (15 o 150 al día con sesión; por IP sin ella).
   const usingServerKey = !userKey;
-  if (usingServerKey && !serverQuotaAllows(ip)) {
-    return reply({ ok: false, issue: { code: "daily_limit", message: DAILY_LIMIT_MESSAGE } });
+  const quota = usingServerKey ? await resolveQuotaCaller(request) : null;
+  if (quota && !serverQuotaAllows(quota.key, quota.limit)) {
+    return reply({ ok: false, issue: { code: "daily_limit", message: quota.message } });
   }
 
   const req: ModelRequest = {
@@ -97,7 +97,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<Blueprint
     });
     // `callGemini` ya tolera ```json; si el modelo devolvió un texto suelto, se reintenta el parseo.
     const json = typeof raw === "string" ? parseJsonText(raw) : raw;
-    if (usingServerKey) serverQuotaConsume(ip);
+    if (quota) serverQuotaConsume(quota.key);
     return reply({ ok: true, blueprint: blueprintFromAi(json, prompt), model });
   } catch (error) {
     if (error instanceof ProviderFailure) return reply({ ok: false, issue: error.issue });

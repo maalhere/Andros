@@ -10,7 +10,8 @@ import { EngineeringNode } from "@/components/shared/EngineeringNode";
 import { EmptyWorkspaceStarter, useStarterVisible } from "@/components/shared/EmptyWorkspaceStarter";
 import { useStarterStore } from "@/store/useStarterStore";
 import { useCanvasReadOnly } from "@/store/useCollabStore";
-import { ImpactAlertsBanner } from "@/components/shared/ImpactAlertsBanner";
+import { UnifiedAlertsBar } from "@/components/cde/UnifiedAlertsBar";
+import { ResolutionStatusPill } from "@/components/cde/ResolutionStatusPill";
 
 const FILTER_TABS: { id: "all" | NodeArchetype; label: string }[] = [
   { id: "all", label: "Todos" },
@@ -23,6 +24,9 @@ const FILTER_TABS: { id: "all" | NodeArchetype; label: string }[] = [
   { id: "form-sheet-node", label: "Fichas" },
   { id: "formula-sheet-node", label: "Fórmulas" },
 ];
+
+/** Pestañas de herramientas técnicas (cálculo LaTeX, CodeLab, fórmulas): del Modo Experto. */
+const EXPERT_TABS = new Set<string>(["calc-latex-node", "code-lab-node", "formula-sheet-node"]);
 
 export const TacticalCardStack: React.FC = () => {
   const nodes = useWorkspaceStore((s) => s.nodes);
@@ -46,6 +50,14 @@ export const TacticalCardStack: React.FC = () => {
     mobileCategoryFilter === "all"
       ? nodes
       : nodes.filter((n) => n.type === mobileCategoryFilter);
+  // Modo Simple: las pestañas técnicas solo aparecen si ya hay tarjetas de ese tipo.
+  const filterTabs = FILTER_TABS.filter(
+    (tab) =>
+      expert ||
+      !EXPERT_TABS.has(tab.id) ||
+      mobileCategoryFilter === tab.id ||
+      nodes.some((n) => n.type === tab.id)
+  );
 
   return (
     <main
@@ -56,7 +68,7 @@ export const TacticalCardStack: React.FC = () => {
       {/* Barra de Filtros Táctiles + Conmutador de Mapa 2D */}
       <div className="flex items-center justify-between gap-2 pt-1">
         <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1">
-          {FILTER_TABS.map((tab) => {
+          {filterTabs.map((tab) => {
             const active = mobileCategoryFilter === tab.id;
             return (
               <button
@@ -117,8 +129,9 @@ export const TacticalCardStack: React.FC = () => {
         </div>
       )}
 
-      {/* Descuadres entre tarjetas conectadas (detector anti-malentendidos) */}
-      <ImpactAlertsBanner variant="stack" />
+      {/* Alerta unificada de IA y semáforo Rojo / Verde de las Fichas de Resolución */}
+      <UnifiedAlertsBar variant="stack" />
+      <ResolutionStatusPill variant="stack" />
 
       {/* Pila de Tarjetas de Ingeniería */}
       <div className={`flex flex-col gap-3 ${readOnly ? "pointer-events-none" : ""}`}>

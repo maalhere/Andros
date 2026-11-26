@@ -1,6 +1,6 @@
 import React from "react";
 import Link from "next/link";
-import { CONTACT_EMAIL, LEGAL_LINKS } from "@/lib/site";
+import { CONTACT_EMAIL, LEGAL_LINKS, TRADEMARK_NOTICE } from "@/lib/site";
 import { CookiePreferencesLink } from "./CookiePreferencesLink";
 
 // ============================================================================
@@ -28,5 +28,9 @@ export const SiteFooter: React.FC<{ compact?: boolean; className?: string }> = (
         </a>
       )}
     </nav>
+    {/* Aviso de marcas e independencia (versión completa en /terminos). */}
+    <p className={`mx-auto max-w-3xl ${compact ? "mt-1" : "px-4 md:px-6 pb-6 -mt-3"} text-[11px] leading-relaxed text-andros-muted`}>
+      {TRADEMARK_NOTICE}
+    </p>
   </footer>
 );

@@ -83,9 +83,9 @@ const STEPS: TourStep[] = [
     title: "Conectar modelos de IA con nodos",
     body: {
       desktop:
-        "Crea un Nodo IA (Claude, ChatGPT o Gemini) o importa un chat, y cablea hacia él tus notas, piezas, CodeLab o fuentes. Un Nodo IA también puede alimentar a otro: analiza un paper con Claude y pasa el resumen a ChatGPT o Gemini.",
+        "Crea un Nodo IA con el modelo que prefieras o importa un chat, y cablea hacia él tus notas, piezas, CodeLab o fuentes. Un Nodo IA también puede alimentar a otro: analiza un paper con un modelo y pasa el resumen a otro distinto.",
       mobile:
-        "Crea un Nodo IA (Claude, ChatGPT o Gemini) o importa un chat, y conecta hacia él tus notas, piezas o fuentes. Un Nodo IA también puede alimentar a otro.",
+        "Crea un Nodo IA con el modelo que prefieras o importa un chat, y conecta hacia él tus notas, piezas o fuentes. Un Nodo IA también puede alimentar a otro.",
     },
   },
   {
@@ -110,16 +110,16 @@ const SIMPLE_OVERRIDES: Record<number, Partial<TourStep>> = {
   1: {
     body: {
       desktop:
-        "Crea tarjetas con + Agregar (o N): notas, enlaces, cálculos o un Nodo IA. Dibuja a mano alzada con D y conecta tarjetas con cables con C.",
+        "Crea tarjetas con + Agregar (o N): notas, enlaces, fichas o un Nodo IA. Dibuja a mano alzada con D y conecta tarjetas con cables con C.",
       mobile:
-        "Con + Agregar escribes una nota, pegas un enlace, creas un cálculo o añades un Nodo IA. Con “Dibujar” abres una hoja para bocetar a mano alzada.",
+        "Con + Agregar escribes una nota, pegas un enlace, creas una ficha o añades un Nodo IA. Con “Dibujar” abres una hoja para bocetar a mano alzada.",
     },
   },
   2: {
     title: "Oráculo y comandos",
     body: {
       desktop:
-        "El Oráculo IA (O) ordena tu lienzo y redacta documentos por ti. Ctrl+K / ⌘K abre la Paleta de Comandos y, desde la barra superior, entras a Andros Arena. Pulsa ? para ver todos los atajos.",
+        "El Oráculo IA (O) ordena tu lienzo y redacta documentos por ti. Ctrl+K / ⌘K abre la Paleta de Comandos y en ⋯ encuentras Andros Arena. Pulsa ? para ver todos los atajos.",
       mobile: "El Oráculo IA ordena tu espacio y redacta por ti. En ⋯ encuentras Andros Arena y esta ayuda.",
     },
   },
@@ -129,9 +129,9 @@ const SIMPLE_OVERRIDES: Record<number, Partial<TourStep>> = {
     title: "Trabaja en equipo y comparte",
     body: {
       desktop:
-        "Únete a la sala de voz de la barra superior, comparte el espacio con un enlace o con tus amigos y editen a la vez. ¿Necesitas piezas 3D, CodeLab o la Biblioteca científica? Activa el Modo Experto en la barra superior.",
+        "Arriba tienes lo esencial: alertas Rojo/Verde, Calendarios externos, Compartir y el Chat del equipo. La sala de voz y lo demás están en ⋯. ¿Necesitas piezas 3D, CodeLab o fórmulas? Activa el Modo Experto en ⋯.",
       mobile:
-        "Entra a la sala de voz, comparte el espacio con un enlace y editen a la vez. Para piezas 3D, CodeLab y Biblioteca activa el Modo Experto en ⋯.",
+        "Arriba: Calendarios, Compartir y Chat del equipo. La sala de voz y lo demás están en ⋯. Para piezas 3D, CodeLab y fórmulas activa el Modo Experto en ⋯.",
     },
   },
 };

@@ -28,7 +28,8 @@ import { useCloudStore } from "@/store/useCloudStore";
 import { useLandingStore } from "@/store/useLandingStore";
 import { useMarketStore } from "@/store/useMarketStore";
 import { SiteFooter } from "@/components/legal/SiteFooter";
-import { FREE_PLAN, PLAN_COMPARISON, PRO_PLAN, startProCheckout } from "@/lib/plans";
+import { FREE_PLAN, PLAN_COMPARISON, PRO_PLAN } from "@/lib/plans";
+import { startProCheckout } from "@/lib/billing/subscriptionClient";
 
 // ============================================================================
 // ANDROS — LANDING EDITORIAL (Swiss / manual técnico)
@@ -38,7 +39,7 @@ import { FREE_PLAN, PLAN_COMPARISON, PRO_PLAN, startProCheckout } from "@/lib/pl
 //   · Hero: qué problema resuelve y dos acciones («Empezar gratis» / «Ver planes»).
 //   · 01 Poderes: Oráculo IA, coordinación en vivo con voz y Motor Anti-Malentendidos.
 //   · 02 Propósito: contribución sobria a los ODS 4, 8 y 9.
-//   · 03 Planes: Gratis $0 vs. Andros Pro $9/mes, comparados fila a fila.
+//   · 03 Planes: Plan Básico $0 vs. Andros Pro $5.99/mes ($49.99/año), fila a fila.
 //
 //   Entrada:
 //   · «Empezar gratis» → login OAuth de Supabase con Google. Al volver con
@@ -237,7 +238,7 @@ const GOALS = [
     number: "4",
     name: "Educación de calidad",
     icon: <BookOpenCheck className="w-4 h-4" aria-hidden="true" />,
-    body: "Acerca conocimiento científico abierto (OpenAlex, arXiv y Crossref) con citas listas para usar, y un Oráculo que guía paso a paso a quien no tiene formación técnica.",
+    body: "Acerca conocimiento científico abierto (bases de datos académicas de acceso libre) con citas listas para usar, y un Oráculo que guía paso a paso a quien no tiene formación técnica.",
   },
   {
     number: "8",
@@ -373,10 +374,30 @@ export const LandingOverlay: React.FC<LandingOverlayProps> = ({ isMobile }) => {
       ?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
   };
 
+  // (Sprint 21) «Pasar a Pro»: sin sesión primero se entra con Google; con la
+  // pasarela sin configurar (503) se explica y se ofrece el aviso por correo.
+  const [proNotice, setProNotice] = useState<string | null>(null);
+  const [proBusy, setProBusy] = useState(false);
   const requestPro = async () => {
-    const result = await startProCheckout();
-    if (result.status === "redirect") window.location.assign(result.url);
-    else useMarketStore.getState().setWaitlistOpen(true);
+    if (proBusy) return;
+    setProNotice(null);
+    if (!user && !cloudDisabled) {
+      clearCloudError();
+      void signInWithGoogle();
+      return;
+    }
+    setProBusy(true);
+    try {
+      const result = await startProCheckout("monthly");
+      if (result.status === "redirect") {
+        window.location.assign(result.url);
+        return;
+      }
+      setProNotice(result.message);
+      if (result.status === "unavailable") useMarketStore.getState().setWaitlistOpen(true);
+    } finally {
+      setProBusy(false);
+    }
   };
 
   const fadeOut = {
@@ -450,7 +471,7 @@ export const LandingOverlay: React.FC<LandingOverlayProps> = ({ isMobile }) => {
                 id="andros-landing-title"
                 className="mt-5 md:mt-6 max-w-[22ch] text-2xl md:text-[2rem] font-semibold leading-tight tracking-tight text-andros-primary"
               >
-                Organiza tu evento o tu equipo sin el caos de WhatsApp.
+                Organiza tu evento o tu equipo en un solo tablero en vivo.
               </h1>
               <p className="mt-3 max-w-lg text-sm md:text-base leading-relaxed text-andros-muted">
                 Cambia los chats infinitos y las hojas de cálculo incómodas en el celular por un
@@ -482,6 +503,7 @@ export const LandingOverlay: React.FC<LandingOverlayProps> = ({ isMobile }) => {
 
                 {!user && !cloudDisabled && (
                   <p className="text-[11px] leading-relaxed text-andros-muted">
+                    {/* brand-ok: método de acceso real del botón (OAuth con la cuenta propia) */}
                     Con tu cuenta de Google, sin tarjeta.{" "}
                     <button
                       type="button"
@@ -588,7 +610,7 @@ export const LandingOverlay: React.FC<LandingOverlayProps> = ({ isMobile }) => {
               kicker="Planes"
               id="andros-planes-title"
               title="Precios claros. Empieza gratis, sin tarjeta."
-              lead="Andros Pro todavía no se cobra: únete a la lista de espera y te avisamos cuando abra. Lo que ya usas en el plan Gratis no cambia."
+              lead="El Plan Básico es gratis para siempre. Andros Pro se paga al mes o al año, con impuestos calculados por nuestro proveedor de pagos, y se cancela cuando quieras: conservas Pro hasta el final del periodo pagado."
             />
 
             <div className="border-t border-andros-border">
@@ -605,17 +627,25 @@ export const LandingOverlay: React.FC<LandingOverlayProps> = ({ isMobile }) => {
                           <span className="text-3xl font-semibold tracking-tight">{plan.price}</span>{" "}
                           <span className="text-xs text-andros-muted">{plan.period}</span>
                         </p>
+                        {plan.altPrice && <p className="text-xs text-andros-muted">{plan.altPrice}</p>}
                         <p className="mt-1 text-xs text-andros-muted">{plan.tagline}</p>
                       </div>
                       {pro ? (
-                        <button
-                          type="button"
-                          onClick={() => void requestPro()}
-                          disabled={igniting}
-                          className="h-11 px-4 rounded-xl bg-andros-accent-fill text-white text-sm font-semibold hover:opacity-90 active:scale-[0.96] spring-micro"
-                        >
-                          Acceso anticipado
-                        </button>
+                        <div className="flex flex-col gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void requestPro()}
+                            disabled={igniting || proBusy}
+                            className="h-11 px-4 rounded-xl bg-andros-accent-fill text-white text-sm font-semibold hover:opacity-90 active:scale-[0.96] spring-micro disabled:opacity-50"
+                          >
+                            {proBusy ? "Abriendo el pago…" : "Pasar a Pro"}
+                          </button>
+                          {proNotice && (
+                            <p role="status" className="text-xs leading-relaxed text-andros-primary">
+                              {proNotice}
+                            </p>
+                          )}
+                        </div>
                       ) : (
                         <button
                           type="button"

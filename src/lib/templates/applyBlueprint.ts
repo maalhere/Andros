@@ -20,7 +20,8 @@ import {
 } from "@/store/useWorkspaceStore";
 import { toast } from "@/store/useToastStore";
 import { computeCalcCells, noteDataToText } from "@/lib/templates/blueprint";
-import { saveCustomTemplate } from "@/lib/templates/localTemplates";
+import { loadCustomTemplates, replacesCustomTemplate, saveCustomTemplate } from "@/lib/templates/localTemplates";
+import { guardTemplateSave } from "@/lib/billing/entitlements";
 import type { BlueprintCard, BoardBlueprint, BlueprintLink } from "@/lib/templates/blueprint";
 import type { EngineeringNodeData, NodeConnection } from "@/types/workspace";
 
@@ -200,13 +201,19 @@ export function blueprintFromWorkspace(name: string): { blueprint: BoardBlueprin
   return { blueprint: { name, cards, links }, skipped: nodes.length - usable.length };
 }
 
-/** Acción del menú ⋯ → «Guardar como plantilla». Devuelve el aviso que se mostró. */
-export function saveWorkspaceAsTemplate(name: string): boolean {
+/**
+ * Acción del menú ⋯ → «Guardar como plantilla». Devuelve `true` si el diálogo
+ * debe cerrarse (se guardó, o se abrió el modal de planes por el tope).
+ */
+export async function saveWorkspaceAsTemplate(name: string): Promise<boolean> {
   const result = blueprintFromWorkspace(name);
   if (!result) {
     toast({ message: "Este espacio no tiene tarjetas de nota o cálculo para guardar como plantilla.", tone: "error" });
     return false;
   }
+  // (Sprint 21) Plan Básico: 1 plantilla propia (reemplazar la del mismo nombre sí se permite).
+  const current = loadCustomTemplates();
+  if (!(await guardTemplateSave(current.length, replacesCustomTemplate(name, current)))) return true;
   if (!saveCustomTemplate(name, result.blueprint)) {
     toast({ message: "El navegador no permitió guardar la plantilla (almacenamiento bloqueado).", tone: "error" });
     return false;

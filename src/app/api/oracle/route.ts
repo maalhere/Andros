@@ -41,14 +41,10 @@ import {
   type ModelRequest,
 } from "@/lib/ai/gemini";
 import { extractStreamingStringField, parseJsonText, repairLatexControlChars } from "@/lib/ai/jsonText";
-import { DAILY_LIMIT_MESSAGE } from "@/lib/ai/freeQuota";
-import { clientIp, serverQuotaAllows, serverQuotaConsume } from "@/lib/ai/serverQuota";
+import { resolveQuotaCaller, serverQuotaAllows, serverQuotaConsume, type QuotaCaller } from "@/lib/ai/serverQuota";
 
-/** Gemini puede tardar con documentos largos: margen para la función serverless. */
 /** Streaming: el primer fragmento sale en ~1 s; 60 s cubre incluso documentos largos en Vercel. */
 export const maxDuration = 60;
-
-
 
 const SYSTEM_INSTRUCTIONS = `Eres el Oráculo IA de Andros: un asistente de investigación e ingeniería que vive dentro de un lienzo espacial de nodos. Tienes permiso para LEER, ANALIZAR, CREAR y ORGANIZAR el lienzo.
 
@@ -58,7 +54,7 @@ TIPOS DE NODO
 - "calc-latex-node": hoja de cálculo con ecuaciones LaTeX. Su justificación, ecuaciones y celdas llegan en textExcerpt.
 - "resource-link-node": enlace externo (YouTube, GitHub, paper científico, LinkedIn/perfil o genérico). Su URL, plataforma, título y resumen llegan en textExcerpt.
 - "code-lab-node": laboratorio de código/cálculo rápido (variables, funciones matemáticas, linspace y plot). Su código, variables resultantes y errores llegan en textExcerpt.
-- "ai-chat-node": conversación con una IA (Gemini, Claude o ChatGPT), propia o importada. Su proveedor, resumen y últimos mensajes llegan en textExcerpt.
+- "ai-chat-node": conversación con una IA (Gemini, Claude, OpenAI u otra), propia o importada. Su proveedor, resumen y últimos mensajes llegan en textExcerpt.
 - "form-sheet-node": ficha estructurada (historial clínico, receta, medición, registro…). Sus campos llegan en textExcerpt como «Etiqueta / clave = valor unidad»; "[revisar]" marca datos pendientes de confirmar. Las fotos adjuntas no se envían.
 - "formula-sheet-node": ficha de fórmula LaTeX reactiva. En textExcerpt llegan su LaTeX, la expresión, cada variable con su valor inyectado y su origen («← Ficha · clave», «Manual» o «Sin dato») y el «Resultado calculado» (ya calculado por Andros con los datos actuales: úsalo tal cual, no lo recalcules ni lo inventes). Si dice «Sin resultado», explica qué dato falta.
 Cada nodo trae connectedNodeIds; la lista "connections" trae los cables con su etiqueta.
@@ -106,6 +102,7 @@ const ARCHETYPES: NodeArchetype[] = [
   "code-lab-node",
   "ai-chat-node",
   "form-sheet-node",
+  "formula-sheet-node",
 ];
 
 function sanitizeActions(raw: unknown, context: OracleCanvasContext): OracleAction[] {
@@ -374,10 +371,8 @@ async function callOpenAI(apiKey: string, req: ModelRequest): Promise<{ raw: unk
 const MISSING_KEY_ISSUE: OracleIssue = {
   code: "missing_key",
   message:
-    "Falta GEMINI_API_KEY. Créala gratis en https://aistudio.google.com/apikey y pégala en .env.local (local) o en Vercel → Settings → Environment Variables (producción); después reinicia el servidor.",
+    "Falta GEMINI_API_KEY. Créala gratis en https://aistudio.google.com/apikey y pégala en .env.local (local) o en las variables de entorno de tu proveedor de alojamiento (producción); después reinicia el servidor.",
 };
-
-const DAILY_LIMIT_ISSUE: OracleIssue = { code: "daily_limit", message: DAILY_LIMIT_MESSAGE };
 
 // ----------------------------------------------------------------------------
 // Ejecución (una sola ruta para respuesta normal y streaming)
@@ -392,7 +387,8 @@ interface OracleRun {
   references: OracleReference[];
   /** Clave de Gemini del usuario (BYOK): sin tope diario. */
   userKey?: string;
-  ip: string;
+  /** (Sprint 21) Cuota de la clave del servidor según el plan; `null` con clave propia. */
+  quota: QuotaCaller | null;
 }
 
 interface OracleHooks {
@@ -453,10 +449,11 @@ async function runOracle(run: OracleRun, hooks: OracleHooks = {}): Promise<Oracl
   const usingServerKey = !run.userKey;
   const openaiKey = process.env.OPENAI_API_KEY?.trim();
 
-  // Respaldo anti-abuso: la clave del servidor tiene un tope diario por IP.
-  const overServerQuota = usingServerKey && !serverQuotaAllows(run.ip);
+  // Tope diario de la clave del servidor: el del plan con sesión; por IP sin ella.
+  const quota = usingServerKey ? run.quota : null;
+  const overServerQuota = Boolean(quota && !serverQuotaAllows(quota.key, quota.limit));
 
-  let issue: OracleIssue | null = overServerQuota ? DAILY_LIMIT_ISSUE : null;
+  let issue: OracleIssue | null = overServerQuota && quota ? { code: "daily_limit", message: quota.message } : null;
 
   /** Convierte la salida cruda (JSON) del modelo en la respuesta final, o `null` si no sirve. */
   const finish = (raw: unknown, engine: OracleEngine, model: string): OracleResponseBody | null => {
@@ -491,7 +488,7 @@ async function runOracle(run: OracleRun, hooks: OracleHooks = {}): Promise<Oracl
         }
         const done = parsedRaw ? finish(parsedRaw, "gemini", model) : null;
         if (done) {
-          if (usingServerKey) serverQuotaConsume(run.ip);
+          if (quota) serverQuotaConsume(quota.key);
           return done;
         }
         // JSON inválido pero terminado con normalidad: no tiene sentido reintentar.
@@ -503,7 +500,7 @@ async function runOracle(run: OracleRun, hooks: OracleHooks = {}): Promise<Oracl
             : "La IA respondió en un formato inesperado. Vuelve a intentarlo.",
         };
         if (streamedReply.trim() && mode === "canvas") {
-          if (usingServerKey) serverQuotaConsume(run.ip);
+          if (quota) serverQuotaConsume(quota.key);
           return { reply: streamedReply.trim(), actions: [], engine: "gemini", model, issue };
         }
         break;
@@ -597,7 +594,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     currentDocument: mode === "document" ? sanitizeDocument(body?.document) : null,
     references: sanitizeReferences(body?.references),
     ...(userKey ? { userKey } : {}),
-    ip: clientIp(request.headers),
+    quota: userKey ? null : await resolveQuotaCaller(request),
   };
 
   if (body?.stream !== true) {

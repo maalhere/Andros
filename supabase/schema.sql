@@ -31,6 +31,20 @@
 --        (SECURITY DEFINER) y la tabla workspace_comments con su RLS.
 --        Dueño y Editor escriben nodos, cables y tinta; Comentarista y
 --        Solo lectura únicamente leen (Comentarista además comenta).
+--  17B. (Sprint 17B) Blindaje: salas Realtime solo para miembros (§8b),
+--        funciones auxiliares sin acceso anónimo, Arena y comentarios con
+--        autor tomado del perfil (triggers) y `public_share_token` visible
+--        solo para el dueño (get/set_workspace_public_share, §9).
+--  18. (Sprint 18) Entorno de Datos Común (CDE) centrado en las personas
+--      → workspace_members.work_area + workspaces.work_areas / owner_work_area
+--        (áreas de trabajo nominales del arranque en 3 pasos) y la tabla
+--        workspace_chat_messages (chat del lienzo con @Área, @usuario y @IA)
+--        con RLS y autor + área rellenados por trigger desde el perfil (§18).
+--  21. (Sprint 21) Suscripciones Plan Básico / Andros Pro y límites reales
+--      → user_subscriptions (RLS: solo lectura propia; escribe el webhook
+--        firmado con service_role), user_plan(), workspace_live_cap() (3 / 6
+--        personas en vivo según el plan del dueño) y el trigger
+--        workspaces_enforce_plan_limit (máx. 2 espacios en Plan Básico).
 -- ============================================================================
 
 create extension if not exists "pgcrypto";
@@ -319,7 +333,7 @@ begin
      or new.user_id is distinct from old.user_id
      or new.added_by is distinct from old.added_by
      or new.created_at is distinct from old.created_at then
-    raise exception 'Solo se puede cambiar el rol de un miembro.';
+    raise exception 'Solo se puede cambiar el rol o el área de trabajo de un miembro.';
   end if;
   return new;
 end;
@@ -442,6 +456,18 @@ begin
 end;
 $$;
 
+-- (Sprint 17B) Las funciones auxiliares SECURITY DEFINER solo las ejecuta
+-- quien tiene sesión (las políticas RLS las llaman como `authenticated`).
+-- Ningún visitante anónimo puede usarlas para sondear espacios o amistades.
+revoke execute on function public.workspace_owner_id(uuid) from public, anon;
+revoke execute on function public.is_workspace_member(uuid) from public, anon;
+revoke execute on function public.are_friends(uuid, uuid) from public, anon;
+revoke execute on function public.can_read_workspace_file(text) from public, anon;
+grant execute on function public.workspace_owner_id(uuid) to authenticated;
+grant execute on function public.is_workspace_member(uuid) to authenticated;
+grant execute on function public.are_friends(uuid, uuid) to authenticated;
+grant execute on function public.can_read_workspace_file(text) to authenticated;
+
 -- ¿Está libre este @usuario? (no revela nada más)
 create or replace function public.username_available(candidate text)
 returns boolean
@@ -541,6 +567,13 @@ begin
   if auth.uid() is distinct from old.owner_id
      and (new.name is distinct from old.name or new.folder is distinct from old.folder) then
     raise exception 'Solo el dueño puede renombrar o mover este espacio.';
+  end if;
+  -- (Sprint 18) Las áreas de trabajo nominales (§18) solo las cambia el dueño.
+  -- Se leen vía to_jsonb para no fallar en bases aún sin esas columnas.
+  if auth.uid() is distinct from old.owner_id
+     and (to_jsonb(new) -> 'work_areas' is distinct from to_jsonb(old) -> 'work_areas'
+          or to_jsonb(new) -> 'owner_work_area' is distinct from to_jsonb(old) -> 'owner_work_area') then
+    raise exception 'Solo el dueño puede cambiar las áreas de trabajo del espacio.';
   end if;
   return new;
 end;
@@ -871,6 +904,80 @@ create policy "arena_posts_delete_own" on public.arena_posts
   for delete to authenticated
   using (owner_id = (select auth.uid()));
 
+-- (Sprint 17B) Nombre visible de una persona según SU perfil (nunca el que
+-- mande el navegador): nombre completo o, si no tiene, su @usuario.
+create or replace function public.profile_display_name(uid uuid)
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select left(coalesce(nullif(btrim(p.full_name), ''), '@' || nullif(btrim(p.username), '')), 120)
+  from public.profiles p
+  where p.id = uid;
+$$;
+
+revoke execute on function public.profile_display_name(uuid) from public, anon;
+grant execute on function public.profile_display_name(uuid) to authenticated;
+
+-- (Sprint 17B) Lo que publica el NAVEGADOR nunca llega aprobado ni firmado
+-- con otro nombre: entra «en revisión», con el motor «keywords» y con el
+-- nombre de autor de su propio perfil. El SQL Editor / service role (sin
+-- auth.uid()) puede seguir moderando.
+create or replace function public.arena_posts_guard_insert()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    return new;
+  end if;
+  new.owner_id := auth.uid();
+  new.moderation_status := 'needs_review';
+  new.ai_engine := 'keywords';
+  if jsonb_typeof(new.moderation) = 'object' then
+    new.moderation := jsonb_set(new.moderation, '{status}', '"needs_review"'::jsonb);
+  else
+    new.moderation := jsonb_build_object('status', 'needs_review');
+  end if;
+  new.author_name := public.profile_display_name(auth.uid());
+  return new;
+end;
+$$;
+
+drop trigger if exists arena_posts_guard_insert on public.arena_posts;
+create trigger arena_posts_guard_insert
+  before insert on public.arena_posts
+  for each row execute function public.arena_posts_guard_insert();
+
+-- Al editar desde el navegador no se puede auto-aprobar ni cambiar el autor.
+create or replace function public.arena_posts_guard_update()
+returns trigger
+language plpgsql
+as $$
+begin
+  if auth.uid() is null then
+    return new;
+  end if;
+  if new.owner_id is distinct from old.owner_id
+     or new.moderation_status is distinct from old.moderation_status
+     or new.moderation is distinct from old.moderation
+     or new.ai_engine is distinct from old.ai_engine
+     or new.author_name is distinct from old.author_name then
+    raise exception 'La moderación y el autor de una publicación no se pueden cambiar desde la app.';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists arena_posts_guard_update on public.arena_posts;
+create trigger arena_posts_guard_update
+  before update on public.arena_posts
+  for each row execute function public.arena_posts_guard_update();
+
 -- Postulaciones: públicas si el postulante lo eligió; si no, solo el
 -- postulante y quien publicó la oferta.
 drop policy if exists "arena_submissions_select" on public.arena_submissions;
@@ -914,11 +1021,11 @@ create policy "arena_submissions_delete_own" on public.arena_submissions
 --    · Sala de carpeta: f-<id del dueño>-<hash de la carpeta>
 --    · Sala de espacio suelto: w-<id del workspace>
 --    · Nada de la sala se guarda: presencia, cursores, audio y pantallas son
---      efímeros. Los cambios de nodos/cables los guarda SOLO el dueño del
---      espacio con sus propias políticas RLS (los invitados no escriben aquí).
+--      efímeros. (Sprint 17B) Cada persona con permiso (dueño o editor)
+--      guarda SOLO sus propios cambios con su RLS; lo recibido no se guarda.
 --
 --    Requisito: Realtime activo en el proyecto (Project Settings → Realtime).
---    Los canales Broadcast/Presence públicos no necesitan políticas extra.
+--    Los canales son privados: necesitan las políticas de la sección 8b.
 --
 --    SPRINT 7.5/7.6 — canal de voz persistente (estilo Discord):
 --    · Al abrir un espacio, la app entra en PRESENCIA PASIVA del canal
@@ -932,28 +1039,140 @@ create policy "arena_submissions_delete_own" on public.arena_submissions
 -- ============================================================================
 
 -- ============================================================================
--- 8b. REALTIME PRIVADO (Sprint 8): canales de la sala solo para autenticados
---     La app abre los canales con `config: { private: true }`. Para que
---     entren, Realtime exige estas políticas sobre `realtime.messages`
---     (Broadcast y Presence). Incluye a invitados con sesión anónima
---     (también son el rol `authenticated`). Sin ellas la app NO se rompe:
---     avisa en la consola y vuelve al canal público.
---     Ejecuta este bloque una vez en Supabase → SQL Editor.
+-- 8b. REALTIME PRIVADO (Sprint 8 → 17B): salas SOLO para miembros
+--     La app abre los canales SIEMPRE con `config: { private: true }` y ya no
+--     vuelve a un canal público si estas políticas faltan (Sprint 17B).
+--     El tema de cada canal lleva el espacio o el dueño de la carpeta:
+--       · andros-collab:w-<workspaceId>          → sala de un espacio suelto
+--       · andros-collab:f-<ownerId>-<hash>       → sala de una carpeta
+--     Reglas:
+--       · Leer (SELECT): sala de espacio → is_workspace_member(ws_id).
+--                        sala de carpeta → dueño o miembro de al menos un
+--                        espacio de ese dueño.
+--       · Emitir (INSERT): cambios de lienzo (node:*, edge:*, alert:*) →
+--         can_edit_workspace(ws_id); avisos de comentarios (comment:*) →
+--         cualquier miembro (Comentarista incluido: solo piden «vuelve a
+--         leer»); access:changed → solo el dueño; presencia, cursores, voz y
+--         pantalla → cualquier miembro.
+--     Nota: Realtime evalúa estas políticas al ENTRAR al canal (con `event`
+--     vacío) y guarda el resultado mientras dura la conexión, así que en la
+--     práctica entra cualquier miembro y la regla por evento es una defensa
+--     extra. Por eso la app, además, aplica en memoria solo los cambios de
+--     quien tiene permiso de edición VERIFICADO en la base y NUNCA guarda en la
+--     nube lo que llega por la sala (cada quien guarda lo suyo con su RLS).
+--     Idempotente: se puede ejecutar varias veces.
 -- ============================================================================
+
+-- Espacio de una sala `andros-collab:w-<uuid>` (NULL si el tema no es de espacio).
+create or replace function public.collab_topic_workspace_id(topic text)
+returns uuid
+language sql
+immutable
+as $$
+  select case
+    when topic ~ '^andros-collab:w-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+      then substring(topic from 17)::uuid
+  end;
+$$;
+
+-- Dueño de una sala `andros-collab:f-<uuid>-<hash>` (NULL si no es de carpeta).
+create or replace function public.collab_topic_owner_id(topic text)
+returns uuid
+language sql
+immutable
+as $$
+  select case
+    when topic ~ '^andros-collab:f-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}-[0-9a-z]{1,16}$'
+      then substring(topic from 17 for 36)::uuid
+  end;
+$$;
+
+-- ¿Eres el dueño o miembro de al menos un espacio de `owner`?
+create or replace function public.can_join_collab_folder(owner uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select auth.uid() is not null and owner is not null and (
+    owner = auth.uid()
+    or exists (
+      select 1
+      from public.workspace_members m
+      join public.workspaces w on w.id = m.workspace_id
+      where w.owner_id = owner and m.user_id = auth.uid()
+    )
+  );
+$$;
+
+-- Decide si quien llama puede leer (`for_write` = false) o emitir el evento
+-- `event` (true) en el canal `topic`.
+create or replace function public.can_use_collab_topic(topic text, for_write boolean, event text)
+returns boolean
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  ws uuid := public.collab_topic_workspace_id(topic);
+  owner uuid := public.collab_topic_owner_id(topic);
+begin
+  if auth.uid() is null then
+    return false;
+  end if;
+  if ws is not null then
+    if not public.is_workspace_member(ws) then
+      return false;
+    end if;
+    if not for_write then
+      return true;
+    end if;
+    if event in ('node:upsert', 'node:delete', 'edge:upsert', 'edge:delete', 'alert:upsert', 'alert:resolve') then
+      return public.can_edit_workspace(ws);
+    end if;
+    if event in ('access:changed', 'cde:changed') then
+      return public.workspace_owner_id(ws) = auth.uid();
+    end if;
+    -- (Sprint 18) Aviso «hay mensajes nuevos en el chat»: solo quien puede escribir.
+    if event = 'chat:new' then
+      return public.can_comment_workspace(ws);
+    end if;
+    -- comment:* (solo avisos), presencia, cursores, voz, pantalla o entrada al canal.
+    return true;
+  end if;
+  if owner is not null then
+    return public.can_join_collab_folder(owner);
+  end if;
+  return false;
+end;
+$$;
+
+revoke execute on function public.can_join_collab_folder(uuid) from public, anon;
+revoke execute on function public.can_use_collab_topic(text, boolean, text) from public, anon;
+grant execute on function public.can_join_collab_folder(uuid) to authenticated;
+grant execute on function public.can_use_collab_topic(text, boolean, text) to authenticated;
 
 drop policy if exists "andros_collab_receive" on realtime.messages;
 create policy "andros_collab_receive"
   on realtime.messages
   for select
   to authenticated
-  using ( realtime.topic() like 'andros-collab:%' );
+  using (
+    realtime.messages.extension in ('broadcast', 'presence')
+    and public.can_use_collab_topic((select realtime.topic()), false, null)
+  );
 
 drop policy if exists "andros_collab_send" on realtime.messages;
 create policy "andros_collab_send"
   on realtime.messages
   for insert
   to authenticated
-  with check ( realtime.topic() like 'andros-collab:%' );
+  with check (
+    realtime.messages.extension in ('broadcast', 'presence')
+    and public.can_use_collab_topic((select realtime.topic()), true, realtime.messages.event)
+  );
 
 -- ============================================================================
 -- 9. VISTA INVITADO (Sprint 11): enlace público de SOLO LECTURA, sin cuenta
@@ -1060,6 +1279,61 @@ $$;
 revoke all on function public.get_public_workspace(text) from public;
 grant execute on function public.get_public_workspace(text) to anon, authenticated;
 
+-- (Sprint 17B) El token del enlace público es SOLO del dueño. Los miembros
+-- del espacio pueden leer su fila (`workspaces_select_member`), así que la
+-- columna `public_share_token` se oculta con privilegios por columna y el
+-- dueño la lee o la cambia únicamente con las dos funciones de abajo.
+-- IMPORTANTE: si en el futuro se añade una columna a `workspaces` que la app
+-- deba leer, agrégala también a este GRANT.
+revoke select on public.workspaces from anon, authenticated;
+grant select (
+  id, owner_id, name, created_at, updated_at, canvas_strokes, folder, public_share_enabled
+) on public.workspaces to authenticated;
+
+-- Estado del enlace público de UN espacio propio: { enabled, token } o NULL.
+create or replace function public.get_workspace_public_share(ws_id uuid)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select jsonb_build_object('enabled', w.public_share_enabled, 'token', w.public_share_token)
+  from public.workspaces w
+  where w.id = ws_id and auth.uid() is not null and w.owner_id = auth.uid();
+$$;
+
+-- Activa, desactiva o renueva el enlace. Solo el dueño (NULL si no lo es).
+create or replace function public.set_workspace_public_share(ws_id uuid, share_enabled boolean, share_token text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  result jsonb;
+begin
+  if auth.uid() is null then
+    return null;
+  end if;
+  if share_token is not null and share_token !~ '^[A-Za-z0-9_-]{24,64}$' then
+    raise exception 'El token del enlace público no tiene un formato válido.';
+  end if;
+  update public.workspaces w
+     set public_share_enabled = share_enabled,
+         public_share_token = share_token
+   where w.id = ws_id and w.owner_id = auth.uid()
+  returning jsonb_build_object('enabled', w.public_share_enabled, 'token', w.public_share_token)
+    into result;
+  return result;
+end;
+$$;
+
+revoke execute on function public.get_workspace_public_share(uuid) from public, anon;
+revoke execute on function public.set_workspace_public_share(uuid, boolean, text) from public, anon;
+grant execute on function public.get_workspace_public_share(uuid) to authenticated;
+grant execute on function public.set_workspace_public_share(uuid, boolean, text) to authenticated;
+
 -- ============================================================================
 -- 12. COMENTARIOS DEL TABLERO (Sprint 16): roles estilo Google Docs
 --     · Dueño, Editor y Comentarista leen y crean comentarios.
@@ -1109,6 +1383,29 @@ create trigger workspace_comments_guard_update
   before update on public.workspace_comments
   for each row execute function public.workspace_comments_guard_update();
 
+-- (Sprint 17B) El autor y su nombre visible salen de la sesión y del perfil,
+-- nunca del navegador: nadie puede firmar un comentario con otro nombre.
+create or replace function public.workspace_comments_fill_author()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    return new; -- SQL Editor / service role
+  end if;
+  new.author_id := auth.uid();
+  new.author_name := coalesce(public.profile_display_name(auth.uid()), '');
+  return new;
+end;
+$$;
+
+drop trigger if exists workspace_comments_fill_author on public.workspace_comments;
+create trigger workspace_comments_fill_author
+  before insert on public.workspace_comments
+  for each row execute function public.workspace_comments_fill_author();
+
 alter table public.workspace_comments enable row level security;
 
 -- Leer: cualquier persona con acceso al espacio (incluye «Solo lectura»).
@@ -1148,3 +1445,302 @@ create policy "workspace_comments_delete" on public.workspace_comments
     public.can_edit_workspace(workspace_id)
     or (author_id = (select auth.uid()) and public.is_workspace_member(workspace_id))
   );
+
+-- ============================================================================
+-- 18. (Sprint 18) ENTORNO DE DATOS COMÚN (CDE) CENTRADO EN LAS PERSONAS
+--     · Áreas de trabajo nominales (Logística, Presupuesto, Diseño…):
+--         workspaces.work_areas       → lista de áreas activas del espacio.
+--         workspaces.owner_work_area  → área del dueño (no tiene fila en members).
+--         workspace_members.work_area → área de cada miembro.
+--       Solo el dueño las cambia (workspaces_guard_shared_update y la política
+--       workspace_members_update_owner).
+--     · workspace_chat_messages: chat del lienzo con menciones @Área, @usuario
+--       y @IA. Lo leen todos los miembros (también «Solo lectura»); escriben
+--       dueño, Editor y Comentarista. El autor, su nombre y su área los pone el
+--       trigger desde `profiles` y `workspace_members` (nunca el navegador).
+--       `kind = 'ai-alert'` guarda la evaluación de la IA de un reporte
+--       («@IA se retrasó el proveedor…») como alerta trazable del espacio.
+--     · En vivo: la app solo emite `chat:new` (aviso de «vuelve a leer»); cada
+--       quien relee la tabla con su RLS (regla 17B: nada se guarda por otro).
+--     Idempotente: se puede ejecutar varias veces sin perder datos.
+-- ============================================================================
+
+alter table public.workspace_members add column if not exists work_area text not null default '';
+alter table public.workspace_members drop constraint if exists workspace_members_work_area_len;
+alter table public.workspace_members add constraint workspace_members_work_area_len
+  check (char_length(work_area) <= 32);
+
+alter table public.workspaces add column if not exists work_areas jsonb not null default '[]'::jsonb;
+alter table public.workspaces add column if not exists owner_work_area text not null default '';
+alter table public.workspaces drop constraint if exists workspaces_work_areas_shape;
+alter table public.workspaces add constraint workspaces_work_areas_shape
+  check (jsonb_typeof(work_areas) = 'array' and jsonb_array_length(work_areas) <= 12);
+alter table public.workspaces drop constraint if exists workspaces_owner_work_area_len;
+alter table public.workspaces add constraint workspaces_owner_work_area_len
+  check (char_length(owner_work_area) <= 32);
+
+create table if not exists public.workspace_chat_messages (
+  id              uuid primary key default gen_random_uuid(),
+  workspace_id    uuid not null references public.workspaces (id) on delete cascade,
+  author_id       uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  author_name     text not null default '' check (char_length(author_name) <= 120),
+  author_area     text not null default '' check (char_length(author_area) <= 32),
+  body            text not null check (char_length(btrim(body)) between 1 and 2000),
+  mentions        jsonb not null default '[]'::jsonb,
+  linked_node_id  text check (linked_node_id is null or char_length(linked_node_id) between 1 and 120),
+  kind            text not null default 'message',
+  alert           jsonb,
+  created_at      timestamptz not null default now()
+);
+
+-- Bases donde la tabla ya existía con menos columnas.
+alter table public.workspace_chat_messages add column if not exists author_area text not null default '';
+alter table public.workspace_chat_messages add column if not exists mentions jsonb not null default '[]'::jsonb;
+alter table public.workspace_chat_messages add column if not exists linked_node_id text;
+alter table public.workspace_chat_messages add column if not exists kind text not null default 'message';
+alter table public.workspace_chat_messages add column if not exists alert jsonb;
+
+alter table public.workspace_chat_messages drop constraint if exists workspace_chat_messages_kind_check;
+alter table public.workspace_chat_messages add constraint workspace_chat_messages_kind_check
+  check (kind in ('message', 'ai-alert'));
+alter table public.workspace_chat_messages drop constraint if exists workspace_chat_messages_mentions_shape;
+alter table public.workspace_chat_messages add constraint workspace_chat_messages_mentions_shape
+  check (jsonb_typeof(mentions) = 'array' and jsonb_array_length(mentions) <= 30);
+alter table public.workspace_chat_messages drop constraint if exists workspace_chat_messages_alert_shape;
+alter table public.workspace_chat_messages add constraint workspace_chat_messages_alert_shape
+  check (
+    (kind = 'message' and alert is null)
+    or (kind = 'ai-alert' and jsonb_typeof(alert) = 'object' and octet_length(alert::text) <= 8000)
+  );
+
+create index if not exists workspace_chat_messages_ws_idx
+  on public.workspace_chat_messages (workspace_id, created_at desc);
+
+-- Autor, nombre visible y área: SIEMPRE de la sesión, del perfil y de la fila
+-- de miembro (o del área del dueño). Nadie firma con otro nombre ni otra área.
+create or replace function public.workspace_chat_fill_author()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    return new; -- SQL Editor / service role
+  end if;
+  new.author_id := auth.uid();
+  new.author_name := coalesce(public.profile_display_name(auth.uid()), '');
+  new.author_area := coalesce(
+    (select nullif(btrim(m.work_area), '') from public.workspace_members m
+      where m.workspace_id = new.workspace_id and m.user_id = auth.uid()),
+    (select nullif(btrim(w.owner_work_area), '') from public.workspaces w
+      where w.id = new.workspace_id and w.owner_id = auth.uid()),
+    ''
+  );
+  new.created_at := now();
+  return new;
+end;
+$$;
+
+drop trigger if exists workspace_chat_fill_author on public.workspace_chat_messages;
+create trigger workspace_chat_fill_author
+  before insert on public.workspace_chat_messages
+  for each row execute function public.workspace_chat_fill_author();
+
+-- Los mensajes no se editan (trazabilidad): solo se borran.
+create or replace function public.workspace_chat_block_update()
+returns trigger
+language plpgsql
+as $$
+begin
+  raise exception 'Los mensajes del chat no se editan: bórralo y escribe uno nuevo.';
+end;
+$$;
+
+drop trigger if exists workspace_chat_block_update on public.workspace_chat_messages;
+create trigger workspace_chat_block_update
+  before update on public.workspace_chat_messages
+  for each row execute function public.workspace_chat_block_update();
+
+alter table public.workspace_chat_messages enable row level security;
+
+-- Leer: cualquier persona con acceso al espacio (incluye «Solo lectura»).
+drop policy if exists "workspace_chat_select" on public.workspace_chat_messages;
+create policy "workspace_chat_select" on public.workspace_chat_messages
+  for select to authenticated
+  using (public.is_workspace_member(workspace_id));
+
+-- Escribir: dueño, Editor y Comentarista, siempre como uno mismo.
+drop policy if exists "workspace_chat_insert" on public.workspace_chat_messages;
+create policy "workspace_chat_insert" on public.workspace_chat_messages
+  for insert to authenticated
+  with check (
+    public.can_comment_workspace(workspace_id)
+    and author_id = (select auth.uid())
+  );
+
+-- Sin política de UPDATE: nadie edita mensajes (además lo bloquea el trigger).
+drop policy if exists "workspace_chat_update" on public.workspace_chat_messages;
+
+-- Borrar: el propio autor (si sigue en el espacio) o el dueño.
+drop policy if exists "workspace_chat_delete" on public.workspace_chat_messages;
+create policy "workspace_chat_delete" on public.workspace_chat_messages
+  for delete to authenticated
+  using (
+    (author_id = (select auth.uid()) and public.is_workspace_member(workspace_id))
+    or public.workspace_owner_id(workspace_id) = (select auth.uid())
+  );
+
+-- ============================================================================
+-- 21. (Sprint 21) SUSCRIPCIONES (PLAN BASICO / ANDROS PRO) Y LIMITES REALES
+--     · user_subscriptions: una fila por cuenta con su plan y el estado que
+--       informa el proveedor de pagos (Merchant of Record). Andros NUNCA
+--       guarda datos de tarjeta: solo ids del proveedor y fechas.
+--     · RLS: cada persona solo LEE su propia fila. No hay politicas de
+--       INSERT/UPDATE/DELETE para el navegador y ademas se revocan esos
+--       permisos: solo el servidor (service_role, desde el webhook firmado
+--       /api/billing/webhook) escribe. Nadie puede auto-asignarse 'pro'.
+--     · user_plan(uid): plan efectivo ('free' | 'pro'), igual que
+--       planFromSubscription() en src/lib/billing/planLimits.ts (estados con
+--       acceso Pro y 72 h de margen tras current_period_end). Uso interno.
+--     · workspace_live_cap(ws_id): tope de personas en vivo del espacio segun
+--       el plan de su DUENO (3 Basico / 6 Pro). Solo para miembros.
+--     · Trigger workspaces_enforce_plan_limit: el Plan Basico no puede crear
+--       un 3.er espacio propio aunque alguien salte la interfaz.
+--     Idempotente: se puede ejecutar varias veces sin perder datos.
+-- ============================================================================
+
+create table if not exists public.user_subscriptions (
+  user_id                   uuid primary key references auth.users (id) on delete cascade,
+  plan                      text not null default 'free',
+  status                    text not null default 'inactive',
+  billing_cycle             text,
+  provider                  text,
+  provider_customer_id      text,
+  provider_subscription_id  text,
+  current_period_end        timestamptz,
+  updated_at                timestamptz not null default now()
+);
+
+-- Bases donde la tabla ya existia con menos columnas.
+alter table public.user_subscriptions add column if not exists plan text not null default 'free';
+alter table public.user_subscriptions add column if not exists status text not null default 'inactive';
+alter table public.user_subscriptions add column if not exists billing_cycle text;
+alter table public.user_subscriptions add column if not exists provider text;
+alter table public.user_subscriptions add column if not exists provider_customer_id text;
+alter table public.user_subscriptions add column if not exists provider_subscription_id text;
+alter table public.user_subscriptions add column if not exists current_period_end timestamptz;
+alter table public.user_subscriptions add column if not exists updated_at timestamptz not null default now();
+
+alter table public.user_subscriptions drop constraint if exists user_subscriptions_plan_check;
+alter table public.user_subscriptions add constraint user_subscriptions_plan_check
+  check (plan in ('free','pro'));
+alter table public.user_subscriptions drop constraint if exists user_subscriptions_cycle_check;
+alter table public.user_subscriptions add constraint user_subscriptions_cycle_check
+  check (billing_cycle is null or billing_cycle in ('monthly','annual'));
+alter table public.user_subscriptions drop constraint if exists user_subscriptions_text_len;
+alter table public.user_subscriptions add constraint user_subscriptions_text_len
+  check (
+    char_length(status) <= 32
+    and (provider is null or char_length(provider) <= 32)
+    and (provider_customer_id is null or char_length(provider_customer_id) <= 64)
+    and (provider_subscription_id is null or char_length(provider_subscription_id) <= 64)
+  );
+
+drop trigger if exists user_subscriptions_set_updated_at on public.user_subscriptions;
+create trigger user_subscriptions_set_updated_at
+  before update on public.user_subscriptions
+  for each row execute function public.set_updated_at();
+
+alter table public.user_subscriptions enable row level security;
+
+-- Leer: solo la fila propia.
+drop policy if exists "user_subscriptions_select_own" on public.user_subscriptions;
+create policy "user_subscriptions_select_own" on public.user_subscriptions
+  for select to authenticated
+  using (user_id = (select auth.uid()));
+
+-- Escribir: NADIE desde el navegador (sin politicas y sin permisos).
+drop policy if exists "user_subscriptions_insert" on public.user_subscriptions;
+drop policy if exists "user_subscriptions_update" on public.user_subscriptions;
+drop policy if exists "user_subscriptions_delete" on public.user_subscriptions;
+revoke insert, update, delete, truncate on public.user_subscriptions from anon, authenticated;
+revoke all on public.user_subscriptions from anon;
+grant select on public.user_subscriptions to authenticated;
+grant all on public.user_subscriptions to service_role;
+
+-- Plan efectivo de una cuenta (uso interno de las funciones de abajo).
+create or replace function public.user_plan(uid uuid)
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select case
+    when exists (
+      select 1 from public.user_subscriptions s
+      where s.user_id = uid
+        and s.plan = 'pro'
+        and s.status in ('active', 'on_trial', 'past_due', 'cancelled')
+        and (s.current_period_end is null or s.current_period_end + interval '72 hours' > now())
+    ) then 'pro'
+    else 'free'
+  end;
+$$;
+
+-- Nadie consulta el plan de otra cuenta desde el navegador.
+revoke all on function public.user_plan(uuid) from public, anon, authenticated;
+
+-- Tope de personas en vivo del espacio (plan del DUENO): 3 Basico / 6 Pro.
+-- NULL si quien pregunta no es miembro del espacio.
+create or replace function public.workspace_live_cap(ws_id uuid)
+returns integer
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select case
+    when not public.is_workspace_member(ws_id) then null
+    when public.user_plan(public.workspace_owner_id(ws_id)) = 'pro' then 6
+    else 3
+  end;
+$$;
+
+revoke all on function public.workspace_live_cap(uuid) from public, anon;
+grant execute on function public.workspace_live_cap(uuid) to authenticated;
+
+-- Plan Basico: hasta 2 espacios propios (los compartidos contigo no cuentan).
+create or replace function public.workspaces_enforce_plan_limit()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  owned integer;
+begin
+  if auth.uid() is null then
+    return new; -- SQL Editor / service role
+  end if;
+  if public.user_plan(new.owner_id) = 'pro' then
+    return new;
+  end if;
+  -- Serializa las altas de la misma cuenta (dos pestanas a la vez).
+  perform pg_advisory_xact_lock(hashtext('andros-ws-limit:' || new.owner_id::text));
+  select count(*) into owned from public.workspaces where owner_id = new.owner_id;
+  if owned >= 2 then
+    raise exception 'Plan Básico: hasta 2 espacios activos. Pasa a Andros Pro para crear más.'
+      using errcode = 'P0001';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function public.workspaces_enforce_plan_limit() from public, anon, authenticated;
+
+drop trigger if exists workspaces_enforce_plan_limit on public.workspaces;
+create trigger workspaces_enforce_plan_limit
+  before insert on public.workspaces
+  for each row execute function public.workspaces_enforce_plan_limit();

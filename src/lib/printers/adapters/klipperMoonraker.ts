@@ -11,6 +11,7 @@
 import type { PrintResult, PrinterStatus } from "@/lib/printer/flashforgeShared";
 import { canReachLocalNetwork, getDesktopBridge } from "@/lib/printer/printerClient";
 import type { LocalTarget } from "../network";
+import { PRINTER_BRIDGE_HEADERS } from "@/lib/printer/bridgeGuard";
 import { SLICERS, printerName } from "../registry";
 import { handoffToSlicer, profileSummary } from "./handoff";
 import type { PrinterAdapter } from "./types";
@@ -42,7 +43,7 @@ export const klipperMoonrakerAdapter: PrinterAdapter = {
     const bridge = getDesktopBridge();
     if (bridge?.klipper) return bridge.klipper.status(target.ip, target.port);
     const query = new URLSearchParams({ ip: target.ip, port: String(target.port) });
-    const res = await fetch(`${ROUTE}?${query.toString()}`, { cache: "no-store" });
+    const res = await fetch(`${ROUTE}?${query.toString()}`, { cache: "no-store", headers: PRINTER_BRIDGE_HEADERS });
     return readJson<PrinterStatus>(res, "No se pudo leer el estado de la impresora.");
   },
 
@@ -52,7 +53,7 @@ export const klipperMoonrakerAdapter: PrinterAdapter = {
     const query = new URLSearchParams({ action: "print", ip: target.ip, port: String(target.port), name: fileName });
     const res = await fetch(`${ROUTE}?${query.toString()}`, {
       method: "POST",
-      headers: { "Content-Type": "application/octet-stream" },
+      headers: { "Content-Type": "application/octet-stream", ...PRINTER_BRIDGE_HEADERS },
       body: new Blob([bytes]),
     });
     return readJson<PrintResult>(res, "La impresora no confirmó el trabajo.");

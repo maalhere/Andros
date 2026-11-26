@@ -200,7 +200,7 @@ export async function publishArenaPost(
 
   const supabase = getSupabaseBrowserClient();
   if (!supabase || !user) {
-    return saveLocal("Publicado en este navegador. Inicia sesión con Google para publicarlo en la nube de la Arena.");
+    return saveLocal("Publicado en este navegador. Inicia sesión para publicarlo en la nube de la Arena.");
   }
   if (!cloudReady) return saveLocal(`Publicado en este navegador. ${ARENA_SETUP_HINT}`);
 
@@ -284,7 +284,7 @@ export async function submitToArena(
     return saveLocal("¡Listo! Es una publicación de ejemplo, así que tu portafolio se guardó en este navegador y ya aparece en «Soluciones».");
   }
   if (input.post.isLocal) return saveLocal("Postulación guardada en este navegador junto a la publicación local.");
-  if (!supabase || !user) return saveLocal("Guardada en este navegador. Inicia sesión con Google para enviarla a quien publicó.");
+  if (!supabase || !user) return saveLocal("Guardada en este navegador. Inicia sesión para enviarla a quien publicó.");
   if (!cloudReady) return saveLocal(`Guardada en este navegador. ${ARENA_SETUP_HINT}`);
 
   // Solo se enlaza el espacio si es un UUID de la nube (el lienzo local no lo es).

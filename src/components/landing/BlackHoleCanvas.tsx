@@ -29,7 +29,7 @@ uniform vec2 uRes;      // tamaño del lienzo en píxeles físicos
 uniform vec2 uCenter;   // centro de la singularidad (píxeles físicos)
 uniform float uRadius;  // radio de la sombra (píxeles físicos)
 uniform float uTime;    // segundos (congelado con movimiento reducido)
-uniform float uLight;   // 0 = Obsidian Monolith, 1 = Paper Modernist
+uniform float uLight;   // 0 = motor oscuro, 1 = motor claro
 
 const float PI = 3.14159265;
 const float TAU = 6.28318531;
@@ -135,7 +135,7 @@ void main() {
   float re = 2.6 * uRadius / minRes;
   vec2 q = s * (1.0 - re * re / max(dot(s, s), 1e-5));
 
-  // ---- Obsidian Monolith ---------------------------------------------------
+  // ---- Motor oscuro --------------------------------------------------------
   vec2 cell = q * 90.0;
   vec2 cid = floor(cell);
   float sh = hash(cid);

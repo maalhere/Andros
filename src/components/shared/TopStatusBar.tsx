@@ -18,12 +18,27 @@ import { CollabRoomButton } from "@/components/collab/VoiceRoomBar";
 import { ShareWorkspaceButton } from "@/components/social/ShareWorkspaceModal";
 import { CommentsButton } from "@/components/comments/CommentsDrawer";
 import { ExperienceModeToggle } from "./ExperienceModeToggle";
+import { ChatButton } from "@/components/cde/WorkspaceChatPanel";
+import { ResolutionStatusPill } from "@/components/cde/ResolutionStatusPill";
+import { useIsExpert } from "@/store/useSettingsStore";
+import { useCollabStore } from "@/store/useCollabStore";
+import { ExternalCalendarsButton } from "@/components/calendar/ExternalCalendarsButton";
 
 // ============================================================================
 // ANDROS — BARRA SUPERIOR (mínima)
 //   Izquierda: logo + selector de proyecto/carpeta.
-//   Derecha:   Canal de voz · Compartir · Comentarios · Día/Noche · Instalar App · Cuenta de Google · ⋯ Más opciones.
+//   Modo Experto: Buscar · Arena · ? · Simple|Experto · Voz · Rojo/Verde ·
+//                 Compartir · Chat · Comentarios · Día/Noche · Instalar · Cuenta · ⋯
+//   Modo Simple (Sprint 19, se entiende en < 5 s): solo lo esencial para
+//                 equipos → Rojo/Verde · Calendarios · Compartir · Chat/Bandeja ·
+//                 Cuenta · ⋯. Lo demás (buscar, voz, comentarios, tema,
+//                 instalar, modo y ayuda) vive agrupado en ⋯. La voz reaparece
+//                 en la barra solo mientras hay alguien en la sala.
 // ============================================================================
+
+/** ¿Hay una llamada en curso (yo o alguien del espacio)? */
+const useVoiceActive = (): boolean =>
+  useCollabStore((s) => s.inCall || s.callConnecting || Boolean(s.invite) || Object.values(s.peers).some((p) => p.inCall));
 
 interface TopStatusBarProps {
   isMobile: boolean;
@@ -35,6 +50,9 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({ isMobile }) => {
   const modKey = useModKey();
   // Con pestañas visibles (h-11 móvil / h-9 escritorio) la barra baja para no solaparse.
   const hasTabs = useTabsBarVisible();
+  // (Sprint 18/19) Modo Simple: chat, alertas Rojo/Verde, calendarios y compartir.
+  const expert = useIsExpert();
+  const voiceActive = useVoiceActive();
 
   return (
     <header
@@ -75,43 +93,60 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({ isMobile }) => {
 
       {/* Acciones: solo lo esencial */}
       <div className="pointer-events-auto shrink-0 flex items-center gap-1.5 md:gap-2">
-        {/* Paleta de comandos: solo escritorio (en el teléfono ya hay barra táctil) */}
-        <button
-          type="button"
-          onClick={() => useCommandPaletteStore.getState().setOpen(true)}
-          aria-label="Buscar nodos y acciones"
-          aria-keyshortcuts="Control+K Meta+K"
-          className="hidden md:flex items-center gap-2 h-9 pl-2.5 pr-1.5 rounded-xl bg-andros-surface backdrop-blur-md border border-andros-border text-andros-muted hover:text-andros-primary shadow-sm active:scale-[0.96] spring-micro"
-        >
-          <Search className="w-4 h-4" aria-hidden="true" />
-          <span className="text-xs">Buscar</span>
-          <Kbd>{modKey} K</Kbd>
-        </button>
-        <button
-          type="button"
-          onClick={() => useMarketStore.getState().setArenaOpen(true)}
-          aria-label="Abrir Andros Arena"
-          className="w-11 h-11 md:w-auto md:h-9 md:px-3 rounded-xl bg-andros-surface backdrop-blur-md border border-andros-border text-andros-muted hover:text-andros-primary shadow-sm active:scale-[0.96] spring-micro flex items-center justify-center gap-1.5"
-        >
-          <Swords className="w-4 h-4 text-andros-accent-ink" aria-hidden="true" />
-          <span className="hidden md:inline text-xs font-medium text-andros-primary">Arena</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => useShortcutsGuideStore.getState().openGuide()}
-          aria-label="Abrir guía de atajos y ayuda"
-          aria-keyshortcuts="Shift+/"
-          title="Atajos y ayuda (?)"
-          className="hidden md:flex w-9 h-9 rounded-xl bg-andros-surface backdrop-blur-md border border-andros-border text-andros-muted hover:text-andros-primary shadow-sm active:scale-[0.96] spring-micro items-center justify-center"
-        >
-          <CircleHelp className="w-4 h-4" aria-hidden="true" />
-        </button>
-        <ExperienceModeToggle />
-        <CollabRoomButton />
-        <ShareWorkspaceButton />
-        <CommentsButton />
-        <ThemeToggle />
-        <InstallAppButton isMobile={isMobile} />
+        {expert ? (
+          <>
+            {/* Paleta de comandos: solo escritorio (en el teléfono ya hay barra táctil) */}
+            <button
+              type="button"
+              onClick={() => useCommandPaletteStore.getState().setOpen(true)}
+              aria-label="Buscar nodos y acciones"
+              aria-keyshortcuts="Control+K Meta+K"
+              className="hidden md:flex items-center gap-2 h-9 pl-2.5 pr-1.5 rounded-xl bg-andros-surface backdrop-blur-md border border-andros-border text-andros-muted hover:text-andros-primary shadow-sm active:scale-[0.96] spring-micro"
+            >
+              <Search className="w-4 h-4" aria-hidden="true" />
+              <span className="text-xs">Buscar</span>
+              <Kbd>{modKey} K</Kbd>
+            </button>
+            <button
+              type="button"
+              onClick={() => useMarketStore.getState().setArenaOpen(true)}
+              aria-label="Abrir Andros Arena"
+              className="w-11 h-11 md:w-auto md:h-9 md:px-3 rounded-xl bg-andros-surface backdrop-blur-md border border-andros-border text-andros-muted hover:text-andros-primary shadow-sm active:scale-[0.96] spring-micro flex items-center justify-center gap-1.5"
+            >
+              <Swords className="w-4 h-4 text-andros-accent-ink" aria-hidden="true" />
+              <span className="hidden md:inline text-xs font-medium text-andros-primary">Arena</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => useShortcutsGuideStore.getState().openGuide()}
+              aria-label="Abrir guía de atajos y ayuda"
+              aria-keyshortcuts="Shift+/"
+              title="Atajos y ayuda (?)"
+              className="hidden md:flex w-9 h-9 rounded-xl bg-andros-surface backdrop-blur-md border border-andros-border text-andros-muted hover:text-andros-primary shadow-sm active:scale-[0.96] spring-micro items-center justify-center"
+            >
+              <CircleHelp className="w-4 h-4" aria-hidden="true" />
+            </button>
+            <ExperienceModeToggle />
+            <CollabRoomButton />
+            {/* Filtro rápido Rojo / Verde (en el teléfono va dentro de la pila) */}
+            {!isMobile && <ResolutionStatusPill />}
+            <ShareWorkspaceButton />
+            <ChatButton />
+            <CommentsButton />
+            <ThemeToggle />
+            <InstallAppButton isMobile={isMobile} />
+          </>
+        ) : (
+          <>
+            {/* La voz solo ocupa sitio mientras alguien está en la sala */}
+            {voiceActive && <CollabRoomButton />}
+            {/* Alertas unificadas: filtro Rojo / Verde (en el teléfono va dentro de la pila) */}
+            {!isMobile && <ResolutionStatusPill />}
+            <ExternalCalendarsButton />
+            <ShareWorkspaceButton showOnMobile />
+            <ChatButton />
+          </>
+        )}
         <GoogleAuthButton isMobile={isMobile} />
         <MoreMenu />
       </div>

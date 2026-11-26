@@ -10,6 +10,7 @@ import type {
   RemoteEditor,
   ScreenShareNodeData,
 } from "@/types/collab";
+import { MAX_SPACE_PARTICIPANTS } from "@/types/collab";
 import { canEditCanvas, type WorkspaceRole } from "@/lib/access/permissions";
 import { currentWorkspaceRole, useWorkspaceRole } from "@/lib/access/workspaceRole";
 
@@ -147,7 +148,7 @@ interface CollabState {
   resetRoom: () => void;
 }
 
-const EMPTY_CAPACITY: CollabCapacity = { spaceCount: 0, voiceCount: 0, readOnly: false };
+const EMPTY_CAPACITY: CollabCapacity = { spaceCount: 0, voiceCount: 0, readOnly: false, limit: MAX_SPACE_PARTICIPANTS };
 
 function sameEditors(a: Record<string, RemoteEditor>, b: Record<string, RemoteEditor>): boolean {
   const keys = Object.keys(a);
@@ -302,7 +303,8 @@ export const useCollabStore = create<CollabState>((set) => ({
     set((state) =>
       state.capacity.spaceCount === capacity.spaceCount &&
       state.capacity.voiceCount === capacity.voiceCount &&
-      state.capacity.readOnly === capacity.readOnly
+      state.capacity.readOnly === capacity.readOnly &&
+      state.capacity.limit === capacity.limit
         ? {}
         : { capacity }
     ),

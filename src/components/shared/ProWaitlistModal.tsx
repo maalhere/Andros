@@ -14,8 +14,8 @@ import { PRO_PLAN } from "@/lib/plans";
 //   · Sin backend ni base de datos: prepara un correo a CONTACT_EMAIL con la
 //     solicitud (igual que el formulario de contacto). Andros no guarda nada.
 //   · Solo pide lo imprescindible (correo) + consentimiento SIN marcar.
-//   · Cuando exista la pasarela (Lemon Squeezy / Paddle), `startProCheckout`
-//     de `src/lib/plans.ts` redirigirá al cobro y este modal dejará de abrirse.
+//   · (Sprint 21) Solo se abre si `/api/billing/checkout` responde 503 (la
+//     pasarela aún sin variables). Con la pasarela activa, el cobro es directo.
 // ============================================================================
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -32,10 +32,10 @@ export const ProWaitlistModal: React.FC = () => {
     <SocialDialog
       open={open}
       onClose={close}
-      title="Acceso anticipado a Andros Pro"
+      title="Avisarme cuando abran los pagos de Pro"
       titleId="andros-pro-waitlist-title"
       icon={<Crown className="w-4 h-4 text-andros-accent-ink" aria-hidden="true" />}
-      description={`Andros Pro costará ${PRO_PLAN.price} ${PRO_PLAN.period}. Aún no cobramos: deja tu correo y te avisaremos en cuanto abra, sin compromiso.`}
+      description={`Andros Pro cuesta ${PRO_PLAN.price} ${PRO_PLAN.period} ${PRO_PLAN.altPrice ?? ""}. Los pagos se activarán muy pronto: deja tu correo y te avisaremos en cuanto abran, sin compromiso.`}
     >
       {/* Se monta de nuevo en cada apertura: el formulario empieza limpio. */}
       {open && <WaitlistForm defaultEmail={accountEmail} onClose={close} />}
@@ -62,7 +62,7 @@ const WaitlistForm: React.FC<{ defaultEmail: string; onClose: () => void }> = ({
     }
     const subject = encodeURIComponent("[Andros] Lista de espera Pro");
     const body = encodeURIComponent(
-      `Hola, quiero acceso anticipado a Andros Pro (${PRO_PLAN.price} ${PRO_PLAN.period}).\n\n— Avisar a: ${email.trim()}`
+      `Hola, avísenme cuando pueda pasar a Andros Pro (${PRO_PLAN.price} ${PRO_PLAN.period}).\n\n— Avisar a: ${email.trim()}`
     );
     window.location.assign(`mailto:${CONTACT_EMAIL}?subject=${subject}&body=${body}`);
     setSent(true);
@@ -120,7 +120,7 @@ const WaitlistForm: React.FC<{ defaultEmail: string; onClose: () => void }> = ({
       </button>
       <p className="text-[11px] leading-relaxed text-andros-muted">
         No guardamos nada en este formulario: se abre tu app de correo con la solicitud lista para
-        enviar. Puedes seguir usando el plan Gratis sin límites de tiempo.
+        enviar. Puedes seguir usando el Plan Básico sin límite de tiempo.
       </p>
     </form>
   );

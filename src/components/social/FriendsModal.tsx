@@ -194,7 +194,7 @@ export const FriendsModal: React.FC = () => {
       }
     >
       {!user ? (
-        <p className="text-sm text-andros-muted">Inicia sesión con Google para añadir amigos y compartir espacios.</p>
+        <p className="text-sm text-andros-muted">Inicia sesión para añadir amigos y compartir espacios.</p>
       ) : setupMissing ? (
         <SetupNotice text={SOCIAL_SETUP_HINT} />
       ) : (

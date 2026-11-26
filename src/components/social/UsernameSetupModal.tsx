@@ -185,7 +185,7 @@ export const UsernameSetupModal: React.FC = () => {
 
         {user?.email && (
           <div className="px-3 py-2 rounded-lg border border-andros-border bg-andros-surface">
-            <p className="text-[11px] text-andros-muted">Correo confirmado por Google</p>
+            <p className="text-[11px] text-andros-muted">Correo verificado al iniciar sesión</p>
             <p className="truncate text-sm text-andros-primary">{user.email}</p>
             <p className="mt-0.5 text-[11px] text-andros-muted">
               Solo sirve para que alguien que ya lo conoce te encuentre; nunca se muestra a otras personas.

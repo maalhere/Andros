@@ -8,13 +8,17 @@ import type { CanvasStroke, EngineeringNodeData, NodeConnection } from "./worksp
 import type { ImpactAlertEntry } from "@/lib/canvas/impact";
 import type { WorkspaceComment } from "@/lib/comments/commentModel";
 import type { MemberRole } from "@/lib/access/permissions";
+import { PLAN_LIMITS } from "@/lib/billing/planLimits";
 
 /**
- * Tope duro por espacio: con 6 la edición en vivo sigue siendo coordinable y
- * la malla WebRTC no satura la subida de nadie. Quien llega 7.º ve el lienzo
- * en modo lectura (sin emitir por Realtime ni abrir WebRTC).
+ * Tope ABSOLUTO por espacio (Andros Pro): con 6 la edición en vivo sigue
+ * siendo coordinable y la malla WebRTC no satura la subida de nadie.
+ * (Sprint 21) El tope real de cada espacio lo pone el plan de su DUEÑO
+ * (`workspace_live_cap()` en Supabase): 3 en Plan Básico y 6 en Pro. Quien
+ * llega después del tope ve el lienzo en modo lectura (sin emitir por
+ * Realtime ni abrir WebRTC).
  */
-export const MAX_SPACE_PARTICIPANTS = 6;
+export const MAX_SPACE_PARTICIPANTS = PLAN_LIMITS.pro.maxLiveParticipants;
 /** Tope del canal de voz/vídeo (malla P2P: cada persona sube N−1 flujos). */
 export const MAX_VOICE_PARTICIPANTS = 5;
 
@@ -86,8 +90,10 @@ export interface CollabCapacity {
   spaceCount: number;
   /** Personas dentro de la voz de la sala (tú incluido si estás dentro). */
   voiceCount: number;
-  /** Llegaste después del 6.º: ves el lienzo en modo lectura. */
+  /** Llegaste después del tope del espacio: ves el lienzo en modo lectura. */
   readOnly: boolean;
+  /** (Sprint 21) Tope de personas en vivo de ESTE espacio (plan del dueño). */
+  limit: number;
 }
 
 /** Cursor remoto en coordenadas del lienzo. */

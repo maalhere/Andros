@@ -183,7 +183,7 @@ function describeGeminiFailure(
     return {
       code: "invalid_key",
       message:
-        "Google rechazó tu GEMINI_API_KEY (no es válida, caducó o fue revocada). Genera una nueva en https://aistudio.google.com/apikey, reemplázala en .env.local (o en Vercel → Settings → Environment Variables) y reinicia el servidor.",
+        "Google rechazó tu GEMINI_API_KEY (no es válida, caducó o fue revocada). Genera una nueva en https://aistudio.google.com/apikey, reemplázala en .env.local (o en las variables de entorno de tu alojamiento) y reinicia el servidor.",
     };
   }
   if (http.length > 0 && http.length === errors.length && http.every((e) => e.status === 429)) {

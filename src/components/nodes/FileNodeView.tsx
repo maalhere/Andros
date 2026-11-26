@@ -630,8 +630,8 @@ export const FileNodeView: React.FC<FileNodeViewProps> = ({ node, variant }) => 
               <LogIn className="w-3.5 h-3.5 shrink-0 mt-0.5 text-andros-accent-ink" />
               <span>
                 {isCloudWorthy && file.extension !== "pdf"
-                  ? "Inicia sesión con Google arriba para guardar este archivo 3D en tu nube"
-                  : "Inicia sesión con Google arriba para guardar este archivo en tu nube"}
+                  ? "Inicia sesión arriba para guardar este archivo 3D en tu nube"
+                  : "Inicia sesión arriba para guardar este archivo en tu nube"}
               </span>
             </p>
           )}

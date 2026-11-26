@@ -183,7 +183,7 @@ export async function copyAlertNotice(alert: ImpactAlertEntry): Promise<void> {
   const text = alertShareText(alert);
   try {
     await navigator.clipboard.writeText(text);
-    toast({ message: "Aviso copiado: pégalo en WhatsApp o léelo en la sala de voz.", tone: "success" });
+    toast({ message: "Aviso copiado: pégalo en el chat de tu equipo o léelo en la sala de voz.", tone: "success" });
   } catch {
     // Portapapeles bloqueado (HTTP, permisos): se muestra para copiarlo a mano.
     toast({ message: text, durationMs: 12_000 });

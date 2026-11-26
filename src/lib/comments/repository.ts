@@ -5,7 +5,7 @@
 // ============================================================================
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { normalizeMemberRole, type MemberRole } from "@/lib/access/permissions";
+import { isMemberRole, type MemberRole } from "@/lib/access/permissions";
 import { COMMENT_MAX_CHARS, sanitizeComment, type WorkspaceComment } from "./commentModel";
 
 export const COMMENTS_SETUP_HINT =
@@ -81,17 +81,27 @@ export async function deleteComment(supabase: SupabaseClient, id: string): Promi
   if (!Array.isArray(data) || data.length === 0) throw new Error("Tu permiso no permite borrar este comentario.");
 }
 
-/** Roles de los miembros del espacio (para ignorar ediciones en vivo sin permiso). */
-export async function listMemberRoles(
-  supabase: SupabaseClient,
-  workspaceId: string
-): Promise<[string, MemberRole][]> {
-  const { data, error } = await supabase
-    .from("workspace_members")
-    .select("user_id, role")
-    .eq("workspace_id", workspaceId);
-  if (error) return [];
-  return ((data ?? []) as { user_id: unknown; role: unknown }[])
-    .filter((r) => typeof r.user_id === "string")
-    .map((r) => [r.user_id as string, normalizeMemberRole(r.role)]);
+/** Acceso verificado de un espacio: su dueño y los roles de sus miembros. */
+export interface WorkspaceAccess {
+  ownerId: string | null;
+  roles: [string, MemberRole][];
+}
+
+/**
+ * (Sprint 17B) Dueño y roles leídos de la base con TU RLS. Sirve para aceptar
+ * en vivo solo ediciones de quien tiene permiso verificado (denegar por
+ * defecto). Un rol desconocido se descarta: nunca se convierte en «Editor».
+ */
+export async function loadWorkspaceAccess(supabase: SupabaseClient, workspaceId: string): Promise<WorkspaceAccess> {
+  const [owner, members] = await Promise.all([
+    supabase.from("workspaces").select("owner_id").eq("id", workspaceId).maybeSingle(),
+    supabase.from("workspace_members").select("user_id, role").eq("workspace_id", workspaceId),
+  ]);
+  const ownerRaw = (owner.data as { owner_id?: unknown } | null)?.owner_id;
+  const roles = members.error
+    ? []
+    : ((members.data ?? []) as { user_id: unknown; role: unknown }[])
+        .filter((r) => typeof r.user_id === "string" && isMemberRole(r.role))
+        .map((r): [string, MemberRole] => [r.user_id as string, r.role as MemberRole]);
+  return { ownerId: !owner.error && typeof ownerRaw === "string" ? ownerRaw : null, roles };
 }

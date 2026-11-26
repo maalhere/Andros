@@ -4,9 +4,10 @@
 // Cuando la sala en vivo aplica al lienzo un cambio que llegó por Broadcast,
 // lo envuelve en `runAsRemoteCollab`. Mientras dura:
 //   · `canvasSync` NO lo vuelve a emitir (sin bucles de red).
-//   · `useCloudSync` NO programa un autoguardado si el cambio vino de otro
-//     equipo del MISMO usuario (ese equipo ya lo guarda). Si vino de un
-//     invitado (otra cuenta), el dueño sí lo guarda: solo él tiene permiso.
+//   · `useCloudSync` NO programa un autoguardado (Sprint 17B: la sala siempre
+//     usa `persist: false`). Quien hizo el cambio ya lo guardó con SU sesión;
+//     el receptor solo lo anota como guardado y nunca escribe ni borra en la
+//     base o en Storage en nombre de otra persona.
 // Zustand notifica a sus suscriptores de forma síncrona dentro de `set`, así
 // que la marca cubre exactamente ese cambio.
 // ============================================================================

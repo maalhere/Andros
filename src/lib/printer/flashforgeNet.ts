@@ -34,12 +34,13 @@ import {
   FLASHFORGE_DEFAULT_PORT,
   isAdventurer3Name,
   isPrivateIPv4,
+  parseFlashforgeTarget,
   type DiscoveredPrinter,
   type DiscoveryResult,
   type PrinterStatusData,
 } from "./flashforgeShared";
 
-export { FLASHFORGE_DEFAULT_PORT, isPrivateIPv4 };
+export { FLASHFORGE_DEFAULT_PORT, isPrivateIPv4, parseFlashforgeTarget };
 
 const COMMAND_TIMEOUT_MS = 4000;
 const UPLOAD_FINISH_TIMEOUT_MS = 90_000;

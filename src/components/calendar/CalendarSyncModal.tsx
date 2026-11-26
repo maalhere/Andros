@@ -30,6 +30,8 @@ import {
 } from "@/lib/calendar/extractEvents";
 import { ICS_MIME, buildIcs, googleCalendarLink, icsFilename } from "@/lib/calendar/ics";
 import { IMPORT_WINDOW_DAYS, MAX_EXPORT_EVENTS, type ImportedCalendarEvent } from "@/lib/calendar/googleEvents";
+import { outlookCalendarLink, type OutlookAccountKind } from "@/lib/calendar/microsoftEvents";
+import type { CalendarProvider } from "@/lib/calendar/calendarPending";
 import {
   ISSUE_MESSAGES,
   browserTimeZone,
@@ -38,20 +40,29 @@ import {
   forgetCalendarToken,
   importUpcomingFromGoogle,
   insertImportedEvents,
-  type ExportOutcome,
 } from "@/lib/calendar/googleCalendarClient";
+import {
+  MICROSOFT_ISSUE_MESSAGES,
+  connectMicrosoftCalendar,
+  exportEventsToMicrosoft,
+  forgetMicrosoftToken,
+  importUpcomingFromMicrosoft,
+  readOutlookAccountKind,
+  saveOutlookAccountKind,
+} from "@/lib/calendar/microsoftCalendarClient";
 import { BUTTON_PRIMARY, BUTTON_SECONDARY, SocialDialog } from "@/components/social/SocialDialog";
 
 // ============================================================================
-// ANDROS — GOOGLE CALENDAR (Sprint 16)
+// ANDROS — CALENDARIOS EXTERNOS (Sprint 16 Google · Sprint 19 Microsoft 365)
 //   Nivel 1 (para todos, sin permisos extra):
-//     · «Abrir en Google Calendar» por hito (enlace oficial prellenado).
+//     · «Abrir en Google Calendar» y «Abrir en Calendario de Microsoft» por
+//       hito (enlaces oficiales prellenados; Outlook trabajo/escuela o personal).
 //     · «Descargar .ics» con todos los hitos (Google, Apple Calendar, Outlook).
-//   Nivel 2 (opcional, tras «Conectar Google Calendar»):
+//   Nivel 2 (opcional, tras «Conectar»), con paridad entre proveedores:
 //     · Enviar los hitos seleccionados al calendario principal.
 //     · Importar los próximos 14 días como Cronograma o Ficha.
-//   Si Google falla (permiso caducado, API sin habilitar) se muestra un aviso
-//   claro y el Nivel 1 sigue a mano en la misma pantalla.
+//   Si un proveedor falla (permiso caducado, proveedor sin configurar) se
+//   muestra un aviso claro y el Nivel 1 sigue a mano en la misma pantalla.
 // ============================================================================
 
 const SOURCE_LABELS: Record<CalendarEvent["source"], string> = {
@@ -60,7 +71,16 @@ const SOURCE_LABELS: Record<CalendarEvent["source"], string> = {
   note: "Nota",
 };
 
-type Issue = ExportOutcome["issue"];
+const PROVIDER_NAMES: Record<CalendarProvider, string> = {
+  google: "Google Calendar",
+  microsoft: "Calendario de Microsoft",
+};
+
+/** Motivos que se arreglan volviendo a conectar (los demás no). */
+const RECONNECT_ISSUES = new Set(["token_expired", "scope_missing", "not_connected"]);
+
+const LINK_BUTTON =
+  "inline-flex items-center gap-1.5 min-h-[44px] md:min-h-0 md:h-8 px-2.5 rounded-lg border border-andros-border bg-andros-surface text-andros-primary text-xs font-medium hover:border-andros-border-active active:scale-[0.96] spring-micro";
 
 export const CalendarSyncModal: React.FC = () => {
   const open = useCalendarStore((s) => s.open);
@@ -69,21 +89,24 @@ export const CalendarSyncModal: React.FC = () => {
     <SocialDialog
       open={open}
       onClose={close}
-      title="Google Calendar"
+      title="Calendarios externos"
       titleId="andros-calendar-title"
       wide
       icon={<CalendarDays className="w-4 h-4 text-andros-accent-ink" aria-hidden="true" />}
-      description="Lleva las fechas de tus fichas y cronogramas a tu calendario, o trae tu agenda al tablero."
+      description="Lleva las fechas de tus fichas y cronogramas a Google Calendar o a Microsoft 365 / Outlook, o trae tu agenda al tablero."
     >
       {open && <CalendarBody />}
     </SocialDialog>
   );
 };
 
+type ProviderIssue = string | null;
+
 const CalendarBody: React.FC = () => {
   const nodes = useWorkspaceStore((s) => s.nodes);
   const focusNodeId = useCalendarStore((s) => s.focusNodeId);
-  const connected = useCalendarStore((s) => s.connected);
+  const googleConnected = useCalendarStore((s) => s.connected);
+  const msConnected = useCalendarStore((s) => s.msConnected);
   const user = useCloudStore((s) => s.user);
   const workspaceId = useCloudStore((s) => s.workspaceId);
   const workspaceName = useWorkspaceManagerStore(
@@ -101,14 +124,18 @@ const CalendarBody: React.FC = () => {
 
   const [deselected, setDeselected] = useState<Set<string>>(() => new Set());
   const selected = events.filter((e) => !deselected.has(e.id));
-  const [created, setCreated] = useState<Record<string, string | null>>({});
-  const [issue, setIssue] = useState<Issue>(null);
-  const [imported, setImported] = useState<ImportedCalendarEvent[] | null>(null);
-  const exportGuard = useSubmitGuard();
-  const importGuard = useSubmitGuard();
+  /** Eventos creados por proveedor: id del hito → enlace (o `null` sin enlace). */
+  const [created, setCreated] = useState<Record<CalendarProvider, Record<string, string | null>>>({
+    google: {},
+    microsoft: {},
+  });
+  const [issues, setIssues] = useState<Record<CalendarProvider, ProviderIssue>>({ google: null, microsoft: null });
+  const [imported, setImported] = useState<{ provider: CalendarProvider; events: ImportedCalendarEvent[] } | null>(null);
+  const [account, setAccount] = useState<OutlookAccountKind>(() => readOutlookAccountKind());
 
   const boardLink = workspaceId && typeof window !== "undefined" ? buildWorkspaceLink(workspaceId) : undefined;
   const timeZone = useMemo(() => browserTimeZone(), []);
+  const anyConnected = googleConnected || msConnected;
 
   const toggle = (id: string) =>
     setDeselected((prev) => {
@@ -117,6 +144,11 @@ const CalendarBody: React.FC = () => {
       else next.add(id);
       return next;
     });
+
+  const chooseAccount = (kind: OutlookAccountKind) => {
+    setAccount(kind);
+    saveOutlookAccountKind(kind);
+  };
 
   const downloadIcs = async () => {
     if (events.length === 0) return;
@@ -130,32 +162,30 @@ const CalendarBody: React.FC = () => {
     });
   };
 
-  const sendSelected = () =>
-    exportGuard.run(async () => {
-      const batch = selected.slice(0, MAX_EXPORT_EVENTS);
-      if (batch.length === 0) return;
-      const outcome = await exportEventsToGoogle(batch, boardLink);
-      setIssue(outcome.issue);
-      const next: Record<string, string | null> = {};
-      for (const r of outcome.results) if (r.ok) next[r.id] = r.htmlLink ?? null;
-      setCreated((prev) => ({ ...prev, ...next }));
-      const ok = Object.keys(next).length;
-      if (ok > 0) {
-        toast({
-          message: `${ok} ${ok === 1 ? "evento creado" : "eventos creados"} en tu Google Calendar.`,
-          tone: "success",
-        });
-      }
-    });
+  const setIssue = (provider: CalendarProvider, issue: ProviderIssue) =>
+    setIssues((prev) => ({ ...prev, [provider]: issue }));
 
-  const loadUpcoming = () =>
-    importGuard.run(async () => {
-      const result = await importUpcomingFromGoogle();
-      setIssue(result.issue);
-      if (!result.issue) setImported(result.events);
-    });
+  const onExported = (
+    provider: CalendarProvider,
+    outcome: { issue: string | null; results: { id: string; ok: boolean; htmlLink?: string }[] }
+  ) => {
+    setIssue(provider, outcome.issue);
+    const next: Record<string, string | null> = {};
+    for (const r of outcome.results) if (r.ok) next[r.id] = r.htmlLink ?? null;
+    setCreated((prev) => ({ ...prev, [provider]: { ...prev[provider], ...next } }));
+    const ok = Object.keys(next).length;
+    if (ok > 0) {
+      toast({
+        message: `${ok} ${ok === 1 ? "evento creado" : "eventos creados"} en tu ${PROVIDER_NAMES[provider]}.`,
+        tone: "success",
+      });
+    }
+  };
 
-  const reconnect = issue === "token_expired" || issue === "scope_missing" || issue === "not_connected";
+  const onImported = (provider: CalendarProvider, result: { issue: string | null; events: ImportedCalendarEvent[] }) => {
+    setIssue(provider, result.issue);
+    if (!result.issue) setImported({ provider, events: result.events });
+  };
 
   return (
     <div className="space-y-5">
@@ -187,19 +217,17 @@ const CalendarBody: React.FC = () => {
             «Sábado 28 de noviembre, 9:00 — Montaje».
           </p>
         ) : (
-          <ul className="divide-y divide-andros-border rounded-xl border border-andros-border">
+          <ul className="max-h-72 overflow-y-auto divide-y divide-andros-border rounded-xl border border-andros-border">
             {events.map((event) => {
               const isOn = !deselected.has(event.id);
-              const done = Object.prototype.hasOwnProperty.call(created, event.id);
-              const link = created[event.id];
               return (
                 <li key={event.id} className="flex items-start gap-2.5 px-3 py-2">
-                  {connected && (
+                  {anyConnected && (
                     <input
                       type="checkbox"
                       checked={isOn}
                       onChange={() => toggle(event.id)}
-                      aria-label={`Enviar «${event.title}» a Google Calendar`}
+                      aria-label={`Incluir «${event.title}» al enviar a tu calendario`}
                       className="mt-1 w-4 h-4 shrink-0 accent-[var(--accent-primary)] max-md:w-5 max-md:h-5"
                     />
                   )}
@@ -209,34 +237,47 @@ const CalendarBody: React.FC = () => {
                       {formatEventDate(event.date)} · {formatEventTime(event)} · {SOURCE_LABELS[event.source]} «
                       {event.sourceTitle}»
                     </p>
-                    {done && (
-                      <p className="mt-0.5 text-[11px] text-andros-success flex items-center gap-1">
-                        <Check className="w-3.5 h-3.5" aria-hidden="true" />
-                        Creado en tu calendario
-                        {link && (
-                          <a
-                            href={link}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="ml-1 underline underline-offset-2 text-andros-accent-ink"
-                          >
-                            Ver evento
-                          </a>
-                        )}
-                      </p>
+                    {(["google", "microsoft"] as const).map((provider) =>
+                      Object.prototype.hasOwnProperty.call(created[provider], event.id) ? (
+                        <p key={provider} className="mt-0.5 text-[11px] text-andros-success flex items-center gap-1">
+                          <Check className="w-3.5 h-3.5" aria-hidden="true" />
+                          Creado en {PROVIDER_NAMES[provider]}
+                          {created[provider][event.id] && (
+                            <a
+                              href={created[provider][event.id] ?? undefined}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="ml-1 underline underline-offset-2 text-andros-accent-ink"
+                            >
+                              Ver evento
+                            </a>
+                          )}
+                        </p>
+                      ) : null
                     )}
+                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                      <a
+                        href={googleCalendarLink(event, { boardLink, timeZone })}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label={`Abrir «${event.title}» en Google Calendar`}
+                        className={LINK_BUTTON}
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+                        Abrir en Google Calendar
+                      </a>
+                      <a
+                        href={outlookCalendarLink(event, { boardLink, timeZone, account })}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label={`Abrir «${event.title}» en Calendario de Microsoft`}
+                        className={LINK_BUTTON}
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+                        Abrir en Calendario de Microsoft
+                      </a>
+                    </div>
                   </div>
-                  <a
-                    href={googleCalendarLink(event, { boardLink, timeZone })}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    aria-label={`Abrir «${event.title}» en Google Calendar`}
-                    title="Abrir en Google Calendar"
-                    className="shrink-0 w-11 h-11 md:w-auto md:h-8 md:px-2.5 rounded-lg border border-andros-border bg-andros-surface text-andros-primary text-xs font-medium flex items-center justify-center gap-1.5 hover:border-andros-border-active active:scale-[0.96] spring-micro"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
-                    <span className="hidden md:inline">Abrir en Google Calendar</span>
-                  </a>
                 </li>
               );
             })}
@@ -251,101 +292,113 @@ const CalendarBody: React.FC = () => {
           </button>
           <p className="text-[11px] text-andros-muted">Funciona con Google Calendar, Apple Calendar y Outlook.</p>
         </div>
+
+        {/* Outlook en la web: cuenta de trabajo/escuela (Microsoft 365) o personal (Outlook.com) */}
+        <div className="flex flex-wrap items-center gap-2">
+          <span id="andros-cal-outlook-kind" className="text-[11px] text-andros-muted">
+            Calendario de Microsoft:
+          </span>
+          {/* Radio exterior 12px (rounded-xl) − 4px (p-1) → interior 8px (rounded-lg) */}
+          <div role="radiogroup" aria-labelledby="andros-cal-outlook-kind" className="flex items-center p-1 rounded-xl border border-andros-border bg-andros-surface">
+            {(
+              [
+                ["work", "Trabajo o escuela"],
+                ["personal", "Personal (Outlook.com)"],
+              ] as const
+            ).map(([kind, label]) => (
+              <button
+                key={kind}
+                type="button"
+                role="radio"
+                aria-checked={account === kind}
+                onClick={() => chooseAccount(kind)}
+                className={`min-h-[44px] md:min-h-0 md:h-7 px-2.5 rounded-lg text-[11px] font-medium active:scale-[0.96] spring-micro ${
+                  account === kind ? "bg-andros-border/70 text-andros-primary" : "text-andros-muted hover:text-andros-primary"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
       </section>
 
       {/* Nivel 2: conexión directa */}
-      <section aria-labelledby="andros-cal-direct" className="space-y-2 pt-4 border-t border-andros-border">
+      <section aria-labelledby="andros-cal-direct" className="space-y-3 pt-4 border-t border-andros-border">
         <h3 id="andros-cal-direct" className="text-xs font-semibold text-andros-primary flex items-center gap-1.5">
           <Link2 className="w-3.5 h-3.5 text-andros-muted" aria-hidden="true" />
-          Conexión directa con Google Calendar
+          Conexión directa
         </h3>
 
         {!user ? (
           <p className="text-xs text-andros-muted">
-            Inicia sesión con Google para enviar hitos a tu calendario o importar tu agenda. El enlace y el .ics de
-            arriba funcionan sin iniciar sesión.
+            Inicia sesión para enviar hitos a tu calendario o importar tu agenda. Los enlaces y el .ics de arriba funcionan
+            sin iniciar sesión.
           </p>
-        ) : !connected ? (
-          <>
-            <p className="text-[11px] leading-relaxed text-andros-muted">
-              Opcional. Google te pedirá permiso solo para crear y leer eventos de tu calendario. El permiso queda en
-              esta pestaña durante menos de una hora y Andros no guarda tu calendario en sus servidores.
-            </p>
-            <button type="button" onClick={() => void connectGoogleCalendar()} className={BUTTON_PRIMARY}>
-              <CalendarPlus className="w-4 h-4" aria-hidden="true" />
-              Conectar Google Calendar
-            </button>
-          </>
         ) : (
-          <>
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                disabled={selected.length === 0 || exportGuard.pending}
-                onClick={() => void sendSelected()}
-                className={BUTTON_PRIMARY}
-              >
-                {exportGuard.pending ? (
-                  <Loader2 className="w-4 h-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
-                ) : (
-                  <Send className="w-4 h-4" aria-hidden="true" />
-                )}
-                Enviar al calendario
-                <span className="font-mono tabular-nums">({Math.min(selected.length, MAX_EXPORT_EVENTS)})</span>
-              </button>
-              <button
-                type="button"
-                disabled={importGuard.pending}
-                onClick={() => void loadUpcoming()}
-                className={BUTTON_SECONDARY}
-              >
-                {importGuard.pending ? (
-                  <Loader2 className="w-4 h-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
-                ) : (
-                  <CalendarDays className="w-4 h-4" aria-hidden="true" />
-                )}
-                Importar próximos {IMPORT_WINDOW_DAYS} días
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  forgetCalendarToken();
-                  setImported(null);
-                  setIssue(null);
-                }}
-                className="min-h-[44px] md:min-h-0 text-[11px] text-andros-muted hover:text-andros-primary underline-offset-4 hover:underline"
-              >
-                Desconectar en esta pestaña
-              </button>
-            </div>
-            {selected.length > MAX_EXPORT_EVENTS && (
-              <p className="text-[11px] text-andros-muted">
-                Se envían como máximo {MAX_EXPORT_EVENTS} hitos por vez: desmarca algunos o repite el envío.
-              </p>
-            )}
-          </>
-        )}
-
-        {issue && (
-          <div role="alert" className="px-3 py-2.5 rounded-xl border border-andros-border bg-andros-surface space-y-2">
-            <p className="text-xs leading-relaxed text-andros-warning">{ISSUE_MESSAGES[issue]}</p>
-            {reconnect && user && (
-              <button type="button" onClick={() => void connectGoogleCalendar()} className={BUTTON_SECONDARY}>
-                <RefreshCw className="w-4 h-4" aria-hidden="true" />
-                Volver a conectar
-              </button>
-            )}
+          <div className="grid gap-3 md:grid-cols-2">
+            <ProviderCard
+              provider="google"
+              connected={googleConnected}
+              issue={issues.google}
+              issueText={(i) => ISSUE_MESSAGES[i as keyof typeof ISSUE_MESSAGES] ?? ISSUE_MESSAGES.failed}
+              selected={selected}
+              connectHint="Google te pedirá permiso solo para crear y leer eventos de tu calendario."
+              connectLabel="Conectar Google Calendar"
+              onConnect={async () => {
+                setIssue("google", null);
+                await connectGoogleCalendar();
+              }}
+              onExport={async (batch) => onExported("google", await exportEventsToGoogle(batch, boardLink))}
+              onImport={async () => onImported("google", await importUpcomingFromGoogle())}
+              onForget={() => {
+                forgetCalendarToken();
+                setIssue("google", null);
+                setImported((prev) => (prev?.provider === "google" ? null : prev));
+              }}
+            />
+            <ProviderCard
+              provider="microsoft"
+              connected={msConnected}
+              issue={issues.microsoft}
+              issueText={(i) =>
+                MICROSOFT_ISSUE_MESSAGES[i as keyof typeof MICROSOFT_ISSUE_MESSAGES] ?? MICROSOFT_ISSUE_MESSAGES.failed
+              }
+              selected={selected}
+              connectHint="Microsoft te pedirá permiso para leer tu perfil y crear y leer eventos de tu calendario (Outlook / Microsoft 365)."
+              connectLabel="Conectar cuenta de Microsoft"
+              onConnect={async () => {
+                setIssue("microsoft", null);
+                const problem = await connectMicrosoftCalendar();
+                if (problem) setIssue("microsoft", problem);
+              }}
+              onExport={async (batch) => onExported("microsoft", await exportEventsToMicrosoft(batch, boardLink))}
+              onImport={async () => onImported("microsoft", await importUpcomingFromMicrosoft())}
+              onForget={() => {
+                forgetMicrosoftToken();
+                setIssue("microsoft", null);
+                setImported((prev) => (prev?.provider === "microsoft" ? null : prev));
+              }}
+            />
           </div>
         )}
 
+        <p className="text-[11px] leading-relaxed text-andros-muted">
+          Opcional. El permiso queda solo en esta pestaña durante menos de una hora y Andros no guarda tu calendario en sus
+          servidores.
+        </p>
+
         {imported && (
           <div className="space-y-2">
-            {imported.length === 0 ? (
+            <h4 className="text-xs font-semibold text-andros-primary">
+              Próximos {IMPORT_WINDOW_DAYS} días · {PROVIDER_NAMES[imported.provider]}
+            </h4>
+            {imported.events.length === 0 ? (
               <p className="text-xs text-andros-muted">No tienes eventos en los próximos {IMPORT_WINDOW_DAYS} días.</p>
             ) : (
               <>
                 <ul className="max-h-52 overflow-y-auto divide-y divide-andros-border rounded-xl border border-andros-border">
-                  {imported.map((e) => (
+                  {imported.events.map((e) => (
                     <li key={e.id} className="px-3 py-2">
                       <p className="text-sm text-andros-primary break-words">{e.title}</p>
                       <p className="text-[11px] text-andros-muted">
@@ -360,7 +413,7 @@ const CalendarBody: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => {
-                        insertImportedEvents(imported, "timeline");
+                        insertImportedEvents(imported.events, "timeline", imported.provider);
                         useCalendarStore.getState().close();
                       }}
                       className={BUTTON_PRIMARY}
@@ -370,7 +423,7 @@ const CalendarBody: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => {
-                        insertImportedEvents(imported, "sheet");
+                        insertImportedEvents(imported.events, "sheet", imported.provider);
                         useCalendarStore.getState().close();
                       }}
                       className={BUTTON_SECONDARY}
@@ -388,6 +441,132 @@ const CalendarBody: React.FC = () => {
           </div>
         )}
       </section>
+    </div>
+  );
+};
+
+// ----------------------------------------------------------------------------
+// Tarjeta de un proveedor (Google o Microsoft): conectar, enviar, importar
+// ----------------------------------------------------------------------------
+
+interface ProviderCardProps {
+  provider: CalendarProvider;
+  connected: boolean;
+  issue: ProviderIssue;
+  issueText: (issue: string) => string;
+  selected: CalendarEvent[];
+  connectHint: string;
+  connectLabel: string;
+  onConnect: () => Promise<void>;
+  onExport: (batch: CalendarEvent[]) => Promise<void>;
+  onImport: () => Promise<void>;
+  onForget: () => void;
+}
+
+const ProviderCard: React.FC<ProviderCardProps> = ({
+  provider,
+  connected,
+  issue,
+  issueText,
+  selected,
+  connectHint,
+  connectLabel,
+  onConnect,
+  onExport,
+  onImport,
+  onForget,
+}) => {
+  const connectGuard = useSubmitGuard();
+  const exportGuard = useSubmitGuard();
+  const importGuard = useSubmitGuard();
+  const headingId = `andros-cal-${provider}`;
+  const count = Math.min(selected.length, MAX_EXPORT_EVENTS);
+  const connect = () => connectGuard.run(onConnect);
+
+  return (
+    <div
+      role="group"
+      aria-labelledby={headingId}
+      className="p-3 rounded-xl border border-andros-border bg-andros-surface space-y-2"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <h4 id={headingId} className="text-xs font-semibold text-andros-primary">
+          {PROVIDER_NAMES[provider]}
+        </h4>
+        <span className={`text-[11px] ${connected ? "text-andros-success" : "text-andros-muted"}`}>
+          {connected ? "Conectado" : "Sin conectar"}
+        </span>
+      </div>
+
+      {!connected ? (
+        <>
+          <p className="text-[11px] leading-relaxed text-andros-muted">{connectHint}</p>
+          <button type="button" disabled={connectGuard.pending} onClick={() => void connect()} className={BUTTON_PRIMARY}>
+            {connectGuard.pending ? (
+              <Loader2 className="w-4 h-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+            ) : (
+              <CalendarPlus className="w-4 h-4" aria-hidden="true" />
+            )}
+            {connectLabel}
+          </button>
+        </>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={count === 0 || exportGuard.pending}
+              onClick={() => void exportGuard.run(() => onExport(selected.slice(0, MAX_EXPORT_EVENTS)))}
+              className={BUTTON_PRIMARY}
+            >
+              {exportGuard.pending ? (
+                <Loader2 className="w-4 h-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+              ) : (
+                <Send className="w-4 h-4" aria-hidden="true" />
+              )}
+              Enviar al calendario
+              <span className="font-mono tabular-nums">({count})</span>
+            </button>
+            <button
+              type="button"
+              disabled={importGuard.pending}
+              onClick={() => void importGuard.run(onImport)}
+              className={BUTTON_SECONDARY}
+            >
+              {importGuard.pending ? (
+                <Loader2 className="w-4 h-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+              ) : (
+                <CalendarDays className="w-4 h-4" aria-hidden="true" />
+              )}
+              Importar próximos {IMPORT_WINDOW_DAYS} días
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={onForget}
+            className="min-h-[44px] md:min-h-0 text-[11px] text-andros-muted hover:text-andros-primary underline-offset-4 hover:underline"
+          >
+            Desconectar en esta pestaña
+          </button>
+          {selected.length > MAX_EXPORT_EVENTS && (
+            <p className="text-[11px] text-andros-muted">
+              Se envían como máximo {MAX_EXPORT_EVENTS} hitos por vez: desmarca algunos o repite el envío.
+            </p>
+          )}
+        </>
+      )}
+
+      {issue && (
+        <div role="alert" className="pt-2 border-t border-andros-border space-y-2">
+          <p className="text-xs leading-relaxed text-andros-warning">{issueText(issue)}</p>
+          {RECONNECT_ISSUES.has(issue) && (
+            <button type="button" disabled={connectGuard.pending} onClick={() => void connect()} className={BUTTON_SECONDARY}>
+              <RefreshCw className="w-4 h-4" aria-hidden="true" />
+              Volver a conectar
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 };

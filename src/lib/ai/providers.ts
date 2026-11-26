@@ -10,7 +10,7 @@ export const AI_PROVIDERS: AiProvider[] = ["gemini", "anthropic", "openai"];
 export const AI_PROVIDER_LABELS: Record<AiProvider, string> = {
   gemini: "Gemini",
   anthropic: "Claude",
-  openai: "ChatGPT",
+  openai: "OpenAI",
 };
 
 /** Color de la insignia de cada proveedor (punto de color en el nodo). */

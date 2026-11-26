@@ -83,6 +83,22 @@ export default function CookiesPage() {
             </tr>
             <tr>
               <td>
+                Almacenamiento de sesión: permiso de Microsoft Graph para tu calendario (
+                <code>andros.calendar.ms-token</code>) y almacenamiento local: tipo de cuenta de
+                Outlook en la web (<code>andros.calendar.outlook-account</code>) y el mismo aviso de
+                conexión pendiente (<code>andros.calendar.pending</code>, que anota si la conexión
+                pedida fue de Google o de Microsoft)
+              </td>
+              <td>
+                Solo si pulsas «Conectar cuenta de Microsoft»: enviar hitos a tu calendario de
+                Outlook / Microsoft 365 o importar tu agenda sin volver a pedir permiso en esa
+                pestaña. El tipo de cuenta solo recuerda si «Abrir en Calendario de Microsoft» usa
+                Outlook de trabajo o personal
+              </td>
+              <td>Menos de 1 hora (token) · 10 minutos (aviso) · hasta que lo borres (tipo de cuenta)</td>
+            </tr>
+            <tr>
+              <td>
                 Almacenamiento local: <code>andros-cookie-consent</code>
               </td>
               <td>Recordar tu elección en este aviso</td>
@@ -91,6 +107,12 @@ export default function CookiesPage() {
           </tbody>
         </table>
       </div>
+      <p>
+        Andros Pro no añade cookies propias: el plan se lee de tu cuenta. Si pasas a Pro, el pago
+        se hace en la página de nuestro proveedor de pagos (Lemon Squeezy), en su propio dominio y
+        con sus propias cookies, regidas por su política. Al volver a Andros solo queda en la
+        dirección un aviso temporal (<code>?pro=gracias</code>) que la app borra al leerlo.
+      </p>
 
       <h2>2. Analítica (opcional)</h2>
       <p>

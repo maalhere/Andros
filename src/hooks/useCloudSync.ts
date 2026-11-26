@@ -34,7 +34,7 @@ import {
 import { useLandingStore } from "@/store/useLandingStore";
 import { useToastStore } from "@/store/useToastStore";
 import { useCollabStore } from "@/store/useCollabStore";
-import { shouldSkipAutosaveForRemote } from "@/lib/collab/remoteFlag";
+import { isApplyingRemoteCollab } from "@/lib/collab/remoteFlag";
 import { canEditCanvas, normalizeMemberRole, type MemberRole } from "@/lib/access/permissions";
 import { currentWorkspaceRole } from "@/lib/access/workspaceRole";
 import { sanitizeCanvasStrokes } from "@/lib/canvas/inkGeometry";
@@ -61,6 +61,7 @@ import type {
 import type { CanvasStroke } from "@/types/workspace";
 import { sanitizeFormSheet } from "@/lib/forms/formSchema";
 import { sanitizeFormulaSheet } from "@/lib/math/formulaSchema";
+import { guardSpaceCreation } from "@/lib/billing/entitlements";
 
 const SAVE_DEBOUNCE_MS = 1200;
 /** Duración de los enlaces de descarga firmados (7 días). */
@@ -517,6 +518,65 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
   const uploadsInFlight = new Set<string>();
   const failedUploads = new Set<string>();
 
+  /**
+   * (Sprint 17B) Solo los archivos de TU carpeta (`<tu id>/…`) se vigilan para
+   * borrarlos del bucket: nunca se intenta borrar lo que subió otra persona.
+   */
+  const ownStoragePaths = (paths: Iterable<string>): Set<string> => {
+    const prefix = userId ? `${userId}/` : null;
+    return new Set(prefix ? [...paths].filter((p) => p.startsWith(prefix)) : []);
+  };
+
+  /**
+   * (Sprint 17B) Cambio recibido de la sala en vivo: su autor ya lo guardó con
+   * su propia sesión. Aquí solo se anota como «guardado» para que el siguiente
+   * guardado LOCAL no lo reescriba ni borre filas o archivos en su nombre.
+   */
+  const absorbRemoteChange = (
+    state: ReturnType<typeof useWorkspaceStore.getState>,
+    prev: ReturnType<typeof useWorkspaceStore.getState>
+  ) => {
+    const uid = rowOwnerId ?? userId;
+    const ws = workspaceId;
+    if (!ready || disposed || collabGuest || !uid || !ws) return;
+
+    if (state.nodes !== prev.nodes) {
+      const before = new Map(prev.nodes.map((n) => [n.id, n]));
+      const touched: EngineeringNodeData[] = [];
+      const total = state.nodes.length;
+      state.nodes.forEach((node, index) => {
+        const old = before.get(node.id);
+        if (old !== node) {
+          nodeSnapshot.set(node.id, JSON.stringify(nodeToRow(node, total - 1 - index, ws, uid)));
+          if (old) touched.push(old);
+        }
+        before.delete(node.id);
+      });
+      for (const [id, old] of before) {
+        nodeSnapshot.delete(id);
+        touched.push(old);
+      }
+      // Un archivo que otra persona quitó o reemplazó NO se borra desde aquí.
+      const stillUsed = storagePathsOf(state.nodes);
+      for (const path of storagePathsOf(touched)) if (!stillUsed.has(path)) syncedStoragePaths.delete(path);
+    }
+
+    if (state.connections !== prev.connections) {
+      const before = new Map(prev.connections.map((c) => [c.id, c]));
+      for (const edge of state.connections) {
+        if (before.get(edge.id) !== edge) {
+          connectionSnapshot.set(edge.id, JSON.stringify(connectionToRow(edge, ws, uid)));
+        }
+        before.delete(edge.id);
+      }
+      for (const id of before.keys()) connectionSnapshot.delete(id);
+    }
+
+    if (state.canvasStrokes !== prev.canvasStrokes && strokesSnapshot !== null) {
+      strokesSnapshot = JSON.stringify(state.canvasStrokes);
+    }
+  };
+
   // --- Error devuelto por /auth/callback (ej. el usuario canceló en Google) ---
   if (typeof window !== "undefined") {
     const url = new URL(window.location.href);
@@ -640,15 +700,31 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
       }
 
       if (ep !== epoch) return;
-      nodeSnapshot = nextNodeSnapshot;
-      connectionSnapshot = nextConnectionSnapshot;
+      // (Sprint 17B) Se actualiza fila a fila: lo que la sala anotó como
+      // «ya guardado por su autor» mientras esto viajaba no se pisa.
+      for (const row of changedNodes) nodeSnapshot.set(row.id, nextNodeSnapshot.get(row.id) ?? "");
+      for (const id of removedNodeIds) nodeSnapshot.delete(id);
+      for (const row of changedConnections) {
+        connectionSnapshot.set(row.id, nextConnectionSnapshot.get(row.id) ?? "");
+      }
+      for (const id of removedConnectionIds) connectionSnapshot.delete(id);
 
-      // Borra del bucket los archivos que ya no usa ningún nodo.
+      // Borra del bucket los archivos PROPIOS que ya no usa ningún nodo. Una
+      // ruta solo deja de vigilarse cuando Storage confirma el borrado (si
+      // falla, se reintenta en el siguiente guardado).
       const currentPaths = storagePathsOf(nodes);
       const orphanPaths = [...syncedStoragePaths].filter((p) => !currentPaths.has(p));
-      syncedStoragePaths = currentPaths;
+      for (const path of ownStoragePaths(currentPaths)) syncedStoragePaths.add(path);
       if (orphanPaths.length > 0) {
-        void supabase.storage.from(PRINT_FILES_BUCKET).remove(orphanPaths);
+        void supabase.storage
+          .from(PRINT_FILES_BUCKET)
+          .remove(orphanPaths)
+          .then(({ error }) => {
+            if (ep !== epoch || error) return;
+            const inUse = storagePathsOf(useWorkspaceStore.getState().nodes);
+            for (const path of orphanPaths) if (!inUse.has(path)) syncedStoragePaths.delete(path);
+          })
+          .catch(() => undefined);
       }
 
       // Tinta libre del lienzo (Lápiz D): se guarda en el propio workspace.
@@ -1049,7 +1125,7 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
           JSON.stringify(connectionToRow(c, wsId, ownerForRows)),
         ])
       );
-      syncedStoragePaths = storagePathsOf(loadedNodes);
+      syncedStoragePaths = ownStoragePaths(storagePathsOf(loadedNodes));
       strokesSnapshot = strokesAvailable ? JSON.stringify(loadedStrokes) : null;
 
       ready = true;
@@ -1119,6 +1195,8 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
     guarded(async () => {
       const uid = userId;
       if (!uid) throw new Error("Inicia sesión para crear espacios.");
+      // (Sprint 21) Plan Básico: hasta 2 espacios propios. Sin lugar → modal de Pro.
+      if (!(await guardSpaceCreation(manager().workspaces.length))) return null;
       const row: Record<string, unknown> = {
         owner_id: uid,
         name: name.trim() || "Nuevo espacio",
@@ -1175,6 +1253,8 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
     await guarded(async () => {
       const uid = userId;
       if (!uid) return;
+      // (Sprint 21) Duplicar también crea un espacio: mismo tope que «Nuevo».
+      if (!(await guardSpaceCreation(manager().workspaces.length))) return;
       if (id === workspaceId && ready) {
         await uploadChain;
         await syncNow();
@@ -1342,8 +1422,12 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
     ) {
       return;
     }
-    // Cambio recibido de otro equipo de tu misma cuenta: ese equipo ya lo guarda.
-    if (shouldSkipAutosaveForRemote()) return;
+    // (Sprint 17B) Cambio recibido de la sala: su autor ya lo guardó con su propia
+    // sesión. Solo se anota como guardado; nunca se reescribe ni se borra por él.
+    if (isApplyingRemoteCollab()) {
+      absorbRemoteChange(state, prev);
+      return;
+    }
     queueUploads();
     scheduleSync();
   });
@@ -1456,9 +1540,9 @@ export interface GoogleSignInOptions {
 
 function googleQueryParams(options: GoogleSignInOptions): Record<string, string> {
   return options.scopes
-    ? // Consentimiento explícito + acceso sin conexión: Google devuelve un token
-      // con el scope nuevo y conserva los permisos ya concedidos.
-      { access_type: "offline", prompt: "consent", include_granted_scopes: "true" }
+    ? // Consentimiento explícito (sin acceso sin conexión): Google devuelve un token
+      // de sesión efímero con el scope nuevo y conserva los permisos ya concedidos.
+      { prompt: "consent", include_granted_scopes: "true" }
     : { prompt: "select_account" };
 }
 
@@ -1554,6 +1638,86 @@ export async function signInWithGoogle(options: GoogleSignInOptions = {}): Promi
   if (error) {
     cloud.setStatus("signed-out", `No se pudo abrir Google: ${describeError(error)}`);
   }
+}
+
+/**
+ * (Sprint 19) Motivo por el que no se pudo abrir la conexión con Microsoft:
+ *   · provider_disabled → el proveedor Azure no está activado en Supabase.
+ *   · link_disabled     → falta activar «Manual linking» en Supabase Auth.
+ *   · failed            → cualquier otro error (red, sesión caducada…).
+ */
+export type MicrosoftLinkProblem = "provider_disabled" | "link_disabled" | "failed";
+
+function classifyLinkError(error: unknown): MicrosoftLinkProblem {
+  const code = String((error as { code?: unknown } | null)?.code ?? "").toLowerCase();
+  const message = describeError(error).toLowerCase();
+  if (code === "manual_linking_disabled" || message.includes("manual linking")) return "link_disabled";
+  if (
+    code === "provider_disabled" ||
+    message.includes("provider is not enabled") ||
+    message.includes("unsupported provider")
+  ) {
+    return "provider_disabled";
+  }
+  return "failed";
+}
+
+/**
+ * «Conectar cuenta de Microsoft»: vincula la identidad de Microsoft (Supabase
+ * Azure OAuth) a la sesión ACTUAL de Andros con `linkIdentity`, así nunca se
+ * cambia de cuenta aunque el correo de Microsoft sea distinto. Al volver, el
+ * `provider_token` de la sesión es el token de Microsoft Graph con los scopes
+ * pedidos (efímero; no se guarda en ninguna base de datos).
+ * Devuelve `null` si se salió a Microsoft, o el motivo si no se pudo.
+ */
+export async function linkMicrosoftIdentity(options: { scopes: string; next: string }): Promise<MicrosoftLinkProblem | null> {
+  const supabase = getSupabaseBrowserClient();
+  if (!supabase) return "failed";
+
+  const desktopAuth = getDesktopBridge()?.auth;
+  if (desktopAuth) {
+    // App de Windows: igual que Google, la autorización se abre en el navegador
+    // del sistema y el código vuelve por 127.0.0.1 a esta ventana (PKCE).
+    try {
+      const { port, state } = await desktopAuth.begin();
+      const redirect = new URL("/auth/callback", window.location.origin);
+      redirect.searchParams.set("desktop_port", String(port));
+      redirect.searchParams.set("desktop_state", state);
+      const { data, error } = await supabase.auth.linkIdentity({
+        provider: "azure",
+        options: {
+          redirectTo: redirect.toString(),
+          scopes: options.scopes,
+          skipBrowserRedirect: true,
+          queryParams: { prompt: "select_account" },
+        },
+      });
+      if (error) throw error;
+      if (!data.url) throw new Error("Supabase no devolvió la dirección de Microsoft.");
+      await desktopAuth.openInBrowser(data.url);
+      useCloudStore
+        .getState()
+        .setAuthNotice("Termina la conexión con Microsoft en tu navegador. Andros se abrirá sola al terminar.");
+      return null;
+    } catch (error) {
+      void desktopAuth.cancel().catch(() => undefined);
+      return classifyLinkError(error);
+    }
+  }
+
+  // Se sale a Microsoft: lo pendiente del lienzo se guarda antes.
+  await activeEngine?.flush();
+  const callback = new URL("/auth/callback", window.location.origin);
+  callback.searchParams.set("next", options.next);
+  const { error } = await supabase.auth.linkIdentity({
+    provider: "azure",
+    options: {
+      redirectTo: callback.toString(),
+      scopes: options.scopes,
+      queryParams: { prompt: "select_account" },
+    },
+  });
+  return error ? classifyLinkError(error) : null;
 }
 
 /**

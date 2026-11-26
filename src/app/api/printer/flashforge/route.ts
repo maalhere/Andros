@@ -15,6 +15,12 @@
 // impresora (npm run dev o la app de Windows). En hosting remoto (Vercel) no
 // hay ruta a la LAN: la búsqueda se desactiva y solo se aceptan IPs privadas
 // para no usar el servidor como puente hacia Internet.
+//
+// (Sprint 17B) Blindaje:
+//   · Apagada por defecto: solo con ANDROS_LOCAL_PRINTER_BRIDGE=1 y nunca en
+//     Vercel. Exige `X-Andros-Bridge: 1` y `Origin` = `Host` (bridgeGuard).
+//   · Destino: IPv4 RFC 1918 estricta (sin 169.254/16) y SOLO el puerto 8899
+//     (parseFlashforgeTarget, el mismo validador que la app de Windows).
 // ============================================================================
 
 import { NextRequest, NextResponse } from "next/server";
@@ -25,15 +31,31 @@ import {
   discoverFlashForge,
   isPrinterBusyError,
   isPrinterTransferring,
-  isPrivateIPv4,
+  parseFlashforgeTarget,
   readPrinterStatus,
   safePrinterFileName,
   uploadAndPrint,
 } from "@/lib/printer/flashforgeNet";
 import type { DiscoveryResult, PrinterStatus } from "@/lib/printer/flashforgeShared";
+import { bridgeRequestInfo, checkPrinterBridgeRequest } from "@/lib/printer/bridgeGuard";
 
-/** En Vercel el servidor no está en el Wi-Fi del usuario. */
-const IS_REMOTE_HOST = Boolean(process.env.VERCEL);
+/** Puente apagado, en Vercel o petición de otro sitio: se rechaza sin tocar la red. */
+function bridgeRefusal(request: NextRequest) {
+  const check = checkPrinterBridgeRequest(bridgeRequestInfo(request), {
+    VERCEL: process.env.VERCEL,
+    ANDROS_LOCAL_PRINTER_BRIDGE: process.env.ANDROS_LOCAL_PRINTER_BRIDGE,
+  });
+  if (check.ok) return null;
+  const body: DiscoveryResult & { disabled?: true } = {
+    ok: false,
+    printers: [],
+    subnets: [],
+    error: check.error,
+    ...(check.remote ? { remote: true } : {}),
+    ...(check.disabled ? { disabled: true } : {}),
+  };
+  return NextResponse.json(body, { status: check.status });
+}
 
 /** La subida de un .gx grande por Wi-Fi puede tardar minutos. */
 export const maxDuration = 300;
@@ -63,24 +85,10 @@ function busyStatus() {
 }
 
 function parseTarget(ipRaw: unknown, portRaw: unknown): { ip: string; port: number } | string {
-  const ip = String(ipRaw ?? "").trim();
-  const port = Number(portRaw ?? FLASHFORGE_DEFAULT_PORT) || FLASHFORGE_DEFAULT_PORT;
-  if (!isPrivateIPv4(ip)) return "Escribe una IP local válida (ej. 192.168.1.45).";
-  if (port < 1 || port > 65535) return "Puerto inválido.";
-  return { ip, port };
+  return parseFlashforgeTarget(ipRaw, portRaw ?? FLASHFORGE_DEFAULT_PORT);
 }
 
 async function discover() {
-  if (IS_REMOTE_HOST) {
-    const body: DiscoveryResult = {
-      ok: false,
-      remote: true,
-      printers: [],
-      subnets: [],
-      error: "La versión web no puede ver tu Wi-Fi. Usa la app de Windows para imprimir en 1 clic.",
-    };
-    return NextResponse.json(body, { status: 409 });
-  }
   try {
     return NextResponse.json(await discoverFlashForge());
   } catch (e) {
@@ -99,6 +107,8 @@ async function discover() {
 // ---------------------------------------------------------------------------
 
 export async function GET(request: NextRequest) {
+  const refusal = bridgeRefusal(request);
+  if (refusal) return refusal;
   const params = request.nextUrl.searchParams;
   if (params.get("action") === "discover") return discover();
 
@@ -130,6 +140,8 @@ interface PrintJsonBody {
 }
 
 export async function POST(request: NextRequest) {
+  const refusal = bridgeRefusal(request);
+  if (refusal) return refusal;
   const params = request.nextUrl.searchParams;
   const isJson = (request.headers.get("content-type") ?? "").includes("application/json");
 

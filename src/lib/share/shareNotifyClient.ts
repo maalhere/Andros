@@ -4,20 +4,14 @@
 // Devuelve una nota corta para mostrar (o `null` si no hace falta decir nada).
 // ============================================================================
 
-import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { sessionAuthHeader } from "@/lib/supabase/authHeader";
 
 export type ShareNotifyOutcome =
   | { sent: true }
   | { sent: false; reason: "not_configured" | "no_email" | "throttled" | "send_failed" | "error" };
 
-/** Cabecera Authorization con tu sesión actual (para rutas /api que la exigen). */
-export async function sessionAuthHeader(): Promise<Record<string, string>> {
-  const supabase = getSupabaseBrowserClient();
-  if (!supabase) return {};
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
+/** Cabecera Authorization con tu sesión actual (se mantiene por compatibilidad). */
+export { sessionAuthHeader };
 
 export async function requestShareNotification(
   workspaceId: string,

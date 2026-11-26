@@ -552,12 +552,10 @@ function assertTrusted(event) {
   }
 }
 
+// (Sprint 17B) Mismo validador que la ruta web: IPv4 RFC 1918 estricta
+// (sin 169.254/16) y SOLO el puerto 8899 de la FlashForge.
 function parseTarget(ipRaw, portRaw) {
-  const ip = String(ipRaw ?? "").trim();
-  const port = Number(portRaw) || printer.FLASHFORGE_DEFAULT_PORT;
-  if (!printer.isPrivateIPv4(ip)) return "IP local no válida.";
-  if (port < 1 || port > 65535) return "Puerto inválido.";
-  return { ip, port };
+  return printer.parseFlashforgeTarget(ipRaw, portRaw);
 }
 
 function connectionMessage(target, e) {
@@ -932,10 +930,16 @@ function startAuthFlow() {
   });
 }
 
-/** Solo se abre en el navegador la pantalla de autorización OAuth de Supabase. */
+/**
+ * Solo se abre en el navegador la pantalla de autorización OAuth de Supabase
+ * o (Sprint 19, «Conectar cuenta de Microsoft» vía linkIdentity) la de
+ * Microsoft identity platform, a la que Supabase remite directamente.
+ */
 function isOAuthAuthorizeUrl(url) {
   const u = parseUrl(url);
-  return Boolean(u && u.protocol === "https:" && u.pathname.endsWith("/auth/v1/authorize"));
+  if (!u || u.protocol !== "https:") return false;
+  if (u.pathname.endsWith("/auth/v1/authorize")) return true;
+  return u.hostname === "login.microsoftonline.com" && /^\/[\w.-]+\/oauth2\/v2\.0\/authorize$/.test(u.pathname);
 }
 
 function setupAuthBridge() {

@@ -59,7 +59,7 @@ const useGroups = (): { title: string; rows: Row[] }[] => {
         { keys: ["V"], label: "Puntero" },
         { keys: ["N"], label: "Nuevo nodo" },
         { keys: ["C"], label: "Conectar con cables" },
-        { keys: ["L"], label: "Nuevo enlace web o YouTube" },
+        { keys: ["L"], label: "Nuevo enlace web o video" },
         { keys: ["M"], label: "Nuevo CodeLab", expertOnly: true },
         { keys: ["D"], label: "Dibujo a mano alzada" },
         { keys: ["E"], label: "Borrador o lápiz", note: "con el lápiz activo" },

@@ -170,7 +170,7 @@ const DrawerPanel: React.FC<{ reduced: boolean }> = ({ reduced }) => {
         {/* Lista */}
         <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-3">
           {!user ? (
-            <p className="text-xs text-andros-muted">Inicia sesión con Google y abre un espacio en la nube para comentar.</p>
+            <p className="text-xs text-andros-muted">Inicia sesión y abre un espacio en la nube para comentar.</p>
           ) : status === "idle" ? (
             <p className="text-xs text-andros-muted">Abre un espacio en la nube para ver sus comentarios.</p>
           ) : status === "setup-missing" ? (

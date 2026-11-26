@@ -42,22 +42,15 @@ import {
   openWorkspaceFromLink,
   refreshCloudWorkspaceList,
   resumeCloudAfterCollabGuest,
-  suspendCloudForCollabGuest,
 } from "@/hooks/useCloudSync";
 import { currentWorkspaceRole } from "@/lib/access/workspaceRole";
 import { ROLE_LABELS } from "@/lib/access/permissions";
 import {
   MAX_SPACE_PARTICIPANTS,
   MAX_VOICE_PARTICIPANTS,
-  type AccessChangedPayload,
   type AlertResolvePayload,
   AlertUpsertPayload,
-  type CanvasRequestPayload,
-  type CanvasSnapshotPayload,
   type CollabPresence,
-  type CommentDeletePayload,
-  type CommentResolvePayload,
-  type CommentUpsertPayload,
   type CursorPayload,
   type EdgeDeletePayload,
   type EdgeUpsertPayload,
@@ -78,20 +71,19 @@ import {
 } from "./mediaDevices";
 import {
   CURSOR_SEND_INTERVAL_MS,
-  SnapshotAssembler,
-  applyRemoteAccessChanged,
   applyRemoteAlertResolve,
   applyRemoteAlertUpsert,
-  applyRemoteCommentDelete,
-  applyRemoteCommentResolve,
-  applyRemoteCommentUpsert,
   applyRemoteEdgeDelete,
   applyRemoteEdgeUpsert,
   applyRemoteNodeDelete,
   applyRemoteNodeUpsert,
-  buildSnapshotParts,
+  isRefreshNotice,
   startCanvasSync,
 } from "./canvasSync";
+import { refreshComments } from "@/lib/comments/useCommentsSync";
+import { fetchWorkspaceLiveCap } from "@/lib/billing/subscriptionClient";
+import { useSubscriptionStore } from "@/store/useSubscriptionStore";
+import { scheduleCdeRefresh } from "@/lib/cde/useCdeSync";
 import {
   buildWorkspaceLink,
   channelNameFor,
@@ -106,10 +98,11 @@ export { CURSOR_SEND_INTERVAL_MS };
 const CURSOR_STALE_MS = 6000;
 /** Un nodo de pantalla finalizado se retira solo tras este tiempo. */
 const ENDED_SHARE_REMOVE_MS = 8000;
-const SNAPSHOT_RETRY_MS = 3000;
-const SNAPSHOT_MAX_ATTEMPTS = 5;
-/** Pausa entre partes del lienzo (respeta el límite de mensajes de Realtime). */
-const SNAPSHOT_PART_GAP_MS = 60;
+/**
+ * (Sprint 17B) Avisos de comentarios o permisos: se agrupan y provocan UNA
+ * lectura nueva de Supabase (así una ráfaga de avisos no satura la base).
+ */
+const REFRESH_NOTICE_DELAY_MS = 400;
 
 /** Cámara ligera: 640×360 a 24 fps (suficiente para 2–5 personas en malla). */
 const CAMERA_CONSTRAINTS: MediaTrackConstraints = {
@@ -147,16 +140,15 @@ interface PresenceSession {
   supabase: SupabaseClient;
   channel: RealtimeChannel;
   roomId: string;
-  assembler: SnapshotAssembler;
   stopCanvasSync: (() => void) | null;
   subscribed: boolean;
-  /** `true` si el canal se pidió como privado (config.private). */
-  isPrivate: boolean;
   /** Ya llegó a SUBSCRIBED alguna vez (para distinguir "sin permisos" de "se cayó la red"). */
   everSubscribed: boolean;
-  snapshotReceived: boolean;
-  snapshotTimer: ReturnType<typeof setTimeout> | null;
   cursorPruneTimer: ReturnType<typeof setInterval> | null;
+  /** Lectura pendiente de comentarios/roles tras un aviso de la sala. */
+  refreshTimer: ReturnType<typeof setTimeout> | null;
+  /** El aviso pendiente incluía `access:changed` (hay que releer tu propio rol). */
+  refreshAccess: boolean;
 }
 
 /** Capa 2: llamada activa (WebRTC + medidor de voz). */
@@ -170,12 +162,12 @@ interface CallSession {
 let session: PresenceSession | null = null;
 
 /**
- * Canales Realtime PRIVADOS (config.private): solo entran usuarios autenticados
- * que pasen las políticas RLS de `realtime.messages` (ver supabase/schema.sql,
- * sección 8). Si el proyecto aún no las tiene, el primer intento falla y la
- * sala vuelve a un canal público con un aviso discreto en consola, sin romperse.
+ * Canales Realtime SIEMPRE PRIVADOS (config.private): solo entran los
+ * miembros del espacio que pasen las políticas RLS de `realtime.messages`
+ * (supabase/schema.sql §8b). (Sprint 17B) Ya NO hay vuelta a un canal público:
+ * si la base no tiene las políticas o no eres miembro, la sala avisa y no se
+ * conecta (el lienzo y el guardado en la nube siguen funcionando).
  */
-let privateChannelsAvailable = true;
 let call: CallSession | null = null;
 let micStream: MediaStream | null = null;
 let cameraStream: MediaStream | null = null;
@@ -482,8 +474,48 @@ function sanitizePresence(raw: unknown, key: string): CollabPresence | null {
 }
 
 // ----------------------------------------------------------------------------
-// Tope de participantes: 6 por espacio y 5 en voz (orden de llegada estable)
+// Tope de participantes (orden de llegada estable). (Sprint 21) El tope del
+// espacio sale del plan de su DUEÑO: 3 en Plan Básico y 6 en Andros Pro. La
+// voz admite como máximo 5 y nunca más que el tope del espacio.
 // ----------------------------------------------------------------------------
+
+let liveCap: { workspaceId: string; cap: number } | null = null;
+let liveCapLoadingFor: string | null = null;
+
+/** Lee (una vez por espacio) el tope del plan del dueño y recalcula la sala. */
+function loadLiveCap(workspaceId: string): void {
+  liveCapLoadingFor = workspaceId;
+  const ownedBySelf = useWorkspaceManagerStore.getState().workspaces.some((w) => w.id === workspaceId);
+  void fetchWorkspaceLiveCap(workspaceId, ownedBySelf).then((cap) => {
+    if (liveCapLoadingFor !== workspaceId) return;
+    liveCapLoadingFor = null;
+    liveCap = { workspaceId, cap };
+    if (session) handlePresenceSync();
+  });
+}
+
+/** El plan pudo cambiar (pago, cancelación): se vuelve a leer el tope. */
+function invalidateLiveCap(): void {
+  liveCap = null;
+  liveCapLoadingFor = null;
+  if (session) handlePresenceSync();
+}
+
+/**
+ * Tope de personas en vivo del espacio abierto. Mientras se lee, se usa el
+ * máximo absoluto para no bloquear a nadie por una espera de red; en cuanto
+ * llega el valor real, la sala se recalcula.
+ */
+function spaceCap(): number {
+  const workspaceId = liveWorkspaceId();
+  if (!workspaceId) return MAX_SPACE_PARTICIPANTS;
+  if (liveCap?.workspaceId === workspaceId) return liveCap.cap;
+  if (liveCapLoadingFor !== workspaceId) loadLiveCap(workspaceId);
+  return MAX_SPACE_PARTICIPANTS;
+}
+
+/** Lugares en la voz: 5 como máximo y nunca más que el tope del espacio. */
+const voiceCap = (): number => Math.min(MAX_VOICE_PARTICIPANTS, spaceCap());
 
 /** Orden de llegada determinista: todos calculan el mismo resultado. */
 function arrivalOrder(entries: { peerId: string; at: number }[]): string[] {
@@ -498,7 +530,7 @@ function voiceSlots(peers: Record<string, CollabPresence>): Set<string> {
     .filter((peer) => peer.inCall)
     .map((peer) => ({ peerId: peer.peerId, at: peer.callJoinedAt ?? peer.joinedAt }));
   if (call && callJoinedAt !== null) entries.push({ peerId: collab().selfPeerId, at: callJoinedAt });
-  return new Set(arrivalOrder(entries).slice(0, MAX_VOICE_PARTICIPANTS));
+  return new Set(arrivalOrder(entries).slice(0, voiceCap()));
 }
 
 /** Calcula tu lugar en el espacio (lectura si llegaste 7.º) y quién escribe dónde. */
@@ -510,17 +542,19 @@ function syncCapacity(peers: Record<string, CollabPresence>, slots: Set<string>)
     { peerId: state.selfPeerId, at: selfSpaceJoinedAt() },
     ...inSpace.map((peer) => ({ peerId: peer.peerId, at: peer.joinedAt })),
   ]);
-  const readOnly = Boolean(workspaceId) && order.indexOf(state.selfPeerId) >= MAX_SPACE_PARTICIPANTS;
+  const cap = spaceCap();
+  const readOnly = Boolean(workspaceId) && order.indexOf(state.selfPeerId) >= cap;
   const wasReadOnly = state.capacity.readOnly;
   state.setCapacity({
-    spaceCount: Math.min(order.length, MAX_SPACE_PARTICIPANTS),
+    spaceCount: Math.min(order.length, cap),
     voiceCount: Object.values(peers).filter((peer) => peer.inCall && slots.has(peer.peerId)).length + (call ? 1 : 0),
     readOnly,
+    limit: cap,
   });
   if (wasReadOnly && !readOnly) toast("Se liberó un lugar: ya puedes editar el espacio en vivo.", "success");
 
   // «Editando: Nombre» en cada tarjeta (solo de quien tiene lugar en tu espacio).
-  const active = new Set(order.slice(0, MAX_SPACE_PARTICIPANTS));
+  const active = new Set(order.slice(0, cap));
   const editors: Record<string, RemoteEditor> = {};
   for (const peer of inSpace) {
     if (!peer.editingNodeId || !active.has(peer.peerId) || editors[peer.editingNodeId]) continue;
@@ -557,7 +591,7 @@ function dropFromFullVoice(): void {
   teardownCall();
   collab().resetCall();
   retrackPresence();
-  toast(`Canal de voz lleno (${MAX_VOICE_PARTICIPANTS}/${MAX_VOICE_PARTICIPANTS}). Sigues en el espacio.`, "error");
+  toast(`Canal de voz lleno (${voiceCap()}/${voiceCap()}). Sigues en el espacio.`, "error");
 }
 
 function handlePresenceSync(): void {
@@ -604,58 +638,30 @@ function handlePresenceSync(): void {
 }
 
 // ----------------------------------------------------------------------------
-// Lienzo completo para invitados (enlaces antiguos `?sala=`)
+// (Sprint 17B) Avisos de comentarios y permisos → nueva lectura de Supabase
+// El intercambio de «lienzo completo» por la sala (`canvas:request` /
+// `canvas:snapshot`) se retiró: nadie entrega el tablero (chats IA ni URLs
+// firmadas) por Realtime. Cada miembro lee el lienzo con su propia RLS.
 // ----------------------------------------------------------------------------
 
-function requestSnapshot(attempt: number): void {
-  if (!session || session.snapshotReceived) return;
-  const guest = collab().guest;
-  if (!guest) return;
-  if (attempt >= SNAPSHOT_MAX_ATTEMPTS) {
-    toast(
-      "Nadie tiene ese espacio abierto ahora. Pide al anfitrión que lo abra y vuelve a unirte.",
-      "error"
-    );
-    return;
-  }
-  const payload: CanvasRequestPayload = {
-    senderId: collab().selfPeerId,
-    workspaceId: guest.workspaceId,
-  };
-  send("canvas:request", payload);
-  session.snapshotTimer = setTimeout(() => requestSnapshot(attempt + 1), SNAPSHOT_RETRY_MS);
-}
-
-async function answerSnapshotRequest(payload: CanvasRequestPayload): Promise<void> {
-  const cloud = useCloudStore.getState();
-  if (collab().guest || !cloud.workspaceId || payload.workspaceId !== cloud.workspaceId) return;
-  if (typeof payload.senderId !== "string") return;
+/**
+ * `comment:*` o `access:changed`: no se confía en lo que trae el mensaje.
+ * Se agrupan los avisos y se vuelven a leer de la base los comentarios y los
+ * roles verificados (y, si cambió algún permiso, también el tuyo).
+ */
+function scheduleVerifiedRefresh(accessChanged: boolean): void {
+  if (!session) return;
+  if (accessChanged) session.refreshAccess = true;
+  if (session.refreshTimer) return;
   const token = presenceToken;
-  const parts = buildSnapshotParts(
-    collab().selfPeerId,
-    payload.senderId,
-    cloud.workspaceId,
-    currentWorkspaceName()
-  );
-  for (const part of parts) {
-    if (token !== presenceToken) return;
-    send("canvas:snapshot", part);
-    await new Promise((resolve) => setTimeout(resolve, SNAPSHOT_PART_GAP_MS));
-  }
-}
-
-function acceptSnapshot(payload: CanvasSnapshotPayload): void {
-  if (!session || session.snapshotReceived) return;
-  const guest = collab().guest;
-  if (!guest || payload.to !== collab().selfPeerId || payload.workspaceId !== guest.workspaceId) return;
-  if (!session.assembler.accept(payload)) return;
-  session.snapshotReceived = true;
-  if (session.snapshotTimer) clearTimeout(session.snapshotTimer);
-  session.snapshotTimer = null;
-  const name = typeof payload.workspaceName === "string" ? payload.workspaceName.slice(0, 80) : guest.workspaceName;
-  collab().setGuest({ ...guest, workspaceName: name });
-  useWorkspaceStore.getState().requestZoomExtents();
-  toast(`Ves «${name}» en vivo. Tus cambios los guarda el anfitrión.`, "success");
+  session.refreshTimer = setTimeout(() => {
+    if (!session || token !== presenceToken) return;
+    const access = session.refreshAccess;
+    session.refreshTimer = null;
+    session.refreshAccess = false;
+    void refreshComments({ quiet: true });
+    if (access) void refreshOwnAccess();
+  }, REFRESH_NOTICE_DELAY_MS);
 }
 
 // ----------------------------------------------------------------------------
@@ -676,9 +682,8 @@ function disconnectPresence(): void {
 
   if (!current) return;
   current.stopCanvasSync?.();
-  if (current.snapshotTimer) clearTimeout(current.snapshotTimer);
+  if (current.refreshTimer) clearTimeout(current.refreshTimer);
   if (current.cursorPruneTimer) clearInterval(current.cursorPruneTimer);
-  current.assembler.clear();
   void current.channel.untrack().catch(() => undefined);
   void current.supabase.removeChannel(current.channel).catch(() => undefined);
 }
@@ -718,22 +723,20 @@ function connectPresence(target?: { roomId: string; label: string }): void {
   collab().setRoom(room.roomId, room.label);
   collab().setStatus("connecting", null);
 
-  const isPrivate = privateChannelsAvailable;
+  // (Sprint 17B) Siempre privado: sin vuelta a un canal público.
   const channel = supabase.channel(channelNameFor(room.roomId), {
-    config: { private: isPrivate, broadcast: { self: false, ack: false }, presence: { key: selfId } },
+    config: { private: true, broadcast: { self: false, ack: false }, presence: { key: selfId } },
   });
 
   session = {
     supabase,
     channel,
     roomId: room.roomId,
-    assembler: new SnapshotAssembler(),
     stopCanvasSync: null,
     subscribed: false,
-    isPrivate,
     everSubscribed: false,
-    snapshotReceived: false,
-    snapshotTimer: null,
+    refreshTimer: null,
+    refreshAccess: false,
     cursorPruneTimer: setInterval(() => {
       const now = Date.now();
       for (const cursor of Object.values(collab().cursors)) {
@@ -763,17 +766,19 @@ function connectPresence(target?: { roomId: string; label: string }): void {
         at: Date.now(),
       });
     })
+    // (Sprint 17B) Lo recibido se aplica SOLO en memoria y solo si el remitente
+    // tiene permiso de edición verificado en la base (denegar por defecto).
     .on("broadcast", { event: "node:upsert" }, ({ payload }) => {
-      if (forLiveWorkspace(payload)) applyRemoteNodeUpsert(payload as NodeUpsertPayload, selfUserId());
+      if (forLiveWorkspace(payload)) applyRemoteNodeUpsert(payload as NodeUpsertPayload);
     })
     .on("broadcast", { event: "node:delete" }, ({ payload }) => {
-      if (forLiveWorkspace(payload)) applyRemoteNodeDelete(payload as NodeDeletePayload, selfUserId());
+      if (forLiveWorkspace(payload)) applyRemoteNodeDelete(payload as NodeDeletePayload);
     })
     .on("broadcast", { event: "edge:upsert" }, ({ payload }) => {
-      if (forLiveWorkspace(payload)) applyRemoteEdgeUpsert(payload as EdgeUpsertPayload, selfUserId());
+      if (forLiveWorkspace(payload)) applyRemoteEdgeUpsert(payload as EdgeUpsertPayload);
     })
     .on("broadcast", { event: "edge:delete" }, ({ payload }) => {
-      if (forLiveWorkspace(payload)) applyRemoteEdgeDelete(payload as EdgeDeletePayload, selfUserId());
+      if (forLiveWorkspace(payload)) applyRemoteEdgeDelete(payload as EdgeDeletePayload);
     })
     .on("broadcast", { event: "alert:upsert" }, ({ payload }) => {
       if (forLiveWorkspace(payload)) applyRemoteAlertUpsert(payload as AlertUpsertPayload);
@@ -781,25 +786,29 @@ function connectPresence(target?: { roomId: string; label: string }): void {
     .on("broadcast", { event: "alert:resolve" }, ({ payload }) => {
       if (forLiveWorkspace(payload)) applyRemoteAlertResolve(payload as AlertResolvePayload);
     })
-    // (Sprint 16) Comentarios y permisos: la base (RLS) es la fuente de verdad.
+    // (Sprint 17B) Comentarios y permisos: el mensaje solo avisa; lo real se
+    // vuelve a leer de Supabase con tu RLS (nunca el rol ni el texto recibidos).
     .on("broadcast", { event: "comment:upsert" }, ({ payload }) => {
-      if (forLiveWorkspace(payload)) applyRemoteCommentUpsert(payload as CommentUpsertPayload);
+      if (isRefreshNotice(payload, liveWorkspaceId())) scheduleVerifiedRefresh(false);
     })
     .on("broadcast", { event: "comment:resolve" }, ({ payload }) => {
-      if (forLiveWorkspace(payload)) applyRemoteCommentResolve(payload as CommentResolvePayload);
+      if (isRefreshNotice(payload, liveWorkspaceId())) scheduleVerifiedRefresh(false);
     })
     .on("broadcast", { event: "comment:delete" }, ({ payload }) => {
-      if (forLiveWorkspace(payload)) applyRemoteCommentDelete(payload as CommentDeletePayload);
+      if (isRefreshNotice(payload, liveWorkspaceId())) scheduleVerifiedRefresh(false);
     })
     .on("broadcast", { event: "access:changed" }, ({ payload }) => {
-      if (!forLiveWorkspace(payload)) return;
-      if (applyRemoteAccessChanged(payload as AccessChangedPayload, selfUserId())) void refreshOwnAccess();
+      if (isRefreshNotice(payload, liveWorkspaceId())) {
+        scheduleVerifiedRefresh(true);
+        scheduleCdeRefresh(true);
+      }
     })
-    .on("broadcast", { event: "canvas:request" }, ({ payload }) => {
-      void answerSnapshotRequest(payload as CanvasRequestPayload);
+    // (Sprint 18) Chat del lienzo y áreas: el aviso solo pide releer de Supabase.
+    .on("broadcast", { event: "chat:new" }, ({ payload }) => {
+      if (isRefreshNotice(payload, liveWorkspaceId())) scheduleCdeRefresh(false);
     })
-    .on("broadcast", { event: "canvas:snapshot" }, ({ payload }) => {
-      acceptSnapshot(payload as CanvasSnapshotPayload);
+    .on("broadcast", { event: "cde:changed" }, ({ payload }) => {
+      if (isRefreshNotice(payload, liveWorkspaceId())) scheduleCdeRefresh(true);
     })
     .on("broadcast", { event: "screen:stop" }, ({ payload }) => {
       const p = payload as ScreenStopPayload;
@@ -824,17 +833,20 @@ function connectPresence(target?: { roomId: string; label: string }): void {
             },
           });
         }
-        if (collab().guest && !session.snapshotReceived && !session.snapshotTimer) requestSnapshot(0);
       } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-        // Canal privado rechazado antes de entrar (sin políticas RLS de Realtime):
-        // se reintenta una vez como canal público sin romper la sala.
-        if (session.isPrivate && !session.everSubscribed) {
-          privateChannelsAvailable = false;
+        // (Sprint 17B) Canal privado rechazado antes de entrar: no eres miembro
+        // de este espacio o faltan las políticas RLS de Realtime. Ya NO se
+        // vuelve a un canal público: la sala queda cerrada con un aviso.
+        if (status === "CHANNEL_ERROR" && !session.everSubscribed) {
           console.warn(
-            "[Andros] Realtime privado no disponible en este proyecto de Supabase (faltan las políticas de realtime.messages, ver supabase/schema.sql §8). Se usa el canal público."
+            "[Andros] La sala en vivo es privada y Realtime rechazó la entrada (no eres miembro del espacio o faltan las políticas de realtime.messages, ver supabase/schema.sql §8b)."
           );
           disconnectPresence();
-          connectPresence(room);
+          collab().setPeers({});
+          collab().setStatus(
+            "error",
+            "No se pudo entrar a la sala en vivo privada de este espacio. Tu lienzo y el guardado en la nube siguen funcionando."
+          );
           return;
         }
         session.subscribed = false;
@@ -1146,32 +1158,26 @@ export async function joinCollabRoom(): Promise<void> {
     return;
   }
 
-  // Enlace ANTIGUO `?sala=…`: sesión de invitado en vivo (como en Sprint 7).
+  // Enlace ANTIGUO `?sala=…` (Sprint 17B): ya no abre una sesión de invitado.
+  // Solo sirve si eres dueño o miembro VERIFICADO del espacio (se abre como
+  // con `?espacio=`); a cualquier otra persona no se le entrega nada.
   const invite = state.invite;
   if (invite) {
     state.setInvite(null);
-    const ownRoom = resolveCurrentRoom();
-    const label = ownRoom?.roomId === invite.roomId ? ownRoom.label : "Sala compartida";
     const manager = useWorkspaceManagerStore.getState();
     const accessible =
       Boolean(invite.workspaceId) &&
       (manager.workspaces.some((w) => w.id === invite.workspaceId) ||
         manager.sharedWorkspaces.some((w) => w.id === invite.workspaceId));
-    if (invite.workspaceId && accessible) {
-      // Eres dueño o miembro: se abre de verdad (la presencia cambia sola).
-      if (cloud.workspaceId !== invite.workspaceId) await openCloudWorkspace(invite.workspaceId);
-    } else {
-      if (invite.workspaceId) {
-        // Espacio de otra cuenta: lo verás en vivo sin guardarlo en tu nube.
-        await suspendCloudForCollabGuest();
-        collab().setGuest({
-          workspaceId: invite.workspaceId,
-          workspaceName: "Espacio compartido",
-          hostName: "tu anfitrión",
-        });
-      }
-      connectPresence({ roomId: invite.roomId, label });
+    if (!invite.workspaceId || !accessible) {
+      toast(
+        "Ese enlace antiguo de sala ya no da acceso. Pide al dueño que te añada al espacio y usa su enlace «?espacio=».",
+        "error"
+      );
+      return;
     }
+    // Eres dueño o miembro: se abre de verdad (la presencia cambia sola).
+    if (cloud.workspaceId !== invite.workspaceId) await openCloudWorkspace(invite.workspaceId);
     if (token !== joinToken) return;
   }
 
@@ -1184,12 +1190,12 @@ export async function joinCollabRoom(): Promise<void> {
   // Topes: en modo lectura no se abre WebRTC; con 5 en voz no se entra.
   const capacityState = collab();
   if (capacityState.capacity.readOnly) {
-    toast(`Sala completa (${MAX_SPACE_PARTICIPANTS}/${MAX_SPACE_PARTICIPANTS}): la voz se habilita cuando se libere un lugar.`, "error");
+    toast(`Sala completa (${capacityState.capacity.limit}/${capacityState.capacity.limit}): la voz se habilita cuando se libere un lugar.`, "error");
     return;
   }
   const voiceTaken = Object.values(capacityState.peers).filter((peer) => peer.inCall).length;
-  if (voiceTaken >= MAX_VOICE_PARTICIPANTS) {
-    toast(`Canal de voz lleno (${MAX_VOICE_PARTICIPANTS}/${MAX_VOICE_PARTICIPANTS}). Sigues en el espacio con el lienzo en vivo.`, "error");
+  if (voiceTaken >= voiceCap()) {
+    toast(`Canal de voz lleno (${voiceCap()}/${voiceCap()}). Sigues en el espacio con el lienzo en vivo.`, "error");
     return;
   }
 
@@ -1474,6 +1480,12 @@ export function useCollabRoom(): void {
       }, EDITING_PRESENCE_DELAY_MS);
     });
 
+    // (Sprint 21) Cambió tu plan (pago o fin de la suscripción): el tope de
+    // personas en vivo de tus espacios se vuelve a leer.
+    const unsubscribePlan = useSubscriptionStore.subscribe((state, prev) => {
+      if (state.plan !== prev.plan) invalidateLiveCap();
+    });
+
     ensurePresence();
 
     const handlePageHide = () => closeEverything();
@@ -1483,6 +1495,7 @@ export function useCollabRoom(): void {
       unsubscribeCloud();
       unsubscribeManager();
       unsubscribeEditing();
+      unsubscribePlan();
       window.removeEventListener("pagehide", handlePageHide);
       closeEverything();
     };

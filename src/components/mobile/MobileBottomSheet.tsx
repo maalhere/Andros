@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Bot,
+  ClipboardCheck,
   ClipboardList,
   Box,
   Cable,
@@ -325,6 +326,7 @@ const QUICK_ADD_ICONS: Record<QuickAddKind, React.ReactNode> = {
   link: <Link2 className="w-5 h-5" />,
   calc: <Calculator className="w-5 h-5" />,
   forms: <ClipboardList className="w-5 h-5" />,
+  resolution: <ClipboardCheck className="w-5 h-5" />,
   formula: <SquareFunction className="w-5 h-5" />,
   ai: <Bot className="w-5 h-5" />,
   "ai-import": <MessagesSquare className="w-5 h-5" />,
@@ -391,7 +393,7 @@ const AddSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           </span>
           <span className="min-w-0">
             <span className="block text-[13px] font-semibold text-andros-primary">Biblioteca científica</span>
-            <span className="block text-[11px] leading-snug text-andros-muted">Papers, normas, YouTube y LinkedIn citables</span>
+            <span className="block text-[11px] leading-snug text-andros-muted">Papers, normas, videos y publicaciones citables</span>
           </span>
         </button>
       )}

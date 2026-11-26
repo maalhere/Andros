@@ -16,8 +16,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { callGeminiHedged, ProviderFailure, type ModelRequest } from "@/lib/ai/gemini";
-import { DAILY_LIMIT_MESSAGE } from "@/lib/ai/freeQuota";
-import { clientIp, serverQuotaAllows, serverQuotaConsume } from "@/lib/ai/serverQuota";
+import { resolveQuotaCaller, serverQuotaAllows, serverQuotaConsume } from "@/lib/ai/serverQuota";
 import { parseJsonText } from "@/lib/ai/jsonText";
 import { clipCleanly, MAX_TOTAL_CHARS } from "@/lib/canvas/contextGraph";
 import {
@@ -149,10 +148,11 @@ export async function POST(request: NextRequest): Promise<NextResponse<AutofillR
   if (!apiKey) return reply({ ok: false, issue: MISSING_KEY });
 
   // Respaldo anti-abuso: la clave del servidor tiene tope diario por IP.
-  const ip = clientIp(request.headers);
+  // (Sprint 21) Tope del plan de quien llama (15 o 150 al día con sesión; por IP sin ella).
   const usingServerKey = !userKey;
-  if (usingServerKey && !serverQuotaAllows(ip)) {
-    return reply({ ok: false, issue: { code: "daily_limit", message: DAILY_LIMIT_MESSAGE } });
+  const quota = usingServerKey ? await resolveQuotaCaller(request) : null;
+  if (quota && !serverQuotaAllows(quota.key, quota.limit)) {
+    return reply({ ok: false, issue: { code: "daily_limit", message: quota.message } });
   }
 
   // Tope de contexto: esquema + información en bruto ≤ 12 000 caracteres.
@@ -178,7 +178,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<AutofillR
       thinkingLevel: "low",
     });
     const json = typeof raw === "string" ? parseJsonText(raw) : raw;
-    if (usingServerKey) serverQuotaConsume(ip);
+    if (quota) serverQuotaConsume(quota.key);
     const result = sanitizeAutofillResult(json, sheets, source);
     // Toda ficha pedida vuelve, aunque el modelo la haya omitido (queda vacía).
     const fallbackGroup = result.sheets[0]?.group ?? "Lote";

@@ -9,49 +9,41 @@
 // se escribe (cada ~150 ms, ver NodeEditors): el guardado en PostgreSQL va
 // aparte, en segundo plano (useCloudSync), y nunca bloquea la escritura.
 //
-// Recepción: aplica el cambio dentro de `runAsRemoteCollab`, así:
+// Recepción: aplica el cambio dentro de `runAsRemoteCollab(…, { persist: false })`:
 //   · este mismo módulo NO lo re-emite (nunca hay eco ni bucle infinito), y
-//   · `useCloudSync` decide si lo guarda (solo el dueño del espacio).
+//   · (Sprint 17B) NADIE lo guarda en la nube por el remitente: cada persona
+//     (dueño o editor) guarda únicamente SUS cambios locales con su propia RLS.
+//     `useCloudSync` solo anota lo recibido como «ya guardado» para no
+//     reescribirlo ni borrar archivos de Storage por su cuenta.
 //
 // Alertas anti-malentendidos (`useImpactStore`): cada alta o baja LOCAL viaja
 // como `alert:upsert` / `alert:resolve` con el mismo `senderId`; las que llegan
 // se aplican con la misma marca remota, así que tampoco rebotan. Solo viven en
 // la sesión (no se guardan en la nube).
 //
-// (Sprint 16) Permisos y comentarios:
-//   · Los cambios de lienzo que lleguen de alguien con rol Comentarista o
-//     Solo lectura se IGNORAN (`isReadOnlySender`): nadie los aplica ni los
-//     guarda en la nube en su nombre.
-//   · `comment:upsert` / `comment:resolve` / `comment:delete` actualizan el
-//     cajón de comentarios de quien tiene el espacio abierto. La tabla
-//     `workspace_comments` (RLS) es la fuente de verdad: estos avisos nunca
-//     se guardan, solo evitan recargar.
+// Permisos y comentarios (Sprint 16 → 17B):
+//   · Los cambios de lienzo solo se aplican si el remitente tiene permiso de
+//     edición VERIFICADO en la base (`isReadOnlySender` deniega por defecto).
+//   · `comment:*` y `access:changed` son solo AVISOS: quien los recibe vuelve
+//     a leer de Supabase (con su RLS) los comentarios y los roles reales. Nunca
+//     se confía en el contenido ni en el rol que trae el mensaje.
 // ============================================================================
 
 import type {
-  AccessChangedPayload,
   AlertResolvePayload,
-  CommentDeletePayload,
-  CommentResolvePayload,
-  CommentUpsertPayload,
   AlertUpsertPayload,
-  CanvasSnapshotPayload,
   EdgeDeletePayload,
   EdgeUpsertPayload,
   NodeDeletePayload,
   NodeUpsertPayload,
 } from "@/types/collab";
-import type { EngineeringNodeData, FormPhoto, NodeConnection } from "@/types/workspace";
+import type { EngineeringNodeData, FormPhoto } from "@/types/workspace";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { useImpactStore } from "@/store/useImpactStore";
 import { sanitizeAlertEntry } from "@/lib/canvas/impact";
 import { parseImportedConnection, parseImportedNode } from "@/hooks/useCloudSync";
-import { sanitizeCanvasStrokes } from "@/lib/canvas/inkGeometry";
 import { isApplyingRemoteCollab, runAsRemoteCollab } from "./remoteFlag";
-import { isReadOnlySender, setKnownMemberRole } from "@/lib/access/memberRoles";
-import { isMemberRole } from "@/lib/access/permissions";
-import { sanitizeComment } from "@/lib/comments/commentModel";
-import { useCommentsStore } from "@/store/useCommentsStore";
+import { isReadOnlySender } from "@/lib/access/memberRoles";
 
 /** Intervalo mínimo entre dos envíos del mismo nodo (~25 fps). */
 export const NODE_SEND_INTERVAL_MS = 40;
@@ -64,7 +56,6 @@ export const NODE_SEND_INTERVAL_MS = 40;
 export const CURSOR_SEND_INTERVAL_MS = 70;
 /** Realtime limita cada mensaje: se queda holgado por debajo. */
 const MAX_EVENT_BYTES = 180_000;
-const MAX_SNAPSHOT_PART_BYTES = 120_000;
 /** Archivos incrustados (`data:`) más grandes que esto no viajan por la sala. */
 const MAX_INLINE_URL_CHARS = 48_000;
 
@@ -291,17 +282,19 @@ function mergeIncomingNode(
   };
 }
 
-/** El remitente no tiene permiso de edición en este espacio: se descarta. */
-function blocked(payload: { workspaceId: string; senderUserId: string }): boolean {
+/** Sin permiso de edición verificado en este espacio: se descarta (denegar por defecto). */
+function blocked(payload: { workspaceId: unknown; senderUserId: unknown }): boolean {
+  if (typeof payload.workspaceId !== "string" || typeof payload.senderUserId !== "string") return true;
   return isReadOnlySender(payload.workspaceId, payload.senderUserId);
 }
 
-/** `persist`: el cambio vino de otra cuenta → el dueño debe guardarlo. */
-function persistFor(senderUserId: string, selfUserId: string): boolean {
-  return senderUserId !== selfUserId;
-}
+/**
+ * Todo lo que llega por la sala se aplica SOLO en memoria: el remitente ya lo
+ * guardó con su propia sesión. El receptor nunca escribe ni borra por él.
+ */
+export const REMOTE_APPLY_OPTIONS = { persist: false } as const;
 
-export function applyRemoteNodeUpsert(payload: NodeUpsertPayload, selfUserId: string): void {
+export function applyRemoteNodeUpsert(payload: NodeUpsertPayload): void {
   if (blocked(payload)) return;
   const node = parseImportedNode(payload.node);
   if (!node) return;
@@ -314,11 +307,11 @@ export function applyRemoteNodeUpsert(payload: NodeUpsertPayload, selfUserId: st
         nodes[index] = mergeIncomingNode(node, state.nodes[index]);
         return { nodes };
       }),
-    { persist: persistFor(payload.senderUserId, selfUserId) }
+    REMOTE_APPLY_OPTIONS
   );
 }
 
-export function applyRemoteNodeDelete(payload: NodeDeletePayload, selfUserId: string): void {
+export function applyRemoteNodeDelete(payload: NodeDeletePayload): void {
   if (blocked(payload)) return;
   if (typeof payload.id !== "string") return;
   runAsRemoteCollab(
@@ -338,11 +331,11 @@ export function applyRemoteNodeDelete(payload: NodeDeletePayload, selfUserId: st
           connectingFrom: state.connectingFrom?.nodeId === payload.id ? null : state.connectingFrom,
         };
       }),
-    { persist: persistFor(payload.senderUserId, selfUserId) }
+    REMOTE_APPLY_OPTIONS
   );
 }
 
-export function applyRemoteEdgeUpsert(payload: EdgeUpsertPayload, selfUserId: string): void {
+export function applyRemoteEdgeUpsert(payload: EdgeUpsertPayload): void {
   if (blocked(payload)) return;
   const edge = parseImportedConnection(payload.edge);
   if (!edge) return;
@@ -357,11 +350,11 @@ export function applyRemoteEdgeUpsert(payload: EdgeUpsertPayload, selfUserId: st
         connections[index] = edge;
         return { connections };
       }),
-    { persist: persistFor(payload.senderUserId, selfUserId) }
+    REMOTE_APPLY_OPTIONS
   );
 }
 
-export function applyRemoteEdgeDelete(payload: EdgeDeletePayload, selfUserId: string): void {
+export function applyRemoteEdgeDelete(payload: EdgeDeletePayload): void {
   if (blocked(payload)) return;
   if (typeof payload.id !== "string") return;
   runAsRemoteCollab(
@@ -374,147 +367,39 @@ export function applyRemoteEdgeDelete(payload: EdgeDeletePayload, selfUserId: st
             state.selectedConnectionId === payload.id ? null : state.selectedConnectionId,
         };
       }),
-    { persist: persistFor(payload.senderUserId, selfUserId) }
+    REMOTE_APPLY_OPTIONS
   );
 }
 
 export function applyRemoteAlertUpsert(payload: AlertUpsertPayload): void {
   const alert = sanitizeAlertEntry(payload.alert);
   if (!alert) return;
-  runAsRemoteCollab(() => useImpactStore.getState().upsertAlert(alert), { persist: false });
+  runAsRemoteCollab(() => useImpactStore.getState().upsertAlert(alert), REMOTE_APPLY_OPTIONS);
 }
 
 export function applyRemoteAlertResolve(payload: AlertResolvePayload): void {
   if (typeof payload.id !== "string") return;
-  runAsRemoteCollab(() => useImpactStore.getState().resolveAlert(payload.id), { persist: false });
+  runAsRemoteCollab(() => useImpactStore.getState().resolveAlert(payload.id), REMOTE_APPLY_OPTIONS);
 }
 
 // ----------------------------------------------------------------------------
-// Comentarios y permisos (Sprint 16)
+// Comentarios y permisos (Sprint 16 → 17B): solo avisos de «vuelve a leer»
 // ----------------------------------------------------------------------------
-
-export function applyRemoteCommentUpsert(payload: CommentUpsertPayload): void {
-  const comment = sanitizeComment(payload.comment);
-  // Solo se acepta un comentario de su propio autor y para este espacio.
-  if (!comment || comment.workspaceId !== payload.workspaceId || comment.authorId !== payload.senderUserId) return;
-  useCommentsStore.getState().upsert(comment);
-}
-
-export function applyRemoteCommentResolve(payload: CommentResolvePayload): void {
-  if (typeof payload.id !== "string" || typeof payload.resolved !== "boolean") return;
-  useCommentsStore.getState().setResolved(payload.id, payload.resolved);
-}
-
-export function applyRemoteCommentDelete(payload: CommentDeletePayload): void {
-  if (typeof payload.id !== "string") return;
-  useCommentsStore.getState().remove(payload.id);
-}
 
 /**
- * Cambio de permiso anunciado por el dueño. Devuelve `true` si te afecta a
- * ti (quien llama vuelve a leer tu rol REAL de la base, no el del mensaje).
+ * Aviso de la sala sobre comentarios (`comment:*`) o permisos
+ * (`access:changed`). Solo indica que hay que volver a leer de Supabase: el
+ * contenido, el autor y el rol del mensaje se IGNORAN (los podría inventar
+ * cualquiera que esté en la sala). `true` si el aviso es para `workspaceId`.
  */
-export function applyRemoteAccessChanged(payload: AccessChangedPayload, selfUserId: string): boolean {
-  if (typeof payload.userId !== "string" || typeof payload.workspaceId !== "string") return false;
-  const role = payload.role === null ? null : isMemberRole(payload.role) ? payload.role : undefined;
-  if (role === undefined) return false;
-  setKnownMemberRole(payload.workspaceId, payload.userId, role);
-  return payload.userId === selfUserId;
+export function isRefreshNotice(payload: unknown, workspaceId: string | null): boolean {
+  if (!payload || typeof payload !== "object" || !workspaceId) return false;
+  return (payload as { workspaceId?: unknown }).workspaceId === workspaceId;
 }
 
 // ----------------------------------------------------------------------------
-// Lienzo completo para invitados (en partes)
+// (Sprint 17B) El intercambio de «lienzo completo» por la sala (`canvas:request`
+// / `canvas:snapshot`, enlaces antiguos `?sala=`) se RETIRÓ: entregaba todo el
+// tablero (chats IA y URLs firmadas incluidos) a quien lo pidiera. Ahora cada
+// miembro lee el lienzo de Supabase con su propia RLS.
 // ----------------------------------------------------------------------------
-
-/** Parte el lienzo actual en mensajes que caben en Realtime. */
-export function buildSnapshotParts(
-  senderId: string,
-  to: string,
-  workspaceId: string,
-  workspaceName: string
-): CanvasSnapshotPayload[] {
-  const { nodes, connections, canvasStrokes } = useWorkspaceStore.getState();
-  const snapshotId = `snap-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-
-  const chunks: EngineeringNodeData[][] = [[]];
-  let chunkBytes = 0;
-  for (const raw of nodes) {
-    const node = nodeForWire(raw);
-    const size = byteLength(node);
-    if (size > MAX_EVENT_BYTES) continue;
-    if (chunkBytes + size > MAX_SNAPSHOT_PART_BYTES && chunks[chunks.length - 1].length > 0) {
-      chunks.push([]);
-      chunkBytes = 0;
-    }
-    chunks[chunks.length - 1].push(node);
-    chunkBytes += size;
-  }
-  const strokes = byteLength(canvasStrokes) <= MAX_SNAPSHOT_PART_BYTES ? canvasStrokes : [];
-  const extras = { connections, strokes };
-  // Cables y tinta viajan en una parte propia al final.
-  chunks.push([]);
-
-  return chunks.map((chunk, part) => ({
-    senderId,
-    to,
-    workspaceId,
-    workspaceName,
-    snapshotId,
-    part,
-    total: chunks.length,
-    nodes: chunk,
-    connections: part === chunks.length - 1 ? extras.connections : [],
-    strokes: part === chunks.length - 1 ? extras.strokes : [],
-  }));
-}
-
-/** Junta las partes de un lienzo y lo aplica cuando están todas. */
-export class SnapshotAssembler {
-  private readonly parts = new Map<string, Map<number, CanvasSnapshotPayload>>();
-
-  /** Devuelve `true` cuando el lienzo quedó aplicado. */
-  accept(payload: CanvasSnapshotPayload): boolean {
-    if (
-      typeof payload.snapshotId !== "string" ||
-      !Number.isInteger(payload.part) ||
-      !Number.isInteger(payload.total) ||
-      payload.total < 1 ||
-      payload.total > 500
-    ) {
-      return false;
-    }
-    const bucket = this.parts.get(payload.snapshotId) ?? new Map<number, CanvasSnapshotPayload>();
-    bucket.set(payload.part, payload);
-    this.parts.set(payload.snapshotId, bucket);
-    if (bucket.size < payload.total) return false;
-
-    const ordered = [...bucket.values()].sort((a, b) => a.part - b.part);
-    this.parts.clear();
-    const nodes = ordered
-      .flatMap((p) => (Array.isArray(p.nodes) ? p.nodes : []))
-      .map(parseImportedNode)
-      .filter((n): n is EngineeringNodeData => n !== null);
-    const nodeIds = new Set(nodes.map((n) => n.id));
-    const connections = ordered
-      .flatMap((p) => (Array.isArray(p.connections) ? p.connections : []))
-      .map(parseImportedConnection)
-      .filter(
-        (c): c is NodeConnection => c !== null && nodeIds.has(c.fromNodeId) && nodeIds.has(c.toNodeId)
-      );
-    const strokes = sanitizeCanvasStrokes(ordered[ordered.length - 1]?.strokes);
-
-    runAsRemoteCollab(
-      () => {
-        const store = useWorkspaceStore.getState();
-        store.hydrateWorkspace(nodes, connections);
-        store.hydrateCanvasStrokes(strokes);
-      },
-      { persist: false }
-    );
-    return true;
-  }
-
-  clear(): void {
-    this.parts.clear();
-  }
-}

@@ -8,11 +8,17 @@ import {
   Crown,
   Eraser,
   MessageSquare,
+  MessagesSquare,
   FileText,
   Gauge,
   Sparkle,
   FolderArchive,
+  Headphones,
   LayoutTemplate,
+  MonitorDown,
+  Moon,
+  Search,
+  Sun,
   CircleHelp,
   GraduationCap,
   KeyRound,
@@ -26,8 +32,11 @@ import {
   X,
 } from "lucide-react";
 import { useMarketStore } from "@/store/useMarketStore";
+import { chooseExperienceMode } from "@/lib/billing/entitlements";
 import { useLibraryStore } from "@/store/useLibraryStore";
 import { useIsExpert, useSettingsStore } from "@/store/useSettingsStore";
+import { openWorkspaceChat } from "@/components/cde/WorkspaceChatPanel";
+import { useUnreadChatCount } from "@/lib/cde/hooks";
 import { useWorkspaceManagerStore } from "@/store/useWorkspaceManagerStore";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { useOnboardingStore } from "@/store/useOnboardingStore";
@@ -42,15 +51,40 @@ import { usePlanExportStore } from "@/store/usePlanExportStore";
 import { useCanvasReadOnly } from "@/store/useCollabStore";
 import { useCommentsStore, useOpenCommentTotal } from "@/store/useCommentsStore";
 import { useCalendarStore } from "@/store/useCalendarStore";
+import { useCollabStore } from "@/store/useCollabStore";
+import { joinCollabRoom } from "@/lib/collab/useCollabRoom";
+import { useCommandPaletteStore } from "@/store/useCommandPaletteStore";
+import { useInstallPrompt } from "@/hooks/useInstallPrompt";
+import { InstallAppModal } from "@/components/pwa/InstallAppModal";
 
 // ============================================================================
 // ANDROS — MENÚ "⋯ MÁS OPCIONES" (barra superior)
 // Agrupa todo lo secundario en una lista limpia para que la pantalla
 // principal se entienda al instante.
+// (Sprint 19) En Modo Simple se ordena en 3 grupos (Equipo · Herramientas ·
+// Configuración) y no repite lo que ya está en la barra (Chat, Compartir,
+// Calendarios). Recibe lo que salió de la barra: buscar, voz, comentarios,
+// tema, instalar app, cambio de modo y ayuda.
 // ============================================================================
+
+type MenuSection = "team" | "tools" | "config";
+
+const SECTION_LABELS: Record<MenuSection, string> = {
+  team: "Equipo",
+  tools: "Herramientas",
+  config: "Configuración",
+};
+
+/** Orden de los grupos en Modo Simple (sin grupo = al final, p. ej. «Limpiar»). */
+const SECTION_ORDER: (MenuSection | undefined)[] = ["team", "tools", "config", undefined];
+
+/** Opciones que en Modo Simple ya están en la barra superior. */
+const SIMPLE_BAR_IDS = new Set(["share", "chat", "calendar"]);
 
 interface MenuItem {
   id: string;
+  /** Grupo en Modo Simple (en Experto la lista sigue plana). */
+  section?: MenuSection;
   label: string;
   icon: React.ReactNode;
   onSelect: () => void;
@@ -173,7 +207,9 @@ const SaveTemplateDialog: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 
   const save = () => {
     if (!name.trim()) return;
-    if (saveWorkspaceAsTemplate(name.trim())) onClose();
+    void saveWorkspaceAsTemplate(name.trim()).then((close) => {
+      if (close) onClose();
+    });
   };
 
   return createPortal(
@@ -274,16 +310,73 @@ export const MoreMenu: React.FC = () => {
   // Sala llena (7.º) o rol Comentarista / Solo lectura: nada que importe, limpie o cree plantillas.
   const readOnly = useCanvasReadOnly();
   const openComments = useOpenCommentTotal();
+  const unreadChat = useUnreadChatCount();
+  const theme = useWorkspaceStore((s) => s.theme);
+  const { canPrompt, isInstalled, platform, promptInstall } = useInstallPrompt();
+  const [installGuideOpen, setInstallGuideOpen] = useState(false);
+
+  const install = async () => {
+    if (canPrompt) {
+      const outcome = await promptInstall();
+      if (outcome !== "unavailable") return;
+    }
+    setInstallGuideOpen(true);
+  };
+
+  /** Lo que en Modo Simple sale de la barra superior (en Experto está a la vista). */
+  const simpleOnlyItems: MenuItem[] = expert
+    ? []
+    : [
+        {
+          id: "search",
+          section: "tools",
+          label: "Buscar nodos y acciones",
+          icon: <Search className="w-4 h-4" />,
+          onSelect: () => useCommandPaletteStore.getState().setOpen(true),
+        },
+        {
+          id: "voice",
+          section: "team",
+          label: "Sala de voz del espacio",
+          icon: <Headphones className="w-4 h-4" />,
+          onSelect: () => {
+            const collab = useCollabStore.getState();
+            if (collab.inCall) collab.setPanelOpen(true);
+            else void joinCollabRoom();
+          },
+        },
+        {
+          id: "theme",
+          section: "config",
+          label: theme === "dark" ? "Cambiar a modo claro" : "Cambiar a modo oscuro",
+          icon: theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />,
+          onSelect: () => useWorkspaceStore.getState().toggleTheme(),
+        },
+        ...(isInstalled
+          ? []
+          : [
+              {
+                id: "install",
+                section: "config" as const,
+                label: "Instalar App",
+                icon: <MonitorDown className="w-4 h-4" />,
+                onSelect: () => void install(),
+              },
+            ]),
+      ];
 
   const allItems: MenuItem[] = [
+    ...simpleOnlyItems,
     {
       id: "mode",
-      label: expert ? "Cambiar a Modo Simple" : "Cambiar a Modo Experto (3D, CodeLab)",
+      section: "config",
+      label: expert ? "Cambiar a Modo Simple" : "Cambiar a Modo Experto (Pro: 3D, CodeLab)",
       icon: expert ? <Sparkle className="w-4 h-4" /> : <Gauge className="w-4 h-4" />,
-      onSelect: () => useSettingsStore.getState().setExperienceMode(expert ? "simple" : "expert"),
+      onSelect: () => void chooseExperienceMode(expert ? "simple" : "expert"),
     },
     {
       id: "friends",
+      section: "team",
       label: "Amigos",
       icon: <Users className="w-4 h-4" />,
       onSelect: () => useSocialStore.getState().setFriendsOpen(true),
@@ -296,7 +389,15 @@ export const MoreMenu: React.FC = () => {
       onSelect: () => useSocialStore.getState().setShareOpen(true),
     },
     {
+      id: "chat",
+      label: "Chat del lienzo",
+      icon: <MessagesSquare className="w-4 h-4" />,
+      onSelect: () => openWorkspaceChat(),
+      badge: unreadChat,
+    },
+    {
       id: "comments",
+      section: "team",
       label: "Comentarios",
       icon: <MessageSquare className="w-4 h-4" />,
       onSelect: () => useCommentsStore.getState().openDrawer(null),
@@ -304,18 +405,20 @@ export const MoreMenu: React.FC = () => {
     },
     {
       id: "calendar",
-      label: "Google Calendar",
+      label: "Calendarios externos",
       icon: <CalendarDays className="w-4 h-4" />,
       onSelect: () => useCalendarStore.getState().openModal(null),
     },
     {
       id: "export-plan",
-      label: "Exportar: PDF, Word, PowerPoint",
+      section: "tools",
+      label: "Exportar: PDF, .docx, .pptx",
       icon: <FileText className="w-4 h-4" />,
       onSelect: () => usePlanExportStore.getState().setOpen(true),
     },
     {
       id: "arena",
+      section: "tools",
       label: "Arena & Empleos",
       icon: <Swords className="w-4 h-4" />,
       onSelect: () => useMarketStore.getState().setArenaOpen(true),
@@ -332,42 +435,49 @@ export const MoreMenu: React.FC = () => {
       : []),
     {
       id: "pro",
-      label: "Planes Pro",
+      section: "config",
+      label: "Planes (Básico / Pro)",
       icon: <Crown className="w-4 h-4" />,
       onSelect: () => useMarketStore.getState().setUpgradeOpen(true),
     },
     {
       id: "settings",
+      section: "config",
       label: "Ajustes",
       icon: <Settings className="w-4 h-4" />,
       onSelect: () => useSettingsStore.getState().setModalOpen(true),
     },
     {
       id: "ai-keys",
-      label: "Claves IA (Gemini, Claude, ChatGPT)",
+      section: "config",
+      label: "Claves IA propias",
       icon: <KeyRound className="w-4 h-4" />,
       onSelect: () => useAiProvidersStore.getState().setKeysModalOpen(true),
     },
     {
       id: "zip",
+      section: "tools",
       label: "Descargar / Importar .zip",
       icon: <FolderArchive className="w-4 h-4" />,
       onSelect: () => useWorkspaceManagerStore.getState().setDrawerOpen(true),
     },
     {
       id: "shortcuts",
+      section: "config",
       label: "Atajos y guía de IA",
       icon: <CircleHelp className="w-4 h-4" />,
       onSelect: () => useShortcutsGuideStore.getState().openGuide(),
     },
     {
       id: "tutorial",
+      section: "config",
       label: "Ver tutorial",
       icon: <GraduationCap className="w-4 h-4" />,
       onSelect: () => useOnboardingStore.getState().start(),
     },
     {
       id: "save-template",
+      section: "tools",
       label: "Guardar como plantilla",
       icon: <LayoutTemplate className="w-4 h-4" />,
       onSelect: () => setSaveTemplateOpen(true),
@@ -380,7 +490,13 @@ export const MoreMenu: React.FC = () => {
       danger: true,
     },
   ];
-  const items = readOnly ? allItems.filter((item) => !READ_ONLY_HIDDEN.has(item.id)) : allItems;
+  // Modo Simple: sin repetir la barra y ordenado por grupos (Equipo → Herramientas → Configuración).
+  const byMode = expert
+    ? allItems
+    : allItems
+        .filter((item) => !SIMPLE_BAR_IDS.has(item.id))
+        .sort((a, b) => SECTION_ORDER.indexOf(a.section) - SECTION_ORDER.indexOf(b.section));
+  const items = readOnly ? byMode.filter((item) => !READ_ONLY_HIDDEN.has(item.id)) : byMode;
 
   return (
     <div ref={ref} className="relative">
@@ -412,11 +528,21 @@ export const MoreMenu: React.FC = () => {
             exit={{ opacity: 0, y: -4, scale: 0.98 }}
             transition={{ duration: 0.14 }}
             aria-label="Más opciones"
-            className="absolute right-0 top-[3.25rem] md:top-11 w-60 p-1.5 rounded-2xl bg-andros-card border border-andros-border shadow-hud-light dark:shadow-hud-dark origin-top-right"
+            className="absolute right-0 top-[3.25rem] md:top-11 w-64 max-h-[calc(100dvh-6rem)] overflow-y-auto overscroll-contain p-1.5 rounded-2xl bg-andros-card border border-andros-border shadow-hud-light dark:shadow-hud-dark origin-top-right"
           >
             {items.map((item, index) => (
               <React.Fragment key={item.id}>
                 {item.danger && index > 0 && <div className="h-px bg-andros-border my-1" />}
+                {!expert && item.section && item.section !== items[index - 1]?.section && (
+                  <p
+                    role="presentation"
+                    className={`px-2.5 pb-1 text-[11px] font-medium text-andros-muted ${
+                      index > 0 ? "pt-2 mt-1 border-t border-andros-border" : "pt-1"
+                    }`}
+                  >
+                    {SECTION_LABELS[item.section]}
+                  </p>
+                )}
                 <button
                   type="button"
                   role="menuitem"
@@ -467,6 +593,7 @@ export const MoreMenu: React.FC = () => {
         {confirmClear && <ClearWorkspaceDialog key="clear" onClose={() => setConfirmClear(false)} />}
         {saveTemplateOpen && <SaveTemplateDialog key="save-template" onClose={() => setSaveTemplateOpen(false)} />}
       </AnimatePresence>
+      <InstallAppModal open={installGuideOpen} platform={platform} onClose={() => setInstallGuideOpen(false)} />
     </div>
   );
 };

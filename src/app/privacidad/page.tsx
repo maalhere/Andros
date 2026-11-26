@@ -78,6 +78,17 @@ export default function PrivacidadPage() {
           eliminar el espacio. No se incluyen en la Vista Invitado.
         </li>
         <li>
+          <strong>Áreas de trabajo y chat del lienzo</strong>: el dueño puede asignar a cada persona
+          un área nominal (por ejemplo, Logística o Presupuesto) que ven los miembros del espacio.
+          En el chat guardamos el texto de cada mensaje, las menciones (@Área o @usuario), la
+          tarjeta enlazada (si la hay), tu identificador, tu nombre visible y tu área (tomados de tu
+          perfil por la base de datos) y la fecha. Solo los leen el dueño y los miembros de ese
+          espacio; lo borran su autor o el dueño, y se borran al eliminar el espacio. No se incluyen
+          en la Vista Invitado. Al escribir <strong>@IA</strong>, el mensaje y un resumen de las
+          tarjetas del tablero se envían a nuestro proveedor de IA (Google Gemini) para evaluar qué
+          tarjetas y áreas afecta; el resultado se guarda en el chat como alerta del espacio.
+        </li>
+        <li>
           <strong>Aviso por correo al compartir</strong>: cuando el dueño te añade a un espacio o
           cambia tu permiso, podemos enviarte un correo transaccional con el nombre de quien lo
           compartió, el nombre del tablero, tu permiso y el enlace al espacio. Tu correo se lee
@@ -145,15 +156,15 @@ export default function PrivacidadPage() {
         antes la normativa de protección de datos de salud de tu país y obtén asesoría legal; eres
         responsable de contar con el consentimiento de las personas cuyos datos registres.
       </p>
-      <h3>Estudio de exportación (PDF, Word, PowerPoint y WhatsApp) y lista de espera Pro</h3>
+      <h3>Estudio de exportación (PDF, .docx, .pptx y resumen para mensajería) y aviso de pagos Pro</h3>
       <ul>
         <li>
-          <strong>Directo del tablero (sin IA)</strong>: el PDF imprimible, el documento de Word
-          (.docx), la presentación de PowerPoint (.pptx) y el resumen para WhatsApp se generan por
+          <strong>Directo del tablero (sin IA)</strong>: el PDF imprimible, el documento .docx, la
+          presentación .pptx y el resumen de texto para pegar en tu app de mensajería se generan por
           completo en tu navegador e incluyen los campos de las fichas, las tablas, las fórmulas y
           sus fotos. No se envía nada a nuestros servidores; tú decides dónde guardas o compartes el
-          archivo (por ejemplo, si lo subes a Google Drive para abrirlo en Google Docs o Google
-          Slides, se aplica la política de Google).
+          archivo, y si lo subes a un servicio de terceros (almacenamiento en la nube, editores en
+          línea o mensajería) se aplica la política de ese servicio.
         </li>
         <li>
           <strong>«Sintetizar y ordenar con IA»</strong>: solo si eliges esta opción, se envían a
@@ -168,9 +179,36 @@ export default function PrivacidadPage() {
           contenido que ya puedes ver.
         </li>
         <li>
-          <strong>Lista de espera de Andros Pro</strong>: el formulario no guarda nada; abre tu app
-          de correo con la solicitud lista para que la envíes tú a nuestro buzón de contacto. Solo
-          recibimos el correo que decidas enviar.
+          <strong>Aviso de apertura de pagos de Andros Pro</strong>: si los pagos aún no están
+          activos, el formulario no guarda nada; abre tu app de correo con la solicitud lista para
+          que la envíes tú a nuestro buzón de contacto. Solo recibimos el correo que decidas enviar.
+        </li>
+      </ul>
+      <h3>Suscripción a Andros Pro (pagos)</h3>
+      <ul>
+        <li>
+          <strong>Quién cobra</strong>: el pago de Andros Pro ($5.99 USD al mes o $49.99 USD al año)
+          lo procesa Lemon Squeezy, que actúa como <em>Merchant of Record</em> (vendedor
+          registrado): emite la factura, calcula y liquida los impuestos de tu país y custodia los
+          datos de pago. Escribes tu tarjeta (u otro medio de pago) en su página, nunca en Andros.
+        </li>
+        <li>
+          <strong>Andros no recibe ni guarda datos de tarjeta</strong>. Al crear el cobro le
+          enviamos tu identificador interno de cuenta, el ciclo elegido (mensual o anual) y, para
+          precargar el formulario, tu correo. De vuelta, el proveedor nos envía un aviso firmado
+          con el estado de la suscripción.
+        </li>
+        <li>
+          <strong>Qué guardamos</strong> en la tabla de suscripciones: tu plan (Básico o Pro), el
+          estado (activa, cancelada, vencida…), el ciclo, el fin del periodo pagado y los
+          identificadores de cliente y de suscripción del proveedor. Solo tú puedes leer tu fila;
+          únicamente nuestro servidor la modifica al recibir un aviso firmado del proveedor.
+        </li>
+        <li>
+          <strong>Para qué</strong>: aplicar los límites de tu plan (espacios, personas en vivo,
+          plantillas, consultas IA y Modo Experto) y abrir el portal donde gestionas o cancelas tu
+          suscripción. El tratamiento del pago en sí se rige además por la política de privacidad
+          de Lemon Squeezy.
         </li>
       </ul>
       <h3>Google Calendar (opcional)</h3>
@@ -196,6 +234,36 @@ export default function PrivacidadPage() {
           datos. Los eventos que importes pasan a ser una tarjeta del espacio, como cualquier otra.
           Puedes retirar el permiso en cualquier momento desde la configuración de tu cuenta de
           Google (Seguridad → Apps de terceros con acceso a tu cuenta).
+        </li>
+      </ul>
+      <h3>Calendario de Microsoft 365 / Outlook (opcional)</h3>
+      <ul>
+        <li>
+          <strong>«Abrir en Calendario de Microsoft»</strong>: no necesita ningún permiso. El enlace
+          abre Outlook en la web (cuenta de trabajo o escuela, o personal, según elijas) con el
+          título, la fecha, la hora con tu zona horaria, la descripción y el enlace al tablero ya
+          escritos (Microsoft lo trata según su política). Tu elección de tipo de cuenta se recuerda
+          en el almacenamiento local de tu navegador.
+        </li>
+        <li>
+          <strong>Conexión directa (acceso incremental)</strong>: solo si pulsas «Conectar cuenta
+          de Microsoft», Microsoft te pide los permisos <code>email</code>, <code>User.Read</code>{" "}
+          (tu nombre y correo) y <code>Calendars.ReadWrite</code> (crear y leer eventos de tu
+          calendario). Es opcional y se pide aparte del inicio de sesión: no cambia tu cuenta de
+          Andros. El token que Microsoft devuelve se guarda temporalmente en el almacenamiento de
+          sesión de esa pestaña (<code>andros.calendar.ms-token</code>, menos de una hora) y se
+          borra al cerrarla o al pulsar «Desconectar». Para enviar hitos o importar tus próximos 14
+          días, nuestro servidor reenvía la petición a Microsoft Graph con ese token y te devuelve
+          el resultado: <strong>no guardamos tu calendario, tus eventos ni el token</strong> en
+          nuestra base de datos.
+        </li>
+        <li>
+          <strong>Cuenta vinculada</strong>: para conceder el permiso sin cambiar de sesión, nuestro
+          proveedor de autenticación (Supabase) registra la cuenta de Microsoft vinculada a la tuya
+          (identificador de Microsoft, correo y nombre), igual que hace con Google al iniciar
+          sesión. Puedes pedirnos desvincularla por correo, y retirar el permiso en cualquier
+          momento desde tu cuenta de Microsoft (account.microsoft.com → Privacidad → Aplicaciones
+          y servicios) o, en cuentas de trabajo o escuela, desde myapps.microsoft.com.
         </li>
       </ul>
       <h3>Impresión 3D multi-impresora (Modo Experto)</h3>
@@ -238,7 +306,7 @@ export default function PrivacidadPage() {
         <li>
           <strong>PostHog (eventos de producto)</strong>: registramos acciones sueltas, sin su
           contenido: que se creó un espacio, se generó un tablero, se llenaron fichas con IA (solo
-          cuántas), se creó una fórmula, se exportó un entregable (pdf, docx, pptx o WhatsApp), se
+          cuántas), se creó una fórmula, se exportó un entregable (pdf, docx, pptx o resumen de texto), se
           activó un enlace de invitado, alguien entró a voz o se eligió una impresora (su modelo).
           Cada evento lleva un identificador aleatorio guardado en tu navegador
           (<code>andros-telemetry-id</code>), sin perfil de persona y sin geolocalización.
@@ -283,13 +351,17 @@ export default function PrivacidadPage() {
           Lector no se envían cambios del lienzo; los comentarios sí viajan en tiempo real.
         </li>
       </ul>
-      <p>No pedimos teléfono, dirección, datos de pago ni documentos de identidad.</p>
+      <p>
+        No pedimos teléfono, dirección ni documentos de identidad, y Andros nunca recibe datos de
+        tarjeta: si pasas a Pro, el pago lo gestiona el proveedor descrito arriba.
+      </p>
 
       <h2>3. Para qué los usamos</h2>
       <ul>
         <li>Mantener tu sesión y guardar tu trabajo en la nube.</li>
         <li>Mostrar tus publicaciones de Arena a otras personas cuando tú las publicas.</li>
         <li>Responder a tus mensajes de soporte.</li>
+        <li>Si pasas a Andros Pro: aplicar tu plan y gestionar tu suscripción.</li>
         <li>
           Solo si aceptas la analítica opcional: medir de forma agregada qué funciones se usan y
           dónde falla la interfaz, para mejorarla.
@@ -305,6 +377,11 @@ export default function PrivacidadPage() {
           <strong>Supabase</strong>: autenticación, base de datos, almacenamiento de archivos y el
           canal en tiempo real (Realtime) que reparte la presencia, los cursores y los cambios de
           las salas en vivo.
+        </li>
+        <li>
+          <strong>Lemon Squeezy</strong> (Merchant of Record): cobro de la suscripción a Andros Pro,
+          facturación e impuestos. Recibe tu identificador interno de cuenta, el ciclo elegido y tu
+          correo, además de los datos de pago que escribes directamente en su página.
         </li>
         <li>
           <strong>Resend</strong>: envío de los correos transaccionales «te compartieron un
@@ -343,6 +420,13 @@ export default function PrivacidadPage() {
           almacenamiento local de tu navegador.
         </li>
         <li>
+          <strong>Microsoft (Microsoft Graph / Outlook)</strong>: solo si conectas tu cuenta de
+          Microsoft, se envían los hitos que eliges enviar (título, fecha, hora, zona horaria,
+          descripción y enlace al tablero) y se leen tus eventos de los próximos 14 días cuando
+          pulsas «Importar». Si usas «Abrir en Calendario de Microsoft», esos mismos datos del hito
+          viajan en el enlace que abre Outlook en tu navegador.
+        </li>
+        <li>
           <strong>Microsoft (Clarity) y PostHog</strong>: solo si aceptas la analítica opcional y
           está activada; reciben los eventos y las sesiones con el contenido enmascarado descritos
           en el punto 2.
@@ -363,7 +447,7 @@ export default function PrivacidadPage() {
 
       <h2>5. Tus claves de IA (BYOK)</h2>
       <p>
-        Las claves de Gemini, Claude o ChatGPT que añades en <em>Claves IA</em> se guardan
+        Las claves de Google Gemini, Anthropic (Claude) u OpenAI que añades en <em>Claves IA</em> se guardan
         únicamente en el almacenamiento local de tu navegador. Nunca se guardan en nuestra base
         de datos. Viajan a nuestro servidor solo dentro de la petición que las usa, y el servidor
         no las almacena ni las registra. Puedes borrarlas en cualquier momento desde el mismo
@@ -374,7 +458,9 @@ export default function PrivacidadPage() {
       <p>
         Mientras tengas cuenta. Si eliminas un espacio, sus nodos y archivos se borran de la nube.
         Si pides la eliminación de tu cuenta, borramos tus datos en un plazo máximo de 30 días,
-        salvo lo que la ley nos obligue a conservar.
+        salvo lo que la ley nos obligue a conservar. La fila de tu suscripción se borra con tu
+        cuenta; las facturas y los registros de pago los conserva el proveedor de pagos durante el
+        plazo que exige la ley fiscal.
       </p>
 
       <h2>7. Tus derechos</h2>
@@ -392,8 +478,9 @@ export default function PrivacidadPage() {
         </li>
         <li>Borrar tus comentarios desde ⋯ → Comentarios.</li>
         <li>
-          Desconectar Google Calendar en la pestaña desde ⋯ → Google Calendar, y retirar el permiso
-          desde tu cuenta de Google.
+          Desconectar Google Calendar o el calendario de Microsoft en la pestaña desde el botón
+          Calendarios (o ⋯ → Calendarios), y retirar el permiso desde tu cuenta de Google o de
+          Microsoft.
         </li>
         <li>
           Desactivar un enlace público «Vista Invitado» o generar uno nuevo (el anterior deja de

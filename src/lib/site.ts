@@ -16,7 +16,7 @@ export const SITE_NAME = "Andros";
 export const SITE_TAGLINE = "Organiza eventos y equipos en tiempo real, con IA";
 
 export const SITE_DESCRIPTION =
-  "Andros es un lienzo infinito para organizar eventos y equipos en tiempo real con IA, sin el caos de WhatsApp ni hojas de cálculo incómodas en el celular. Con Modo Experto para piezas 3D, cálculos y fuentes citables.";
+  "Andros es un lienzo infinito para organizar eventos y equipos en tiempo real con IA: tarjetas, cables y un plan compartido que se actualiza al instante en el celular y en la computadora. Con Modo Experto para piezas 3D, cálculos y fuentes citables.";
 
 /**
  * TODO(fundador): correo provisional. Cámbialo aquí por el buzón real antes del
@@ -24,8 +24,19 @@ export const SITE_DESCRIPTION =
  */
 export const CONTACT_EMAIL = "contacto.androshn@gmail.com";
 
+/**
+ * Cláusula de independencia y marcas (Sprint 20). Se muestra completa en
+ * /terminos; el pie de página usa la versión corta. `verify:brand` comprueba
+ * que ambas sigan publicadas.
+ */
+export const INTEGRATIONS_NOTICE =
+  "Las integraciones opcionales con servicios externos funcionan mediante sus interfaces públicas y están sujetas a sus propios términos.";
+
+export const TRADEMARK_NOTICE =
+  "Todas las marcas mencionadas por motivos de compatibilidad técnica pertenecen a sus respectivos propietarios; Andros no está afiliado, patrocinado ni respaldado por ellos.";
+
 /** Fecha de la última revisión de los textos legales (se muestra en cada página). */
-export const LEGAL_LAST_UPDATED = "24 de noviembre de 2026";
+export const LEGAL_LAST_UPDATED = "26 de noviembre de 2026";
 
 export const LEGAL_LINKS = [
   { href: "/privacidad", label: "Privacidad" },

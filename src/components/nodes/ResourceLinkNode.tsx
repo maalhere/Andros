@@ -20,6 +20,7 @@ import {
 import { ResourceLinkEngineeringNode, ResourceLinkPlatform } from "@/types/workspace";
 import type { ResourceCitationData } from "@/types/library";
 import { useWorkspaceStore, createEmptyResourceLinkPayload } from "@/store/useWorkspaceStore";
+import { sessionAuthHeader } from "@/lib/supabase/authHeader";
 
 // ============================================================================
 // NODO TIPO 4 — ENLACE / FUENTE EXTERNA
@@ -122,7 +123,9 @@ export const ResourceLinkNodeView: React.FC<ResourceLinkNodeProps> = ({ node }) 
     });
 
     try {
-      const res = await fetch(`/api/link-preview?url=${encodeURIComponent(trimmed)}`);
+      const res = await fetch(`/api/link-preview?url=${encodeURIComponent(trimmed)}`, {
+        headers: await sessionAuthHeader(),
+      });
       const result = await res.json();
       if (result.errorMessage && !result.title && !result.youtube && !result.github) {
         updateNodePayload(node.id, {
@@ -176,7 +179,7 @@ export const ResourceLinkNodeView: React.FC<ResourceLinkNodeProps> = ({ node }) 
             type="url"
             value={draftUrl}
             onChange={(e) => setDraftUrl(e.target.value)}
-            placeholder="Pega una URL: YouTube, GitHub, arXiv, LinkedIn…"
+            placeholder="Pega una URL: video, repositorio, paper, perfil…"
             className="flex-1 min-h-[40px] bg-andros-canvas border border-andros-border focus:border-andros-accent rounded-xl px-3 text-xs text-andros-primary placeholder:text-andros-muted outline-none spring-micro"
             data-no-drag
           />
@@ -259,7 +262,7 @@ export const ResourceLinkNodeView: React.FC<ResourceLinkNodeProps> = ({ node }) 
         <div className="rounded-xl overflow-hidden border border-andros-border bg-black" data-no-drag>
           <iframe
             src={`https://www.youtube-nocookie.com/embed/${data.youtube.videoId}`}
-            title={data.title || "Video de YouTube"}
+            title={data.title || "Video incrustado"}
             className="w-full aspect-video"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
             allowFullScreen

@@ -101,7 +101,7 @@ export const ExportDeliverableModal: React.FC = () => {
       title="Estudio de exportación"
       titleId="andros-export-studio-title"
       icon={<FileDown className="w-4 h-4 text-andros-accent-ink" aria-hidden="true" />}
-      description="Tu tablero como PDF, Word, PowerPoint o resumen para WhatsApp. Elige si la IA redacta y ordena el contenido o si sale tal cual, al instante."
+      description="Tu tablero como PDF, documento .docx, presentación .pptx o resumen para mensajería. Elige si la IA redacta y ordena el contenido o si sale tal cual, al instante."
     >
       {open && <ExportStudioBody />}
     </SocialDialog>
@@ -227,7 +227,7 @@ const ExportStudioBody: React.FC = () => {
         filename: `${exportFileBase(outline.title)}.docx`,
         blobOrUrl: blob,
         mimeType: DOCX_MIME,
-        description: "Documento de Word: se abre y edita en Microsoft Word y en Google Docs (súbelo a Drive).",
+        description: "Documento .docx (formato estándar): se abre y edita en cualquier procesador de textos compatible.",
       });
     });
 
@@ -243,17 +243,17 @@ const ExportStudioBody: React.FC = () => {
         filename: `${exportFileBase(outline.title)}.pptx`,
         blobOrUrl: blob,
         mimeType: PPTX_MIME,
-        description: "Presentación 16:9: se abre y edita en Microsoft PowerPoint y en Google Slides (súbela a Drive).",
+        description: "Presentación .pptx 16:9 (formato estándar): se abre y edita en cualquier programa de presentaciones compatible.",
       });
     });
 
   const copyWhatsApp = async () => {
     const ok = await copyText(whatsapp);
     setCopied(ok);
-    if (ok) track("deliverable_exported", { type: "whatsapp" });
+    if (ok) track("deliverable_exported", { type: "summary" });
     toast({
       message: ok
-        ? "Resumen copiado. Pégalo en tu grupo de WhatsApp."
+        ? "Resumen copiado. Pégalo en el grupo de mensajería de tu equipo."
         : "No se pudo copiar. Selecciona el texto de la vista previa y cópialo a mano.",
       tone: ok ? "success" : "error",
     });
@@ -374,7 +374,7 @@ const ExportStudioBody: React.FC = () => {
         <OutputCard
           icon={FileText}
           title="Documento .docx"
-          note="Compatible con Word / Google Docs"
+          note="Formato estándar para procesadores de textos"
           action="Descargar .docx"
           busy={busy === "docx"}
           disabled={empty || guard.pending}
@@ -383,7 +383,7 @@ const ExportStudioBody: React.FC = () => {
         <OutputCard
           icon={Presentation}
           title="Presentación .pptx"
-          note="Compatible con PowerPoint / Google Slides"
+          note="Formato estándar para programas de presentaciones"
           action="Descargar .pptx"
           busy={busy === "pptx"}
           disabled={empty || guard.pending}
@@ -391,7 +391,7 @@ const ExportStudioBody: React.FC = () => {
         />
         <OutputCard
           icon={copied ? Check : ClipboardCopy}
-          title="Resumen para WhatsApp"
+          title="Resumen para mensajería"
           note="Texto listo para pegar en un grupo."
           action={copied ? "Resumen copiado" : "Copiar resumen"}
           busy={false}
@@ -410,16 +410,17 @@ const ExportStudioBody: React.FC = () => {
 
       <p className="text-[11px] leading-relaxed text-andros-muted">
         {useAi
-          ? "Con IA se envía a Google Gemini el texto y los datos de las tarjetas (nunca las fotos: se incrustan en tu dispositivo). "
+          ? // brand-ok: aviso de privacidad en el momento (proveedor de IA que recibe los datos)
+            "Con IA se envía a Google Gemini el texto y los datos de las tarjetas (nunca las fotos: se incrustan en tu dispositivo). "
           : "Todo se genera en tu navegador, sin enviar nada. "}
-        Para el PDF, elige «Guardar como PDF» en el diálogo de impresión. Los .docx y .pptx se abren directo al subirlos a
-        Google Drive.
+        Para el PDF, elige «Guardar como PDF» en el diálogo de impresión. Los .docx y .pptx son formatos estándar
+        y se abren en cualquier editor de documentos o presentaciones compatible.
       </p>
 
       {!empty && (
         <details className="group rounded-xl border border-andros-border">
           <summary className="cursor-pointer select-none px-3 min-h-[44px] md:min-h-[36px] flex items-center text-xs font-medium text-andros-primary">
-            Vista previa del resumen para WhatsApp
+            Vista previa del resumen para mensajería
           </summary>
           <pre className="max-h-56 overflow-y-auto px-3 pb-3 whitespace-pre-wrap break-words font-sans text-xs leading-relaxed text-andros-muted">
             {whatsapp}

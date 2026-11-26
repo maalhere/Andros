@@ -107,7 +107,7 @@ export const ArenaPostDetail: React.FC<{
             <Sparkles className="w-3 h-3 text-andros-accent-ink" />
             {post.isExample
               ? "Publicación de ejemplo incluida con Andros"
-              : `Etiquetas: ${post.engine === "gemini" ? "escáner IA (Gemini)" : "analizador local"} · calidad ${post.moderation.qualityScore}/100`}
+              : `Etiquetas: ${post.engine === "gemini" ? "escáner IA" : "analizador local"} · calidad ${post.moderation.qualityScore}/100`}
             {post.authorName ? ` · publicado por ${post.authorName}` : ""}
           </p>
           <div className="flex flex-wrap gap-2">
@@ -323,7 +323,7 @@ const ApplyPanel: React.FC<{
           </button>
         ))}
         {workspaces.length === 0 && (
-          <p className="text-[10px] text-andros-muted px-1">Inicia sesión con Google para elegir también entre tus otros espacios guardados en la nube.</p>
+          <p className="text-[10px] text-andros-muted px-1">Inicia sesión para elegir también entre tus otros espacios guardados en la nube.</p>
         )}
       </div>
 

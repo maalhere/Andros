@@ -3,6 +3,7 @@ import { useAiProvidersStore } from "@/store/useAiProvidersStore";
 import { markPendingImportPanel } from "@/lib/ai/nodeChatClient";
 import { useFormsLibraryStore } from "@/store/useFormsLibraryStore";
 import { useFormulaCreatorStore } from "@/store/useFormulaCreatorStore";
+import { createResolutionCard } from "@/lib/cde/resolutionActions";
 
 // ============================================================================
 // ANDROS — MENÚ "+ AGREGAR" (dock de escritorio y cajón del teléfono)
@@ -11,22 +12,29 @@ import { useFormulaCreatorStore } from "@/store/useFormulaCreatorStore";
 // Importar chat. Ambos viewports usan estas mismas funciones.
 // ============================================================================
 
-export type QuickAddKind = "file3d" | "note" | "link" | "calc" | "forms" | "formula" | "ai" | "ai-import";
+export type QuickAddKind = "file3d" | "note" | "link" | "calc" | "forms" | "resolution" | "formula" | "ai" | "ai-import";
 
 export const QUICK_ADD_OPTIONS: { kind: QuickAddKind; label: string; description: string }[] = [
   { kind: "file3d", label: "Archivo 3D", description: "Sube una pieza .stl, .obj o .3mf" },
   { kind: "note", label: "Nota", description: "Texto, listas y bocetos rápidos" },
-  { kind: "link", label: "Enlace Web/YouTube", description: "Video, paper o página con vista previa" },
+  { kind: "link", label: "Enlace web", description: "Video, paper o página con vista previa" },
   { kind: "calc", label: "Cálculo", description: "Hoja con fórmulas y ecuaciones" },
   { kind: "forms", label: "Librería de fichas", description: "Fichas con campos y fotos, replicables o llenadas con IA" },
+  { kind: "resolution", label: "Ficha de resolución", description: "Algo pendiente por resolver: Rojo hasta pasarla a Verde" },
   { kind: "formula", label: "Fórmula LaTeX", description: "Se calcula sola con los datos de tus fichas conectadas" },
-  { kind: "ai", label: "Nuevo Nodo IA", description: "Gemini, Claude o ChatGPT con el contexto de sus cables" },
-  { kind: "ai-import", label: "Importar chat", description: "Trae una conversación de ChatGPT, Claude o Gemini" },
+  { kind: "ai", label: "Nuevo Nodo IA", description: "El modelo de IA que elijas, con el contexto de sus cables" },
+  { kind: "ai-import", label: "Importar chat", description: "Trae una conversación de un chat de IA externo" },
 ];
 
-/** Opciones de «+ Agregar» según el modo: el Modo Simple oculta la subida de archivos 3D. */
+/**
+ * Herramientas técnicas de ingeniería: solo en Modo Experto (Sprint 19).
+ * Archivo 3D (visor + impresoras), Cálculo (hoja LaTeX) y Fórmula LaTeX.
+ */
+export const EXPERT_ONLY_QUICK_ADD: ReadonlySet<QuickAddKind> = new Set<QuickAddKind>(["file3d", "calc", "formula"]);
+
+/** Opciones de «+ Agregar» según el modo: el Modo Simple oculta 3D, cálculo y fórmulas LaTeX. */
 export function quickAddOptionsFor(expert: boolean) {
-  return expert ? QUICK_ADD_OPTIONS : QUICK_ADD_OPTIONS.filter((o) => o.kind !== "file3d");
+  return expert ? QUICK_ADD_OPTIONS : QUICK_ADD_OPTIONS.filter((o) => !EXPERT_ONLY_QUICK_ADD.has(o.kind));
 }
 
 // ----------------------------------------------------------------------------
@@ -67,6 +75,17 @@ export function quickAdd(kind: QuickAddKind, file?: File): string {
     ws.setActiveMobileSheet("none");
     useFormsLibraryStore.getState().openLibrary("library");
     return "";
+  }
+  if (kind === "resolution") {
+    ws.setActiveTool("pointer");
+    ws.setActiveMobileSheet("none");
+    const selected = ws.selectedNodeId;
+    return (
+      createResolutionCard({
+        description: "Describe aquí qué falta resolver",
+        affectedNodeIds: selected ? [selected] : [],
+      }) ?? ""
+    );
   }
   if (kind === "formula") {
     ws.setActiveTool("pointer");

@@ -35,6 +35,8 @@ import { ShortcutsGuideModal } from "@/components/shared/ShortcutsGuideModal";
 import { CloudLoadingSkeleton } from "@/components/shared/CloudLoadingSkeleton";
 import { SITE_DESCRIPTION, SITE_TAGLINE, LEGAL_LINKS } from "@/lib/site";
 import { useCollabRoom } from "@/lib/collab/useCollabRoom";
+import { useSubscriptionSync } from "@/lib/billing/subscriptionClient";
+import { usePlanEnforcement } from "@/lib/billing/entitlements";
 import { VoiceRoomBar } from "@/components/collab/VoiceRoomBar";
 import { ScreenShareDock } from "@/components/nodes/ScreenShareNode";
 import { CollabVideoStrip } from "@/components/collab/CollabVideoStrip";
@@ -43,10 +45,12 @@ import { UsernameSetupModal } from "@/components/social/UsernameSetupModal";
 import { FriendsModal } from "@/components/social/FriendsModal";
 import { ShareWorkspaceModal } from "@/components/social/ShareWorkspaceModal";
 import { EmptyWorkspaceStarter } from "@/components/shared/EmptyWorkspaceStarter";
-import { ImpactAlertsBanner } from "@/components/shared/ImpactAlertsBanner";
+import { UnifiedAlertsBar } from "@/components/cde/UnifiedAlertsBar";
+import { WorkspaceChatPanel } from "@/components/cde/WorkspaceChatPanel";
+import { useCdeSync } from "@/lib/cde/useCdeSync";
 import { CommentsDrawer } from "@/components/comments/CommentsDrawer";
 import { useCommentsSync } from "@/lib/comments/useCommentsSync";
-import { useGoogleCalendarReturn } from "@/lib/calendar/googleCalendarClient";
+import { useExternalCalendarReturn } from "@/lib/calendar/calendarReturn";
 import { useCalendarStore } from "@/store/useCalendarStore";
 
 // Paneles pesados (Oráculo con Markdown + KaTeX, Biblioteca y Arena): fuera del
@@ -73,7 +77,7 @@ const FormulaCreatorModal = dynamic(
   () => import("@/components/math/FormulaCreatorModal").then((m) => m.FormulaCreatorModal),
   { ssr: false }
 );
-// Google Calendar (extractor de fechas, .ics y conexión directa): al abrirse por 1.ª vez.
+// Calendarios externos (Google / Microsoft: extractor de fechas, .ics y conexión directa): al abrirse por 1.ª vez.
 const CalendarSyncModal = dynamic(
   () => import("@/components/calendar/CalendarSyncModal").then((m) => m.CalendarSyncModal),
   { ssr: false }
@@ -91,14 +95,19 @@ export default function AndrosWorkspacePage() {
   useSettingsSync();
   // Librería de fichas replicables: localStorage + perfil de Supabase.
   useFormLibrarySync();
+  // (Sprint 21) Plan de la cuenta (Básico / Pro) y sus límites en la interfaz.
+  useSubscriptionSync();
+  usePlanEnforcement();
   // Sala en vivo: voz, presencia, cursores, pantalla compartida y edición simultánea.
   useCollabRoom();
   // @usuario y amistades (espacios compartidos).
   useSocialSync();
   // Comentarios del tablero y roles de los miembros del espacio abierto.
   useCommentsSync();
-  // Vuelta de «Conectar Google Calendar» (token temporal en esta pestaña).
-  useGoogleCalendarReturn();
+  // (Sprint 18) CDE: áreas de trabajo, personas y chat del lienzo.
+  useCdeSync();
+  // Vuelta de «Conectar Google Calendar» o «Conectar cuenta de Microsoft» (token temporal en esta pestaña).
+  useExternalCalendarReturn();
   const showLanding = useLandingStore((s) => s.phase !== "workspace");
   const oracleOpen = useWorkspaceStore((s) => s.isOracleModalOpen);
   const libraryMounted = useOpenedOnce(useLibraryStore((s) => s.open));
@@ -150,6 +159,7 @@ export default function AndrosWorkspacePage() {
       <FriendsModal />
       <ShareWorkspaceModal />
       <CommentsDrawer />
+      <WorkspaceChatPanel />
       {calendarMounted && <CalendarSyncModal />}
       <UsernameSetupModal />
 
@@ -167,8 +177,8 @@ export default function AndrosWorkspacePage() {
           <SpatialCanvas />
           <FloatingHudDock />
           <EmptyWorkspaceStarter variant="canvas" />
-          {/* Descuadres entre tarjetas conectadas (detector anti-malentendidos) */}
-          <ImpactAlertsBanner variant="floating" />
+          {/* Alerta unificada de IA: descuadres + reportes a @IA, sin duplicados */}
+          <UnifiedAlertsBar variant="floating" />
         </>
       )}
 

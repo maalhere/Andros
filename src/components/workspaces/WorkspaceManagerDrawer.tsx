@@ -34,6 +34,7 @@ import {
   refreshCloudWorkspaceList,
   renameCloudWorkspace,
 } from "@/hooks/useCloudSync";
+import { useStarterStore } from "@/store/useStarterStore";
 import { useSocialStore } from "@/store/useSocialStore";
 import { SOCIAL_SETUP_HINT } from "@/lib/social/repository";
 
@@ -117,6 +118,8 @@ export const WorkspaceManagerDrawer: React.FC = () => {
   const handleCreate = async () => {
     const ok = await createCloudWorkspace(newName, newFolder);
     if (ok) {
+      // (Sprint 18) Espacio nuevo = arranque guiado en 3 pasos otra vez.
+      useStarterStore.getState().reopen();
       setNewName("");
       setOpen(false);
     }
@@ -580,7 +583,7 @@ export const WorkspaceManagerDrawer: React.FC = () => {
               </>
             ) : (
               <p className="text-[11px] text-andros-muted rounded-xl border border-andros-border p-3">
-                Inicia sesión con Google para guardar varios espacios en carpetas dentro de tu
+                Inicia sesión para guardar varios espacios en carpetas dentro de tu
                 cuenta. Mientras tanto puedes descargar y abrir paquetes .andros.zip.
               </p>
             )}

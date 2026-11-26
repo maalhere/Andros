@@ -64,7 +64,7 @@ export const WorkspaceQuickSwitcher: React.FC = () => {
         >
           {!signedIn && (
             <p className="px-2 py-1.5 text-[11px] text-andros-muted">
-              Inicia sesión con Google para tener varios espacios y carpetas.
+              Inicia sesión para tener varios espacios y carpetas.
             </p>
           )}
           {groups.map((group) => (

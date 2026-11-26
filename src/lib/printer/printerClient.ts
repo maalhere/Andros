@@ -16,6 +16,7 @@ import {
   type PrintResult,
   type PrinterStatus,
 } from "./flashforgeShared";
+import { PRINTER_BRIDGE_HEADERS } from "@/lib/printer/bridgeGuard";
 
 export interface AndrosDesktopBridge {
   isDesktop: true;
@@ -82,7 +83,7 @@ export async function discoverPrinters(): Promise<DiscoveryResult> {
   if (bridge) return bridge.printer.discover();
   const res = await fetch("/api/printer/flashforge", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...PRINTER_BRIDGE_HEADERS },
     body: JSON.stringify({ action: "discover" }),
     cache: "no-store",
   });
@@ -93,7 +94,10 @@ export async function fetchPrinterStatus(ip: string, port: string | number): Pro
   const bridge = getDesktopBridge();
   if (bridge) return bridge.printer.status(ip.trim(), toPort(port));
   const query = new URLSearchParams({ ip: ip.trim(), port: String(toPort(port)) });
-  const res = await fetch(`/api/printer/flashforge?${query.toString()}`, { cache: "no-store" });
+  const res = await fetch(`/api/printer/flashforge?${query.toString()}`, {
+    cache: "no-store",
+    headers: PRINTER_BRIDGE_HEADERS,
+  });
   return (await res.json()) as PrinterStatus;
 }
 
@@ -108,7 +112,7 @@ export async function sendPrintJob(
   const query = new URLSearchParams({ action: "print", ip: ip.trim(), port: String(toPort(port)), name: fileName });
   const res = await fetch(`/api/printer/flashforge?${query.toString()}`, {
     method: "POST",
-    headers: { "Content-Type": "application/octet-stream" },
+    headers: { "Content-Type": "application/octet-stream", ...PRINTER_BRIDGE_HEADERS },
     body: new Blob([bytes]),
   });
   return (await res.json()) as PrintResult;

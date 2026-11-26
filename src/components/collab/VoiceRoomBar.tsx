@@ -96,6 +96,7 @@ export const CollabRoomButton: React.FC = () => {
   const panelOpen = useCollabStore((s) => s.panelOpen);
   const hasInvite = useCollabStore((s) => Boolean(s.invite));
   const anySpeaking = useCollabStore((s) => Object.values(s.speaking).some(Boolean));
+  const spaceLimit = useCollabStore((s) => s.capacity.limit);
 
   const voicePeers = Object.values(peers)
     .filter((p) => p.inCall)
@@ -103,7 +104,9 @@ export const CollabRoomButton: React.FC = () => {
   const isLocal = status === "local";
   const voiceCount = voicePeers.length + (inCall && !isLocal ? 1 : 0);
   const names = voicePeers.map((p) => p.name);
-  const voiceFull = !inCall && voicePeers.length >= MAX_VOICE_PARTICIPANTS;
+  // (Sprint 21) La voz admite 5 como máximo y nunca más que el tope del espacio (plan del dueño).
+  const voiceLimit = Math.min(MAX_VOICE_PARTICIPANTS, spaceLimit);
+  const voiceFull = !inCall && voicePeers.length >= voiceLimit;
 
   const handleClick = () => {
     if (!inCall) {
@@ -121,7 +124,7 @@ export const CollabRoomButton: React.FC = () => {
     : voicePeers.length === 0
       ? ["Voz", "Vacío", false]
       : voiceFull
-        ? ["Voz llena", `${MAX_VOICE_PARTICIPANTS}/${MAX_VOICE_PARTICIPANTS}`, true]
+        ? ["Voz llena", `${voiceLimit}/${voiceLimit}`, true]
         : ["En voz", String(voicePeers.length), true];
 
   const ariaLabel = inCall
@@ -131,7 +134,7 @@ export const CollabRoomButton: React.FC = () => {
     : voicePeers.length === 0
       ? "Unirse al canal de voz del espacio (vacío)"
       : voiceFull
-        ? `Canal de voz lleno (${MAX_VOICE_PARTICIPANTS}/${MAX_VOICE_PARTICIPANTS}): ${namesList(names)}`
+        ? `Canal de voz lleno (${voiceLimit}/${voiceLimit}): ${namesList(names)}`
         : `Unirse al canal de voz: ${namesList(names)} ${voicePeers.length === 1 ? "está" : "están"} dentro`;
 
   const title = inCall
@@ -502,6 +505,7 @@ export const VoiceRoomBar: React.FC<{ isMobile: boolean }> = ({ isMobile }) => {
   const guest = useCollabStore((s) => s.guest);
   const panelOpen = useCollabStore((s) => s.panelOpen);
   const readOnly = useCollabStore((s) => s.capacity.readOnly);
+  const spaceLimit = useCollabStore((s) => s.capacity.limit);
   const userName = useCloudStore((s) => s.user?.name);
   const cloudWorkspaceId = useCloudStore((s) => s.workspaceId);
   const hasTabs = useTabsBarVisible();
@@ -525,12 +529,14 @@ export const VoiceRoomBar: React.FC<{ isMobile: boolean }> = ({ isMobile }) => {
             <h2 className="text-sm font-semibold text-andros-primary">
               Sala completa (
               <span className="font-mono tabular-nums">
-                {MAX_SPACE_PARTICIPANTS}/{MAX_SPACE_PARTICIPANTS}
+                {spaceLimit}/{spaceLimit}
               </span>
               ) — viendo en modo lectura
             </h2>
             <p className="mt-0.5 text-xs text-andros-muted">
               Ves los cambios en vivo. Podrás editar y entrar a la voz en cuanto se libere un lugar.
+              {spaceLimit < MAX_SPACE_PARTICIPANTS &&
+                ` Este espacio admite ${spaceLimit} personas en vivo con el Plan Básico de su dueño (${MAX_SPACE_PARTICIPANTS} con Andros Pro).`}
             </p>
           </div>
         </section>

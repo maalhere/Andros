@@ -9,11 +9,17 @@
 // 2. Si Gemini no responde a tiempo (saturado, sin cuota, sin clave), el
 //    etiquetador determinista responde igual: publicar SIEMPRE funciona.
 // Las reglas duras de fraude se aplican siempre, también sobre la IA.
+// (Sprint 17B) Gemini (clave del servidor) solo con sesión iniciada y con el
+// mismo tope diario por persona que el resto de la IA gratuita. Sin sesión o
+// sin cuota responde el analizador local: publicar sigue funcionando.
 // ============================================================================
 
 import { NextRequest, NextResponse } from "next/server";
 import { callGemini, ProviderFailure } from "@/lib/ai/gemini";
 import { keywordAnalyze, mergeModeration, sanitizeTags } from "@/lib/arena/keywordTagger";
+import { quotaForUser, serverQuotaAllows, serverQuotaConsume } from "@/lib/ai/serverQuota";
+import { getUserPlan } from "@/lib/billing/serverPlan";
+import { getRequestUser } from "@/lib/supabase/server";
 import {
   ARENA_DISCIPLINES,
   ARENA_LEVELS,
@@ -41,7 +47,7 @@ Analiza la publicación y responde SOLO con JSON con esta forma exacta:
   "tags": {
     "discipline": string[],            // 1 a 3, SOLO de: ${ARENA_DISCIPLINES.join(", ")}
     "level": string[],                 // 1 a 2, SOLO de: ${ARENA_LEVELS.join(", ")}
-    "skills": string[]                 // 2 a 8 habilidades técnicas cortas y normalizadas (ej. "CAD", "FEA", "SolidWorks", "Next.js", "MATLAB", "Python", "FDM", "GD&T")
+    "skills": string[]                 // 2 a 8 habilidades técnicas cortas y normalizadas (ej. "CAD", "FEA", "Simulación térmica", "Python", "FDM", "GD&T")
   }
 }
 
@@ -94,6 +100,23 @@ export async function POST(request: NextRequest): Promise<NextResponse<ArenaAnal
     });
   }
 
+  const caller = await getRequestUser(request);
+  if (!caller) {
+    return NextResponse.json({
+      ...keywordAnalyze(draft),
+      notice: "Etiquetas generadas con el analizador local. Inicia sesión para usar el escáner IA.",
+    });
+  }
+  // (Sprint 21) Tope del plan de la persona (15 o 150 al día), leído de Supabase.
+  const quota = quotaForUser(caller.userId, await getUserPlan(caller.supabase, caller.userId));
+  const quotaKey = quota.key;
+  if (!serverQuotaAllows(quotaKey, quota.limit)) {
+    return NextResponse.json({
+      ...keywordAnalyze(draft),
+      notice: "Etiquetas generadas con el analizador local: alcanzaste el tope diario de IA gratuita. Puedes publicar igual.",
+    });
+  }
+
   try {
     const { raw, model } = await callGemini(
       apiKey,
@@ -114,6 +137,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<ArenaAnal
     );
     const obj = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
     if (!obj.tags && !obj.moderation) throw new Error("Respuesta sin etiquetas");
+    serverQuotaConsume(quotaKey);
     return NextResponse.json({
       tags: sanitizeTags(obj.tags, draft),
       moderation: mergeModeration(obj.moderation, draft),

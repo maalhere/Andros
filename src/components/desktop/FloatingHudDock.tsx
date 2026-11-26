@@ -7,6 +7,7 @@ import {
   Bot,
   Box,
   Calculator,
+  ClipboardCheck,
   ClipboardList,
   MessagesSquare,
   Library,
@@ -319,6 +320,7 @@ const QUICK_ADD_ICONS: Record<QuickAddKind, React.ReactNode> = {
   link: <Link2 className="w-4 h-4" />,
   calc: <Calculator className="w-4 h-4" />,
   forms: <ClipboardList className="w-4 h-4" />,
+  resolution: <ClipboardCheck className="w-4 h-4" />,
   formula: <SquareFunction className="w-4 h-4" />,
   ai: <Bot className="w-4 h-4" />,
   "ai-import": <MessagesSquare className="w-4 h-4" />,
@@ -516,7 +518,7 @@ export const FloatingHudDock: React.FC = () => {
         {expert && (
           <DockButton
             full={full}
-            title="Biblioteca científica: papers, normas, YouTube y LinkedIn (B)"
+            title="Biblioteca científica: papers, normas, videos y publicaciones profesionales (B)"
             label="Biblioteca"
             icon={<Library className="w-4 h-4" />}
             onClick={() => useLibraryStore.getState().openLibrary({ origin: "canvas" })}

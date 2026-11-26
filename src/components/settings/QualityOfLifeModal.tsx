@@ -311,8 +311,8 @@ export const QualityOfLifeModal: React.FC = () => {
                 value={theme}
                 onChange={setTheme}
                 options={[
-                  { value: "light", label: "Día · Paper", icon: <Sun className="w-3.5 h-3.5" /> },
-                  { value: "dark", label: "Noche · Obsidian", icon: <Moon className="w-3.5 h-3.5" /> },
+                  { value: "light", label: "Día · Papel", icon: <Sun className="w-3.5 h-3.5" /> },
+                  { value: "dark", label: "Noche · Monolito", icon: <Moon className="w-3.5 h-3.5" /> },
                 ]}
               />
             </Section>
@@ -380,7 +380,7 @@ export const QualityOfLifeModal: React.FC = () => {
               />
             </Section>
 
-            <Section title="Autoguardado en la nube" hint="Solo aplica con sesión de Google iniciada.">
+            <Section title="Autoguardado en la nube" hint="Solo aplica con la sesión iniciada.">
               <Segmented<AutosaveMode>
                 label="Frecuencia de autoguardado"
                 value={autosave}

@@ -68,7 +68,7 @@ export const useDownloadPermissionStore = create<DownloadPermissionState>((set) 
 
 const TYPE_LABELS: Record<string, string> = {
   "andros.zip": "Paquete de espacio Andros",
-  gx: "Archivo de impresión FlashForge",
+  gx: "Archivo de impresión FlashForge", // brand-ok: formato .gx propio de esa impresora (Modo Experto)
   gcode: "G-code de impresión 3D",
   stl: "Modelo 3D STL",
   obj: "Modelo 3D OBJ",

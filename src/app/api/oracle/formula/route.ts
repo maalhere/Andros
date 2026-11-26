@@ -19,8 +19,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import katex from "katex";
 import { callGeminiHedged, ProviderFailure, type ModelRequest } from "@/lib/ai/gemini";
-import { DAILY_LIMIT_MESSAGE } from "@/lib/ai/freeQuota";
-import { clientIp, serverQuotaAllows, serverQuotaConsume } from "@/lib/ai/serverQuota";
+import { resolveQuotaCaller, serverQuotaAllows, serverQuotaConsume } from "@/lib/ai/serverQuota";
 import { parseJsonText } from "@/lib/ai/jsonText";
 import { FORMULA_FUNCTION_NAMES } from "@/lib/math/formulaEval";
 import { normalizeUnit } from "@/lib/math/formulaBinding";
@@ -133,10 +132,11 @@ export async function POST(request: NextRequest): Promise<NextResponse<FormulaGe
   if (!apiKey) return reply({ ok: false, issue: MISSING_KEY });
 
   // Respaldo anti-abuso: la clave del servidor tiene tope diario por IP.
-  const ip = clientIp(request.headers);
+  // (Sprint 21) Tope del plan de quien llama (15 o 150 al día con sesión; por IP sin ella).
   const usingServerKey = !userKey;
-  if (usingServerKey && !serverQuotaAllows(ip)) {
-    return reply({ ok: false, issue: { code: "daily_limit", message: DAILY_LIMIT_MESSAGE } });
+  const quota = usingServerKey ? await resolveQuotaCaller(request) : null;
+  if (quota && !serverQuotaAllows(quota.key, quota.limit)) {
+    return reply({ ok: false, issue: { code: "daily_limit", message: quota.message } });
   }
 
   const started = Date.now();
@@ -155,7 +155,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<FormulaGe
 
   try {
     let { raw, model } = await ask(baseContent, TOTAL_BUDGET_MS);
-    if (usingServerKey) serverQuotaConsume(ip);
+    if (quota) serverQuotaConsume(quota.key);
     let draft = toDraft(raw, fields);
 
     // Una sola corrección si el borrador no pasó la validación y queda tiempo.
