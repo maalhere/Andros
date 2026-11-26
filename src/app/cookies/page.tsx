@@ -99,6 +99,16 @@ export default function CookiesPage() {
             </tr>
             <tr>
               <td>
+                Almacenamiento de sesión: portapapeles de fichas (<code>andros.clipboard</code>)
+              </td>
+              <td>
+                Solo si copias o cortas una ficha: pegarla, también en otro espacio. Se queda en tu
+                navegador
+              </td>
+              <td>Hasta cerrar la pestaña o la sesión</td>
+            </tr>
+            <tr>
+              <td>
                 Almacenamiento local: <code>andros-cookie-consent</code>
               </td>
               <td>Recordar tu elección en este aviso</td>

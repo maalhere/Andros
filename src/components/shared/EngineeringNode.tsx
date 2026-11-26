@@ -8,6 +8,7 @@ import { NodeCalendarButton, NodeCommentButton } from "@/components/nodes/NodeHe
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { celebrate } from "@/lib/effects/celebrate";
 import { deleteNodeWithUndo } from "@/lib/canvas/undoable";
+import { useCardMenuStore } from "@/store/useCardMenuStore";
 import {
   ArrowLeft,
   ArrowRight,
@@ -24,6 +25,7 @@ import {
   SquareFunction,
   Terminal,
   X,
+  MoreHorizontal,
 } from "lucide-react";
 import {
   CalcLatexEngineeringNode,
@@ -549,6 +551,21 @@ export const EngineeringNode = React.memo(function EngineeringNode({
           <span className="text-[10px] font-mono bg-andros-accent/10 text-andros-accent-ink px-1.5 py-0.5 rounded">
             {node.codeTag}
           </span>
+          {/* Copiar / Cortar / Pegar (copiar también en solo lectura) */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              const r = e.currentTarget.getBoundingClientRect();
+              useCardMenuStore.getState().openMenu({ x: r.left, y: r.bottom + 4, nodeId: node.id });
+            }}
+            className="pointer-events-auto hit-slop p-1 max-md:p-2.5 rounded-lg text-andros-muted hover:text-andros-primary hover:bg-andros-border/40 active:scale-[0.96] spring-micro"
+            title="Copiar o cortar ficha"
+            aria-label="Acciones de la ficha"
+            aria-haspopup="menu"
+          >
+            <MoreHorizontal className="w-3.5 h-3.5" />
+          </button>
           {!readOnly && (
             <button
               type="button"

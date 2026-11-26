@@ -29,6 +29,7 @@ import { useLandingStore } from "@/store/useLandingStore";
 import { OnboardingTour } from "@/components/onboarding/OnboardingTour";
 import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
 import { CommandPalette } from "@/components/shared/CommandPalette";
+import { CardActionsMenu } from "@/components/shared/CardActionsMenu";
 import { Toaster } from "@/components/shared/Toaster";
 import { WorkspaceTabsBar } from "@/components/workspaces/WorkspaceTabsBar";
 import { ShortcutsGuideModal } from "@/components/shared/ShortcutsGuideModal";
@@ -190,6 +191,7 @@ export default function AndrosWorkspacePage() {
 
       {/* Paleta de comandos (⌘K) y avisos con «Deshacer» */}
       <CommandPalette />
+      <CardActionsMenu />
       <Toaster />
       <ShortcutsGuideModal />
 

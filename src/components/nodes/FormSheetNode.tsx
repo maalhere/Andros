@@ -707,7 +707,12 @@ export const FormSheetNodeView: React.FC<{ node: FormSheetEngineeringNode; varia
   }
 
   return (
-    <div className="py-3 space-y-3" onPaste={onPaste} {...presence}>
+    <div
+      className="py-3 space-y-3"
+      onPaste={onPaste}
+      data-paste-zone={readOnly ? undefined : true}
+      {...presence}
+    >
       {/* Resumen de la ficha */}
       <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
         {data.area && <AreaBadge area={data.area} />}

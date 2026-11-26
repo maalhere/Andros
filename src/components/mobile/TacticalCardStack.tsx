@@ -1,7 +1,8 @@
 "use client";
 
 import React from "react";
-import { Layers } from "lucide-react";
+import { ClipboardPaste, Layers } from "lucide-react";
+import { pasteClipboard } from "@/lib/canvas/clipboardActions";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { useTabsBarVisible } from "@/store/useTabsStore";
 import { useIsExpert } from "@/store/useSettingsStore";
@@ -45,6 +46,7 @@ export const TacticalCardStack: React.FC = () => {
   const starterDismissed = useStarterStore((s) => s.dismissed);
   // Sala completa (7.º) o rol Comentarista / Solo lectura: tarjetas de solo lectura (el desplazamiento sigue).
   const readOnly = useCanvasReadOnly();
+  const hasClipboard = useWorkspaceStore((s) => s.clipboard !== null);
 
   const filteredNodes =
     mobileCategoryFilter === "all"
@@ -132,6 +134,17 @@ export const TacticalCardStack: React.FC = () => {
       {/* Alerta unificada de IA y semáforo Rojo / Verde de las Fichas de Resolución */}
       <UnifiedAlertsBar variant="stack" />
       <ResolutionStatusPill variant="stack" />
+
+      {hasClipboard && !readOnly && (
+        <button
+          type="button"
+          onClick={() => pasteClipboard()}
+          className="self-start min-h-11 px-3.5 rounded-xl border border-andros-border bg-andros-surface text-xs font-medium text-andros-primary flex items-center gap-1.5 active:scale-[0.96] spring-micro"
+        >
+          <ClipboardPaste className="w-3.5 h-3.5 text-andros-accent-ink" aria-hidden="true" />
+          Pegar ficha
+        </button>
+      )}
 
       {/* Pila de Tarjetas de Ingeniería */}
       <div className={`flex flex-col gap-3 ${readOnly ? "pointer-events-none" : ""}`}>

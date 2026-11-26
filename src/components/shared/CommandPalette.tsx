@@ -7,6 +7,9 @@ import {
   Bot,
   CalendarDays,
   ClipboardList,
+  ClipboardPaste,
+  Copy,
+  Scissors,
   MessageSquare,
   Cable,
   Code2,
@@ -56,7 +59,8 @@ import { useShortcutsGuideStore } from "@/store/useShortcutsGuideStore";
 import { usePlanExportStore } from "@/store/usePlanExportStore";
 import { useFormsLibraryStore } from "@/store/useFormsLibraryStore";
 import { SHORTCUT_KEYS } from "@/hooks/useGlobalShortcuts";
-import { Kbd } from "./Kbd";
+import { Kbd, useModKey } from "./Kbd";
+import { copyCards, cutCards, pasteClipboard } from "@/lib/canvas/clipboardActions";
 import { springOrInstant } from "@/lib/motion";
 import type { NodeArchetype } from "@/types/workspace";
 
@@ -111,6 +115,8 @@ const WRITE_COMMAND_IDS = new Set([
   "forms-library",
   "forms-autofill",
   "new-formula",
+  "cut-card",
+  "paste-card",
 ]);
 
 /** Herramientas técnicas que no se muestran en Modo Simple (Sprint 19). */
@@ -140,6 +146,9 @@ const PaletteDialog: React.FC<{ reduced: boolean; onClose: () => void }> = ({ re
   const nodes = useWorkspaceStore((s) => s.nodes);
   const theme = useWorkspaceStore((s) => s.theme);
   const expert = useIsExpert();
+  const hasSelection = useWorkspaceStore((s) => s.nodes.some((n) => n.id === s.selectedNodeId));
+  const hasClipboard = useWorkspaceStore((s) => s.clipboard !== null);
+  const mod = useModKey();
   // Sala llena (7.º) o vista invitado: sin acciones que modifiquen el lienzo.
   const readOnly = useCanvasReadOnly();
   const [query, setQuery] = useState("");
@@ -176,6 +185,41 @@ const PaletteDialog: React.FC<{ reduced: boolean; onClose: () => void }> = ({ re
         icon: <StickyNote className="w-4 h-4" />,
         run: () => quickAdd("note"),
       },
+      ...(hasSelection
+        ? ([
+            {
+              id: "copy-card",
+              group: "Acciones",
+              label: "Copiar ficha seleccionada",
+              keywords: "copiar duplicar portapapeles tarjeta nodo",
+              shortcut: `${mod} C`,
+              icon: <Copy className="w-4 h-4" />,
+              run: () => void copyCards(),
+            },
+            {
+              id: "cut-card",
+              group: "Acciones",
+              label: "Cortar ficha seleccionada",
+              keywords: "cortar mover portapapeles tarjeta nodo",
+              shortcut: `${mod} X`,
+              icon: <Scissors className="w-4 h-4" />,
+              run: () => void cutCards(),
+            },
+          ] satisfies Command[])
+        : []),
+      ...(hasClipboard
+        ? ([
+            {
+              id: "paste-card",
+              group: "Acciones",
+              label: "Pegar ficha",
+              keywords: "pegar portapapeles tarjeta nodo duplicar",
+              shortcut: `${mod} V`,
+              icon: <ClipboardPaste className="w-4 h-4" />,
+              run: () => void pasteClipboard(),
+            },
+          ] satisfies Command[])
+        : []),
       {
         id: "mode",
         group: "Acciones",
@@ -401,7 +445,7 @@ const PaletteDialog: React.FC<{ reduced: boolean; onClose: () => void }> = ({ re
     const byMode = expert ? actions : actions.filter((c) => !EXPERT_ONLY_COMMAND_IDS.has(c.id));
     const visible = readOnly ? byMode.filter((c) => !WRITE_COMMAND_IDS.has(c.id)) : byMode;
     return [...visible, ...nodeCommands];
-  }, [nodes, theme, expert, readOnly]);
+  }, [nodes, theme, expert, readOnly, hasSelection, hasClipboard, mod]);
 
   const results = useMemo(() => {
     const tokens = normalize(query).split(/\s+/).filter(Boolean);

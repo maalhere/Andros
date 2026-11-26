@@ -31,6 +31,7 @@ import {
   MAX_FILE_SIZE_LABEL,
   useWorkspaceStore,
 } from "@/store/useWorkspaceStore";
+import { clipboardStoragePaths } from "@/lib/canvas/clipboard";
 import { useLandingStore } from "@/store/useLandingStore";
 import { useToastStore } from "@/store/useToastStore";
 import { useCollabStore } from "@/store/useCollabStore";
@@ -521,9 +522,11 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
   /**
    * (Sprint 17B) Solo los archivos de TU carpeta (`<tu id>/…`) se vigilan para
    * borrarlos del bucket: nunca se intenta borrar lo que subió otra persona.
+   * Y solo los de ESTE espacio: una ficha pegada desde otro lienzo apunta un
+   * momento al archivo original, que no se puede borrar desde aquí.
    */
   const ownStoragePaths = (paths: Iterable<string>): Set<string> => {
-    const prefix = userId ? `${userId}/` : null;
+    const prefix = userId && workspaceId ? `${userId}/${workspaceId}/` : null;
     return new Set(prefix ? [...paths].filter((p) => p.startsWith(prefix)) : []);
   };
 
@@ -713,7 +716,9 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
       // ruta solo deja de vigilarse cuando Storage confirma el borrado (si
       // falla, se reintenta en el siguiente guardado).
       const currentPaths = storagePathsOf(nodes);
-      const orphanPaths = [...syncedStoragePaths].filter((p) => !currentPaths.has(p));
+      // Un archivo cortado sigue vivo mientras esté en el portapapeles.
+      const held = clipboardStoragePaths(useWorkspaceStore.getState().clipboard);
+      const orphanPaths = [...syncedStoragePaths].filter((p) => !currentPaths.has(p) && !held.has(p));
       for (const path of ownStoragePaths(currentPaths)) syncedStoragePaths.add(path);
       if (orphanPaths.length > 0) {
         void supabase.storage
@@ -853,11 +858,72 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
    */
   let uploadChain: Promise<void> = Promise.resolve();
 
+  /** Ficha pegada desde otro espacio: copia su archivo a la carpeta de este. */
+  const adoptFile = async (
+    nodeId: string,
+    file: FileNodePayload & { storagePath: string },
+    key: string,
+    queuedEpoch: number
+  ) => {
+    const stillForeign = () => {
+      const node = useWorkspaceStore.getState().nodes.find((n) => n.id === nodeId);
+      return node?.type === "file-node" && node.fileData.storagePath === file.storagePath;
+    };
+    try {
+      if (queuedEpoch !== epoch || !userId || !workspaceId || !stillForeign()) return;
+      const name = safeStorageName(file.storagePath.split("/").pop() ?? file.fileName);
+      const path = `${userId}/${workspaceId}/${safeStorageName(nodeId)}/${name}`;
+      const bucket = supabase.storage.from(PRINT_FILES_BUCKET);
+      const { error } = await bucket.copy(file.storagePath, path);
+      if (queuedEpoch !== epoch || !stillForeign()) return;
+      if (error) {
+        // Con el archivo aún en este equipo, basta con volver a subirlo.
+        if (file.downloadUrl.startsWith("blob:")) {
+          useWorkspaceStore.getState().updateNodePayload(nodeId, { storagePath: undefined });
+          return;
+        }
+        throw error;
+      }
+      const signed = await bucket.createSignedUrl(path, SIGNED_URL_TTL_SECONDS, {
+        download: file.fileName || true,
+      });
+      if (queuedEpoch !== epoch || !stillForeign()) return;
+      useWorkspaceStore.getState().updateNodePayload(nodeId, {
+        storagePath: path,
+        ...(signed.data ? { downloadUrl: signed.data.signedUrl } : {}),
+      });
+    } catch (error) {
+      if (queuedEpoch !== epoch) return;
+      failedUploads.add(key);
+      cloud().setUploadError(nodeId, describeError(error));
+      cloud().setStatus(
+        "error",
+        `No se pudo copiar "${file.fileName}" a este espacio: ${describeError(error)}`
+      );
+    } finally {
+      uploadsInFlight.delete(key);
+      cloud().changePendingUploads(-1);
+    }
+  };
+
   const queueUploads = () => {
     if (!ready || disposed || collabGuest || !canEditCanvas(currentWorkspaceRole())) return;
     for (const node of useWorkspaceStore.getState().nodes) {
       if (node.type !== "file-node") continue;
       const file = node.fileData;
+      const { storagePath } = file;
+      if (storagePath && storagePath.split("/")[1] !== workspaceId) {
+        const key = `${node.id}|adopt|${storagePath}`;
+        if (uploadsInFlight.has(key) || failedUploads.has(key)) continue;
+        uploadsInFlight.add(key);
+        cloud().changePendingUploads(1);
+        cloud().setUploadError(node.id, null);
+        const queuedEpoch = epoch;
+        uploadChain = uploadChain.then(() =>
+          adoptFile(node.id, { ...file, storagePath }, key, queuedEpoch)
+        );
+        continue;
+      }
       const isInline = file.downloadUrl.startsWith("data:");
       const isLocalFile = file.downloadUrl.startsWith("blob:") || isInline;
       if (file.status !== "ready" || !isLocalFile || file.storagePath) continue;
@@ -1393,7 +1459,10 @@ function startCloudEngine(supabase: SupabaseClient): CloudEngine {
     if (disposed) return;
 
     if (!user) {
-      if (userId !== null) resetSession();
+      if (userId !== null) {
+        resetSession();
+        useWorkspaceStore.getState().clearClipboard();
+      }
       cloud().setUser(null);
       cloud().setStatus("signed-out");
       return;
@@ -1733,6 +1802,7 @@ export async function signOutFromCloud(): Promise<void> {
   activeEngine?.pause();
   await supabase.auth.signOut();
 
+  useWorkspaceStore.getState().clearClipboard();
   useWorkspaceStore.getState().hydrateWorkspace([], []);
   useWorkspaceStore.getState().hydrateCanvasStrokes([]);
   useCloudStore.getState().setUser(null);

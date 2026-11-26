@@ -10,10 +10,13 @@ import { useShortcutsGuideStore } from "@/store/useShortcutsGuideStore";
 import { useOnboardingStore } from "@/store/useOnboardingStore";
 import { isCanvasReadOnly } from "@/store/useCollabStore";
 import { closeActiveWorkspaceTab, focusWorkspaceTab } from "@/components/workspaces/WorkspaceTabsBar";
+import { handleClipboardShortcut } from "@/lib/canvas/clipboardActions";
 
 // ============================================================================
 // ANDROS — ATAJOS DE TECLADO GLOBALES
 //   ⌘K / Ctrl+K → Paleta de comandos (en cualquier tamaño de pantalla).
+//   ⌘/Ctrl + C · X · V → copiar, cortar y pegar fichas (nunca dentro de un
+//   campo de texto ni con texto seleccionado; ver clipboardActions).
 //   Solo escritorio: V seleccionar · N nodo · C conectar · D dibujar ·
 //   B biblioteca · L enlace · M CodeLab · O Oráculo IA · ? guía de atajos.
 //   Pestañas de espacios: Alt+1…9 saltar · Alt+W cerrar la activa (no se
@@ -48,6 +51,8 @@ export function useGlobalShortcuts(isDesktop: boolean) {
         palette.toggle();
         return;
       }
+
+      if (!palette.open && handleClipboardShortcut(e)) return;
 
       if (!isDesktop || palette.open) return;
       // La guía de atajos y el tutorial gestionan su propio teclado.

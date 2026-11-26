@@ -21,7 +21,9 @@ import { EngineeringNode } from "@/components/shared/EngineeringNode";
 import { ScreenShareLayer } from "@/components/nodes/ScreenShareNode";
 import { CollabCursorsLayer } from "@/components/collab/CollabCursorsLayer";
 import { useCanvasReadOnly } from "@/store/useCollabStore";
+import { useCardMenuStore } from "@/store/useCardMenuStore";
 import { collectUpstreamContext } from "@/lib/canvas/contextGraph";
+import { belongsToText } from "@/lib/canvas/clipboardActions";
 import {
   Bounds,
   buildPressureOutline,
@@ -799,6 +801,8 @@ export const SpatialCanvas: React.FC = () => {
     node: EngineeringNodeData
   ) => {
     e.stopPropagation();
+    // El botón derecho abre el menú: ni arrastra ni conecta.
+    if (e.button === 2) return;
     if (selectedConnectionId) selectConnection(null);
 
     // Hay un cable esperando destino: este nodo es el destino.
@@ -995,7 +999,7 @@ export const SpatialCanvas: React.FC = () => {
   };
 
   const handleCanvasPointerDown = (e: React.PointerEvent<HTMLElement>) => {
-    if (e.button === 1 || isDrawTool) return;
+    if (e.button === 1 || e.button === 2 || isDrawTool) return;
     if (e.target !== e.currentTarget) return;
     selectNode(null);
     if (selectedConnectionId) selectConnection(null);
@@ -1012,6 +1016,39 @@ export const SpatialCanvas: React.FC = () => {
       x: e.clientX - canvasTransform.x,
       y: e.clientY - canvasTransform.y,
     };
+  };
+
+  /** Menú contextual propio sobre una ficha o el fondo; el texto conserva el nativo. */
+  const handleContextMenu = (e: React.MouseEvent<HTMLElement>) => {
+    // Con el Lápiz, el botón lateral del stylus no debe abrir el menú.
+    if (isDrawTool) {
+      e.preventDefault();
+      return;
+    }
+    if (belongsToText(e.target)) return;
+    const target = e.target as Element;
+    if (target.closest('a, img, video, [role="menu"]')) return;
+
+    const point = toCanvasPoint(e.clientX, e.clientY);
+    // En solo lectura las tarjetas no reciben el puntero: se localizan por geometría.
+    const nodeId =
+      target.closest("[data-node-id]")?.getAttribute("data-node-id") ??
+      (readOnly
+        ? [...nodes].reverse().find((n) => isPointInsideNode(n, getSize(n.id), point))?.id
+        : undefined) ??
+      null;
+    // Los cables cuentan como fondo; los iconos de un botón, no.
+    const onBackground =
+      target === e.currentTarget || (target.closest("svg") !== null && !target.closest("button"));
+    if (!nodeId && !onBackground) return;
+    // Sin nada que ofrecer, se deja el menú del navegador.
+    if (!nodeId && (readOnly || !useWorkspaceStore.getState().clipboard)) return;
+
+    e.preventDefault();
+    if (nodeId) selectNode(nodeId);
+    useCardMenuStore
+      .getState()
+      .openMenu({ x: e.clientX, y: e.clientY, nodeId, ...(nodeId ? {} : { pasteAt: point }) });
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLElement>) => {
@@ -1189,10 +1226,7 @@ export const SpatialCanvas: React.FC = () => {
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerCancel}
-      onContextMenu={(e) => {
-        // Con el Lápiz, el botón lateral del stylus no debe abrir el menú.
-        if (isDrawTool) e.preventDefault();
-      }}
+      onContextMenu={handleContextMenu}
       className={`w-screen h-screen relative overflow-hidden canvas-grid ${
         canvasBackground === "grid" ? "canvas-bg-grid" : canvasBackground === "plain" ? "canvas-bg-plain" : ""
       } select-none touch-none ${cursorClass}`}

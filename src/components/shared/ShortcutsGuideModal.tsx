@@ -17,7 +17,7 @@ import {
 // ============================================================================
 // ANDROS — GUÍA DE REFERENCIA RÁPIDA (tecla «?» o botón de ayuda)
 // Solo lista atajos que existen en el código:
-//   useGlobalShortcuts → ⌘/Ctrl+K, V, N, C, D, B, L, M, O, Alt+1…9, Alt+W, ?
+//   useGlobalShortcuts → ⌘/Ctrl+K, ⌘/Ctrl+C·X·V, V, N, C, D, B, L, M, O, Alt+1…9, Alt+W, ?
 //   SpatialCanvas      → rueda (zoom al cursor), botón central (mover y
 //                        doble clic = encuadrar), Esc, Supr; con el lápiz
 //                        activo: E (borrador) y ⌘/Ctrl+Z (deshacer trazo).
@@ -65,6 +65,9 @@ const useGroups = (): { title: string; rows: Row[] }[] => {
         { keys: ["E"], label: "Borrador o lápiz", note: "con el lápiz activo" },
         { keys: [mod, "Z"], label: "Deshacer el último trazo", note: "con el lápiz activo" },
         { keys: ["Supr"], label: "Borrar el cable seleccionado" },
+        { keys: [mod, "C"], label: "Copiar la ficha seleccionada" },
+        { keys: [mod, "X"], label: "Cortar la ficha seleccionada" },
+        { keys: [mod, "V"], label: "Pegar la ficha" },
       ],
     },
     {

@@ -70,6 +70,8 @@ import {
   searchCatalog,
 } from "@/lib/forms/templateCatalog";
 import { PLAN_LIMITS } from "@/lib/billing/planLimits";
+import { parseClipboard } from "@/lib/canvas/clipboard";
+import { revokeLocalFileUrl, useWorkspaceStore } from "@/store/useWorkspaceStore";
 
 let passed = 0;
 let failed = 0;
@@ -571,6 +573,130 @@ section("6. Librería de fichas: catálogo de plantillas (Sprint 23)");
   ];
   const landingHits = landingSources.filter((f) => /whats\s?app|telegram|slack|\bexcel\b|notion|revit/i.test(fs.readFileSync(f, "utf8")));
   check("Portada, SEO y catálogo: sin «WhatsApp» ni apps de mensajería u ofimática", landingHits.length === 0, landingHits);
+}
+
+// ----------------------------------------------------------------------------
+section("Portapapeles de fichas: copiar, cortar y pegar");
+// ----------------------------------------------------------------------------
+{
+  const store = () => useWorkspaceStore.getState();
+  const find = (id: string) => store().nodes.find((n) => n.id === id);
+  store().hydrateWorkspace([], []);
+  store().spawnNode({
+    type: "form-sheet-node",
+    title: "Montaje del escenario",
+    position: { x: 100, y: 200 },
+    formSheetData: {
+      category: "Logística",
+      area: "Logística",
+      fields: [{ id: "f1", fieldKey: "estado", label: "Estado", type: "text", value: "Pendiente" }],
+    },
+  });
+  const sourceId = store().selectedNodeId as string;
+  const noteId = store().aiCreateNode({ type: "sketch-note-node", title: "Nota", position: { x: 600, y: 200 } });
+  store().aiConnectNodes(sourceId, noteId, "Depende de");
+  const original = JSON.stringify(find(sourceId));
+
+  check("Sin selección ni ids no se copia nada", (store().selectNode(null), store().copySelectedCards() === 0));
+  store().selectNode(sourceId);
+  const before = store().nodes;
+  check("Copiar no modifica el lienzo", store().copySelectedCards({ workspaceId: "ws-a" }) === 1 && store().nodes === before);
+
+  const [copyId] = store().pasteCards({ workspaceId: "ws-a" });
+  const copy = find(copyId);
+  check("Pegar genera un id nuevo y conserva el original", copyId !== sourceId && JSON.stringify(find(sourceId)) === original && store().nodes.length === 3);
+  check("La copia se desplaza +32, +32", copy?.position.x === 132 && copy.position.y === 232, copy?.position);
+  check(
+    "La copia conserva título, área, categoría y estado",
+    copy?.type === "form-sheet-node" && copy.title === "Montaje del escenario" && copy.formSheetData.area === "Logística" &&
+      copy.formSheetData.category === "Logística" && copy.formSheetData.fields[0].value === "Pendiente",
+    copy
+  );
+  check("La copia queda seleccionada y sin cables huérfanos", store().selectedNodeId === copyId && store().connections.length === 1);
+  const [secondId] = store().pasteCards({ workspaceId: "ws-a" });
+  check("Pegar otra vez sigue escalonando (+64)", find(secondId)?.position.x === 164, find(secondId)?.position);
+  store().updateNodePayload(copyId, { category: "Otra" });
+  check("Copia profunda: editar la copia no toca la original", JSON.stringify(find(sourceId)) === original);
+
+  store().hydrateWorkspace([], []);
+  const [otherId] = store().pasteCards({ workspaceId: "ws-b", viewCenter: { x: 1000, y: 800 } });
+  const other = find(otherId);
+  check("En otro espacio aparece centrada en la vista", other?.position.x === 840 && other.position.y === 690, other?.position);
+
+  // Cortar
+  store().hydrateWorkspace([], []);
+  store().spawnNode({ type: "sketch-note-node", title: "A", position: { x: 0, y: 0 }, summary: "Texto intacto" });
+  const aId = store().selectedNodeId as string;
+  const bId = store().aiCreateNode({ type: "sketch-note-node", title: "B", position: { x: 600, y: 0 } });
+  store().aiConnectNodes(aId, bId, "Afecta a");
+  const cutSource = find(aId);
+  const removed = store().cutSelectedCards({ ids: [aId], workspaceId: "ws-a" });
+  check("Cortar elimina la ficha y sus cables", !find(aId) && store().connections.length === 0 && store().clipboard?.mode === "cut");
+  if (removed) store().restoreSnapshot(removed);
+  check("«Deshacer» devuelve la ficha y su cable", Boolean(find(aId)) && store().connections.length === 1);
+
+  store().cutSelectedCards({ ids: [aId], workspaceId: "ws-a" });
+  const [movedId] = store().pasteCards({ workspaceId: "ws-a" });
+  const moved = find(movedId);
+  check(
+    "Cortar + pegar: la ficha vuelve con sus datos intactos",
+    movedId !== aId && moved?.type === "sketch-note-node" && cutSource?.type === "sketch-note-node" &&
+      moved.title === cutSource.title && JSON.stringify(moved.sketchNoteData) === JSON.stringify(cutSource.sketchNoteData),
+    moved
+  );
+  check("Cortar + pegar en el mismo espacio recupera el cable", store().connections.length === 1 && store().connections[0].fromNodeId === movedId && store().connections[0].toNodeId === bId, store().connections);
+  check("Tras el primer pegado, «cortar» pasa a «copiar»", store().clipboard?.mode === "copy");
+  store().pasteCards({ workspaceId: "ws-a" });
+  check("El segundo pegado no duplica cables", store().connections.length === 1 && store().nodes.length === 3);
+
+  // Fichas de Resolución: el código correlativo no se repite
+  store().hydrateWorkspace(
+    [
+      {
+        id: "res",
+        type: "form-sheet-node",
+        title: `${created.code} · Audio`,
+        codeTag: created.code,
+        position: { x: 0, y: 0 },
+        updatedAt: "Ahora mismo",
+        formSheetData: { templateId: "cde-resolution", category: "Resolución", fields: [], attachments: [], resolution: created },
+      },
+    ],
+    []
+  );
+  store().copySelectedCards({ ids: ["res"], workspaceId: "ws-a" });
+  const [resId] = store().pasteCards({ workspaceId: "ws-a" });
+  const res = find(resId);
+  check(
+    "Copiar una Ficha de Resolución asigna un código nuevo y mantiene el estado",
+    res?.type === "form-sheet-node" && res.formSheetData.resolution?.code === "RES-009" && res.codeTag === "RES-009" &&
+      res.title.startsWith("RES-009") && res.formSheetData.resolution.status === created.status &&
+      res.formSheetData.resolution.affectedNodeIds.length === 0,
+    res
+  );
+
+  // Archivos locales compartidos y persistencia
+  const url = "blob:andros-verificacion";
+  store().hydrateWorkspace([], []);
+  const fileId = store().aiCreateNode({ type: "file-node", fileData: { fileName: "pieza.stl", status: "ready", downloadUrl: url } });
+  store().copySelectedCards({ ids: [fileId] });
+  let revoked = 0;
+  const realRevoke = URL.revokeObjectURL;
+  URL.revokeObjectURL = () => { revoked += 1; };
+  revokeLocalFileUrl(url);
+  URL.revokeObjectURL = realRevoke;
+  check("El archivo local copiado no se libera al borrar una de las fichas", revoked === 0);
+  const restored = parseClipboard(JSON.stringify(store().clipboard));
+  const restoredCard = restored?.cards[0];
+  check(
+    "Tras recargar: un enlace blob: perdido se marca como error",
+    restoredCard?.type === "file-node" && restoredCard.fileData.downloadUrl === "" && restoredCard.fileData.status === "error",
+    restoredCard
+  );
+  check("Portapapeles corrupto → vacío", parseClipboard("{no") === null && parseClipboard('{"cards":[{"id":1}]}') === null);
+
+  store().clearClipboard();
+  check("Sin portapapeles, pegar no hace nada", store().pasteCards().length === 0);
 }
 
 console.log(`\n${passed} correctas · ${failed} fallidas`);

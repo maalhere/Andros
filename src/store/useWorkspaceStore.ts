@@ -41,6 +41,14 @@ import {
   FORMULA_SHEET_CODE_TAG,
 } from "@/lib/math/formulaSchema";
 
+import {
+  createClipboard,
+  planPaste,
+  readStoredClipboard,
+  writeStoredClipboard,
+  type CardClipboard,
+} from "@/lib/canvas/clipboard";
+
 export { createEmptyFormSheetPayload, createEmptyFormulaSheetPayload };
 
 // ============================================================================
@@ -84,6 +92,21 @@ interface WorkspaceState {
 
   /** Reemplaza el lienzo completo (lo usa la nube al cargar el workspace guardado). */
   hydrateWorkspace: (nodes: EngineeringNodeData[], connections: NodeConnection[]) => void;
+
+  // --------------------------------------------------------------------------
+  // Portapapeles de fichas (los permisos se comprueban en clipboardActions)
+  // --------------------------------------------------------------------------
+  /** Sobrevive al cambio de espacio: permite pegar en otro lienzo. */
+  clipboard: CardClipboard | null;
+  /** Copia las fichas (por defecto, la seleccionada). Devuelve cuántas copió. */
+  copySelectedCards: (options?: ClipboardSourceOptions) => number;
+  /** Copia y quita las fichas. Devuelve lo quitado (para «Deshacer») o `null`. */
+  cutSelectedCards: (options?: ClipboardSourceOptions) => CanvasSnapshot | null;
+  /** Pega con ids nuevos y selecciona lo pegado. Devuelve los ids creados. */
+  pasteCards: (options?: PasteOptions) => string[];
+  /** Un corte deshecho deja de ser un traslado pendiente. */
+  markClipboardAsCopy: () => void;
+  clearClipboard: () => void;
 
   // Acciones de Conexión
   startConnecting: (nodeId: string, port?: PortPosition) => void;
@@ -185,6 +208,18 @@ interface WorkspaceState {
 /** Opciones de borrado: con `keepFileUrl` el archivo local sigue vivo para «Deshacer». */
 export interface RemovalOptions {
   keepFileUrl?: boolean;
+}
+
+export interface ClipboardSourceOptions {
+  /** Fichas concretas; sin ellas se usa la seleccionada. */
+  ids?: string[];
+  workspaceId?: string;
+}
+
+export interface PasteOptions {
+  workspaceId?: string;
+  viewCenter?: { x: number; y: number };
+  at?: { x: number; y: number };
 }
 
 /** Copia de lo borrado para poder restaurarlo. */
@@ -979,9 +1014,23 @@ function findSlotRightOf(
   return { x, y };
 }
 
+/**
+ * Enlaces locales que pasaron por el portapapeles: los pueden compartir varias
+ * fichas, así que viven hasta que se cierre o recargue la pestaña.
+ */
+const clipboardFileUrls = new Set<string>();
+
+function retainFileUrls(clipboard: CardClipboard): void {
+  for (const card of clipboard.cards) {
+    if (card.type === "file-node" && card.fileData.downloadUrl.startsWith("blob:")) {
+      clipboardFileUrls.add(card.fileData.downloadUrl);
+    }
+  }
+}
+
 /** Libera la memoria de un archivo local cuando ya no se usa. */
 export function revokeLocalFileUrl(url: string | undefined): void {
-  if (!url || !url.startsWith("blob:")) return;
+  if (!url || !url.startsWith("blob:") || clipboardFileUrls.has(url)) return;
   if (typeof URL === "undefined" || typeof URL.revokeObjectURL !== "function") return;
   URL.revokeObjectURL(url);
 }
@@ -1989,6 +2038,85 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           snapshot.inkHistory && state.inkHistory.length === 0 ? snapshot.inkHistory : state.inkHistory,
       };
     }),
+
+  // --------------------------------------------------------------------------
+  // Portapapeles de fichas
+  // --------------------------------------------------------------------------
+
+  clipboard: readStoredClipboard(),
+
+  copySelectedCards: (options) => {
+    const { nodes, connections, selectedNodeId } = get();
+    const ids = options?.ids ?? (selectedNodeId ? [selectedNodeId] : []);
+    const clipboard = createClipboard("copy", ids, nodes, connections, options?.workspaceId);
+    if (!clipboard) return 0;
+    retainFileUrls(clipboard);
+    writeStoredClipboard(clipboard);
+    set({ clipboard });
+    return clipboard.cards.length;
+  },
+
+  cutSelectedCards: (options) => {
+    const state = get();
+    const ids = options?.ids ?? (state.selectedNodeId ? [state.selectedNodeId] : []);
+    const clipboard = createClipboard("cut", ids, state.nodes, state.connections, options?.workspaceId);
+    if (!clipboard) return null;
+    retainFileUrls(clipboard);
+    writeStoredClipboard(clipboard);
+    const cut = new Set(clipboard.cards.map((n) => n.id));
+    const touches = (c: NodeConnection) => cut.has(c.fromNodeId) || cut.has(c.toNodeId);
+    const removed: CanvasSnapshot = {
+      nodes: state.nodes.filter((n) => cut.has(n.id)),
+      connections: state.connections.filter(touches),
+    };
+    set({
+      clipboard,
+      nodes: state.nodes.filter((n) => !cut.has(n.id)),
+      connections: state.connections.filter((c) => !touches(c)),
+      selectedNodeId: state.selectedNodeId && cut.has(state.selectedNodeId) ? null : state.selectedNodeId,
+      selectedConnectionId: removed.connections.some((c) => c.id === state.selectedConnectionId)
+        ? null
+        : state.selectedConnectionId,
+      connectingFrom:
+        state.connectingFrom && cut.has(state.connectingFrom.nodeId) ? null : state.connectingFrom,
+    });
+    return removed;
+  },
+
+  pasteCards: (options) => {
+    const state = get();
+    if (!state.clipboard) return [];
+    const result = planPaste({
+      ...options,
+      clipboard: state.clipboard,
+      nodes: state.nodes,
+      connections: state.connections,
+      newId: nextUniqueId,
+    });
+    writeStoredClipboard(result.clipboard);
+    set({
+      clipboard: result.clipboard,
+      nodes: result.nodes,
+      connections: result.connections,
+      selectedNodeId: result.pastedIds.at(-1) ?? null,
+      selectedConnectionId: null,
+      connectingFrom: null,
+    });
+    return result.pastedIds;
+  },
+
+  markClipboardAsCopy: () => {
+    const { clipboard } = get();
+    if (!clipboard || clipboard.mode === "copy") return;
+    const next: CardClipboard = { ...clipboard, mode: "copy" };
+    writeStoredClipboard(next);
+    set({ clipboard: next });
+  },
+
+  clearClipboard: () => {
+    writeStoredClipboard(null);
+    set({ clipboard: null });
+  },
 
   setOracleModalOpen: (isOpen) =>
     set({
