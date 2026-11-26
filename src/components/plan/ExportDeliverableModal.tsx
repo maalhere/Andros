@@ -26,7 +26,7 @@ import { useSubmitGuard } from "@/hooks/useSubmitGuard";
 import { copyText } from "@/lib/collab/room";
 import { requestFileDownload } from "@/lib/downloadWithPermission";
 import { FREE_DAILY_LIMIT, todayKey } from "@/lib/ai/freeQuota";
-import { PLAN_CATEGORY_LABELS, buildPlanDocument, planToWhatsApp } from "@/lib/plan/planDocument";
+import { PLAN_CATEGORY_LABELS, buildPlanDocument, planToChatSummary } from "@/lib/plan/planDocument";
 import {
   INSTRUCTION_MAX_CHARS,
   exportCardsFromPlan,
@@ -48,7 +48,7 @@ import { OutlinePrintSheet } from "./OutlinePrintSheet";
 //   1. PDF imprimible enriquecido (`window.print()`, sin librerías).
 //   2. Word / Google Docs (.docx)     ─┐ generadores diferidos: `docx` y
 //   3. PowerPoint / Google Slides (.pptx) ┘ `pptxgenjs` se descargan al pulsar.
-//   4. Resumen para WhatsApp (portapapeles).
+//   4. Resumen para chats de grupo (portapapeles).
 // «Sintetizar con IA» gasta 1 consulta (se reutiliza para el PDF y el Word);
 // «Directo del tablero» no usa la red. Las fotos nunca salen del dispositivo.
 // ============================================================================
@@ -139,7 +139,7 @@ const ExportStudioBody: React.FC = () => {
   const cards = useMemo(() => exportCardsFromPlan(doc), [doc]);
   const photoAssets = useMemo(() => photoAssetsFromPlan(doc), [doc]);
   const contentKey = useMemo(() => fingerprint(JSON.stringify(cards)), [cards]);
-  const whatsapp = useMemo(() => planToWhatsApp(doc), [doc]);
+  const chatSummary = useMemo(() => planToChatSummary(doc), [doc]);
   const empty = doc.sections.length === 0;
   const photoCount = photoAssets.size;
 
@@ -247,8 +247,8 @@ const ExportStudioBody: React.FC = () => {
       });
     });
 
-  const copyWhatsApp = async () => {
-    const ok = await copyText(whatsapp);
+  const copyChatSummary = async () => {
+    const ok = await copyText(chatSummary);
     setCopied(ok);
     if (ok) track("deliverable_exported", { type: "summary" });
     toast({
@@ -396,7 +396,7 @@ const ExportStudioBody: React.FC = () => {
           action={copied ? "Resumen copiado" : "Copiar resumen"}
           busy={false}
           disabled={empty}
-          onClick={() => void copyWhatsApp()}
+          onClick={() => void copyChatSummary()}
         />
       </div>
 
@@ -423,7 +423,7 @@ const ExportStudioBody: React.FC = () => {
             Vista previa del resumen para mensajería
           </summary>
           <pre className="max-h-56 overflow-y-auto px-3 pb-3 whitespace-pre-wrap break-words font-sans text-xs leading-relaxed text-andros-muted">
-            {whatsapp}
+            {chatSummary}
           </pre>
         </details>
       )}

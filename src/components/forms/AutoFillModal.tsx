@@ -13,6 +13,8 @@ import { useSubmitGuard } from "@/hooks/useSubmitGuard";
 import { AutofillError, runAutofill, type AutofillSource } from "@/lib/forms/autofillClient";
 import { AUTOFILL_MAX_RAW_CHARS, AUTOFILL_MAX_REQUEST_SHEETS } from "@/lib/forms/autofill";
 import { isFieldFilled } from "@/lib/forms/formSchema";
+import { findCatalogTemplate } from "@/lib/forms/templateCatalog";
+import type { FormTemplate } from "@/types/forms";
 import { BUTTON_PRIMARY, BUTTON_SECONDARY, SocialDialog } from "@/components/social/SocialDialog";
 import type { FormSheetEngineeringNode } from "@/types/workspace";
 
@@ -42,8 +44,16 @@ const EXAMPLE_TEXT =
   "Paciente María López, 34 años, viene por migraña hace 3 días, PA 120/80, sin alergias, recetar ibuprofeno 400mg cada 8h por 3 días y citar en 1 semana; llenar historial clínico y receta";
 
 export const AutoFillPanel: React.FC<{ onDone?: () => void }> = ({ onDone }) => {
-  const templates = useFormsLibraryStore((s) => s.templates);
+  const ownTemplates = useFormsLibraryStore((s) => s.templates);
   const preselect = useFormsLibraryStore((s) => s.preselectTemplateIds);
+  // (Sprint 23) Una plantilla del catálogo elegida con «Llenar con IA» se suma
+  // a la lista sin guardarse en la librería personal.
+  const templates = useMemo<FormTemplate[]>(() => {
+    const fromCatalog = preselect
+      .map(findCatalogTemplate)
+      .filter((t): t is NonNullable<typeof t> => Boolean(t) && !ownTemplates.some((o) => o.id === t?.id));
+    return [...fromCatalog, ...ownTemplates];
+  }, [preselect, ownTemplates]);
   const nodes = useWorkspaceStore((s) => s.nodes);
   const readOnly = useCanvasReadOnly();
   // Se suscribe al contador para refrescar «quedan N consultas».

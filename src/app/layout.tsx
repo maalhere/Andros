@@ -1,14 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import {
-  Inter,
-  JetBrains_Mono,
-  Playfair_Display,
-  Space_Grotesk,
-  Syne,
-  Instrument_Serif,
-  Bebas_Neue,
-  Cormorant_Garamond,
-} from "next/font/google";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { PwaRegister } from "@/components/shared/PwaRegister";
 import { DownloadPermissionModal } from "@/components/modals/DownloadPermissionModal";
@@ -18,8 +9,9 @@ import { SITE_DESCRIPTION, SITE_NAME, SITE_TAGLINE, SITE_URL } from "@/lib/site"
 
 // ============================================================================
 // TIPOGRAFÍAS — Todas se descargan en el build y se sirven desde Andros
-// (sin peticiones a Google en el navegador). Las 6 últimas alimentan el
-// logo generativo mutante de la Landing (MutantAndrosLogo).
+// (sin peticiones externas en el navegador). Sprint 22: la portada usa una
+// tipografía editorial estática (Inter), así que ya no se cargan familias
+// decorativas.
 // ============================================================================
 
 const inter = Inter({
@@ -36,57 +28,7 @@ const jetbrainsMono = JetBrains_Mono({
   display: "swap",
 });
 
-const playfairDisplay = Playfair_Display({
-  subsets: ["latin"],
-  style: ["normal", "italic"],
-  variable: "--font-playfair",
-  display: "swap",
-});
-
-const spaceGrotesk = Space_Grotesk({
-  subsets: ["latin"],
-  variable: "--font-space-grotesk",
-  display: "swap",
-});
-
-const syne = Syne({
-  subsets: ["latin"],
-  variable: "--font-syne",
-  display: "swap",
-});
-
-const instrumentSerif = Instrument_Serif({
-  subsets: ["latin"],
-  weight: "400",
-  style: ["normal", "italic"],
-  variable: "--font-instrument-serif",
-  display: "swap",
-});
-
-const bebasNeue = Bebas_Neue({
-  subsets: ["latin"],
-  weight: "400",
-  variable: "--font-bebas",
-  display: "swap",
-});
-
-const cormorantGaramond = Cormorant_Garamond({
-  subsets: ["latin"],
-  style: ["normal", "italic"],
-  variable: "--font-cormorant",
-  display: "swap",
-});
-
-const fontVariables = [
-  inter.variable,
-  jetbrainsMono.variable,
-  playfairDisplay.variable,
-  spaceGrotesk.variable,
-  syne.variable,
-  instrumentSerif.variable,
-  bebasNeue.variable,
-  cormorantGaramond.variable,
-].join(" ");
+const fontVariables = [inter.variable, jetbrainsMono.variable].join(" ");
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),

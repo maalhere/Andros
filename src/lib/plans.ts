@@ -2,7 +2,7 @@
 // ANDROS — PLANES (textos de la portada y del modal de planes)
 //
 // Precios y límites salen de `src/lib/billing/planLimits.ts` (fuente única):
-// Plan Básico $0 vs. Andros Pro $5.99 USD/mes o $49.99 USD/año. Cada fila que
+// Plan Básico $0 vs. Andros Pro $5.99 USD/mes o $65.99 USD/año. Cada fila que
 // se promete aquí se aplica de verdad en el código (Sprint 21):
 //   · Espacios        → `guardSpaceCreation` + trigger SQL `workspaces_enforce_plan_limit`.
 //   · Personas en vivo → tope del plan del DUEÑO (`workspace_live_cap()` en la sala).
@@ -13,7 +13,15 @@
 // ============================================================================
 
 import { FREE_DAILY_LIMIT, PRO_DAILY_LIMIT } from "@/lib/ai/freeQuota";
-import { ANNUAL_MONTHS_SAVED, PLAN_LIMITS, PRO_PRICING, type PlanId } from "@/lib/billing/planLimits";
+import {
+  ANNUAL_MONTHLY_EQUIVALENT,
+  ANNUAL_SAVINGS_PERCENT,
+  ANNUAL_SAVINGS_USD,
+  PLAN_LIMITS,
+  PRO_PRICING,
+  formatUsd,
+  type PlanId,
+} from "@/lib/billing/planLimits";
 import { MAX_VOICE_PARTICIPANTS } from "@/types/collab";
 
 export type { PlanId };
@@ -33,8 +41,14 @@ export interface PlanDefinition {
 const FREE = PLAN_LIMITS.free;
 const PRO = PLAN_LIMITS.pro;
 
-/** «Ahorra más de 3 meses»: calculado con los precios reales (ver planLimits.ts). */
-export const ANNUAL_SAVINGS_LABEL = `ahorra más de ${ANNUAL_MONTHS_SAVED} meses`;
+/** «$5.50/mes»: equivalente mensual del pago anual (ver planLimits.ts). */
+export const ANNUAL_MONTHLY_LABEL = `${formatUsd(ANNUAL_MONTHLY_EQUIVALENT)}/mes`;
+
+/** «ahorra 8% al año»: calculado con los precios reales (ver planLimits.ts). */
+export const ANNUAL_SAVINGS_LABEL = `ahorra ${ANNUAL_SAVINGS_PERCENT}% al año`;
+
+/** «Ahorras $5.89 al año»: ahorro exacto al centavo. */
+export const ANNUAL_SAVINGS_USD_LABEL = `ahorras ${formatUsd(ANNUAL_SAVINGS_USD)} al año`;
 
 export const FREE_PLAN: PlanDefinition = {
   id: "free",
@@ -58,7 +72,7 @@ export const PRO_PLAN: PlanDefinition = {
   name: "Andros Pro",
   price: PRO_PRICING.monthly.label,
   period: PRO_PRICING.monthly.period,
-  altPrice: `o ${PRO_PRICING.annual.label} ${PRO_PRICING.annual.period} (${ANNUAL_SAVINGS_LABEL})`,
+  altPrice: `o ${PRO_PRICING.annual.label} ${PRO_PRICING.annual.period} (${ANNUAL_MONTHLY_LABEL} · ${ANNUAL_SAVINGS_LABEL})`,
   tagline: "Para quien coordina a muchas personas a la vez.",
   features: [
     "Espacios ilimitados",

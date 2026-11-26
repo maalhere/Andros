@@ -57,7 +57,7 @@ import {
 //   · Enlace público «Vista Invitado» (`/ver/<token>`): solo lectura y sin
 //     cuenta, para voluntarios, clientes o directivos. Solo el dueño lo activa,
 //     lo desactiva o genera uno nuevo (el anterior deja de funcionar).
-//   · Atajo a «Exportar Plan del Día» (PDF + resumen para WhatsApp).
+//   · Atajo a «Exportar Plan del Día» (PDF + resumen para chats de grupo).
 //   · (Sprint 16) Permisos estilo Google Docs: Editor, Comentarista o Solo
 //     lectura al añadir y en 1 clic por miembro. Cada alta o cambio avisa por
 //     correo (si el servidor tiene Resend) y en vivo a la sala.

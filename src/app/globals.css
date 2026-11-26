@@ -48,6 +48,80 @@
     --warning-ink: #FBBF24;
   }
 
+  /* ==========================================
+     PORTADA PÚBLICA (Sprint 22 → 23): un solo estilo fijo
+     «Mesa de estudio»: papel crema, tinta grafito cálida, terracota, salvia
+     y un rojo semáforo sobrio. Siempre claro, aunque la app esté en modo
+     oscuro. El sistema Dual-Engine sigue intacto dentro del lienzo.
+     Contrastes (WCAG AA) medidos sobre el papel #F4EFE6:
+       muted 6.2:1 · accent-ink 5.7:1 · success 5.1:1 · danger 5.7:1 ·
+       blanco sobre accent-fill 6.0:1.
+     ========================================== */
+  .andros-landing {
+    --bg-canvas: #F4EFE6; /* papel crema */
+    --surface-elevated: rgba(251, 248, 242, 0.88);
+    --surface-card: #FBF8F2; /* marfil */
+    --border-subtle: rgba(60, 48, 36, 0.13);
+    --border-active: rgba(60, 48, 36, 0.3);
+    --text-primary: #2A2622; /* grafito cálido */
+    --text-muted: #5F574D;
+    --grid-dot: #DCD3C4;
+    --accent-primary: #C2613E; /* terracota (decoración) */
+    --accent-success: #4E6B57; /* salvia */
+    --accent-ink: #9A4424;
+    --accent-fill: #A3482A;
+    --danger-ink: #A33A2C; /* rojo semáforo sobrio */
+    --warning-ink: #8F5512;
+    --landing-grid-line: rgba(60, 48, 36, 0.055);
+    --landing-grid-major: rgba(60, 48, 36, 0.085);
+    --landing-trace: rgba(60, 48, 36, 0.32);
+    --landing-red-tint: rgba(163, 58, 44, 0.1);
+    --landing-sage-tint: rgba(78, 107, 87, 0.13);
+    --landing-clay-tint: rgba(194, 97, 62, 0.11);
+    --landing-ochre: #B8893A;
+    color-scheme: light;
+    background-color: var(--bg-canvas);
+    color: var(--text-primary);
+  }
+
+  /* Retícula editorial muy sutil (papel milimetrado de estudio) */
+  .andros-landing .landing-grid {
+    background-image:
+      linear-gradient(to right, var(--landing-grid-major) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--landing-grid-major) 1px, transparent 1px),
+      linear-gradient(to right, var(--landing-grid-line) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--landing-grid-line) 1px, transparent 1px);
+    background-size: 160px 160px, 160px 160px, 32px 32px, 32px 32px;
+    background-position: -1px -1px;
+  }
+
+  /* Titulares editoriales: serif del sistema (sin descargas ni cursivas) */
+  .andros-landing .landing-serif {
+    font-family: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    font-weight: 500;
+    letter-spacing: -0.015em;
+  }
+
+  /* Trazo a lápiz que se dibuja una sola vez (subrayados y conexiones) */
+  .andros-landing .landing-draw {
+    stroke-dasharray: 1;
+    stroke-dashoffset: 1;
+    animation: landing-draw 1.1s var(--ease-out-micro) 0.25s forwards;
+  }
+
+  @keyframes landing-draw {
+    to {
+      stroke-dashoffset: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .andros-landing .landing-draw {
+      animation: none;
+      stroke-dashoffset: 0;
+    }
+  }
+
   * {
     border-color: var(--border-subtle);
     -webkit-tap-highlight-color: transparent;

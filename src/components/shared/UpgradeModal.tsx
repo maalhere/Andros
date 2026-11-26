@@ -9,13 +9,13 @@ import { useSettingsStore } from "@/store/useSettingsStore";
 import { useSubscriptionStore } from "@/store/useSubscriptionStore";
 import { useSubmitGuard } from "@/hooks/useSubmitGuard";
 import { signInWithGoogle } from "@/hooks/useCloudSync";
-import { ANNUAL_SAVINGS_LABEL, PLANS } from "@/lib/plans";
-import { PRO_PRICING, type BillingCycle } from "@/lib/billing/planLimits";
+import { ANNUAL_MONTHLY_LABEL, ANNUAL_SAVINGS_LABEL, ANNUAL_SAVINGS_USD_LABEL, PLANS } from "@/lib/plans";
+import { PRO_PRICING, TWELVE_MONTHLY_TOTAL, formatUsd, type BillingCycle } from "@/lib/billing/planLimits";
 import { openBillingPortal, startProCheckout, type CheckoutResult } from "@/lib/billing/subscriptionClient";
 import { CONTACT_EMAIL } from "@/lib/site";
 
 // ============================================================================
-// ANDROS — PLANES (Plan Básico $0 vs. Andros Pro $5.99/mes o $49.99/año)
+// ANDROS — PLANES (Plan Básico $0 vs. Andros Pro $5.99/mes o $65.99/año)
 // Los datos viven en `src/lib/plans.ts` (los mismos que muestra la portada).
 // «Pasar a Pro» pide al servidor el enlace de cobro (`/api/billing/checkout`).
 // Si la pasarela aún no está configurada, el servidor responde 503 y aquí se
@@ -167,7 +167,7 @@ export const UpgradeModal: React.FC = () => {
                       <span className="text-[11px] text-andros-muted">{pro ? price.period : p.period}</span>
                       {pro && cycle === "annual" && (
                         <span className="block text-[11px] text-andros-muted">
-                          Equivale a 12 meses por {PRO_PRICING.annual.label} en vez de ${(PRO_PRICING.monthly.amount * 12).toFixed(2)} ({ANNUAL_SAVINGS_LABEL}).
+                          Equivale a {ANNUAL_MONTHLY_LABEL}: {PRO_PRICING.annual.label} al año en vez de {formatUsd(TWELVE_MONTHLY_TOTAL)} ({ANNUAL_SAVINGS_USD_LABEL}).
                         </span>
                       )}
                     </p>

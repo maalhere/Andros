@@ -75,7 +75,7 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({ isMobile }) => {
           <AndrosMark className="w-6 h-6" />
         </button>
         <div className="min-w-0 flex items-center gap-1.5 text-xs">
-          {/* Destino del vuelo del logo mutante (LandingOverlay) */}
+          {/* Destino del vuelo del nombre de la portada (LandingOverlay) */}
           <button
             type="button"
             onClick={openLanding}

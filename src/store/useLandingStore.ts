@@ -2,8 +2,8 @@ import { create } from "zustand";
 
 // ============================================================================
 // ANDROS — ESTADO DE LA LANDING PAGE
-//   · "landing"   → se muestra la portada con el logo mutante.
-//   · "igniting"  → transición de ignición: el logo vuela a la barra superior.
+//   · "landing"   → se muestra la portada pública.
+//   · "igniting"  → transición de entrada: la marca vuela a la barra superior.
 //   · "workspace" → lienzo de trabajo normal.
 //
 // Regla de entrada:

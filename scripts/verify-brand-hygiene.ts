@@ -20,13 +20,30 @@
 //
 // Además comprueba la cláusula de independencia en /terminos y el pie de
 // página, y que public/ no sirva logotipos de terceros.
+//
+// (Sprint 22) Regla ESTRICTA para la portada pública (src/components/landing/):
+// cero marcas de terceros, sin zonas de integración, sin «brand-ok» y sin la
+// excepción BYOK. También se revisan los textos que la portada importa (planes,
+// SEO, avisos legales y `COMPANY_CONTACT`), que no haya botón de tema ni
+// controles de tipografía/animación, y que el scroll vertical no se bloquee.
 // ============================================================================
 
 import fs from "node:fs";
 import path from "node:path";
 // `typescript` se carga en tiempo de ejecución (--external:typescript).
 import ts from "typescript";
-import { INTEGRATIONS_NOTICE, TRADEMARK_NOTICE } from "@/lib/site";
+import {
+  COMPANY_CONTACT,
+  INTEGRATIONS_NOTICE,
+  LEGAL_LINKS,
+  SITE_DESCRIPTION,
+  SITE_NAME,
+  SITE_TAGLINE,
+  TRADEMARK_NOTICE,
+  isPlaceholderLink,
+} from "@/lib/site";
+import { FREE_PLAN, PLAN_COMPARISON, PRO_PLAN } from "@/lib/plans";
+import { CATALOG_CATEGORIES, TEMPLATE_CATALOG } from "@/lib/forms/templateCatalog";
 
 let passed = 0;
 let failed = 0;
@@ -334,6 +351,56 @@ export function scanSource(file: string, source: string): Finding[] {
   return findings;
 }
 
+// ----------------------------------------------------------------------------
+// Regla estricta de la portada pública (Sprint 22)
+// ----------------------------------------------------------------------------
+
+/** Archivos de la portada: ninguna marca de terceros, sin excepciones. */
+export const LANDING_ZONES = ["src/components/landing/"];
+
+/** Términos extra que en la portada tampoco se nombran (acceso, pagos, plataformas). */
+export const LANDING_EXTRA: Term[] = [
+  t("Supabase"),
+  t("Stripe"),
+  t("Paddle"),
+  t("Lemon Squeezy", "Lemon\\s?Squeezy"),
+  t("PostHog", "posthog", "i"),
+  t("Gmail", "gmail", "i"),
+  t("Hotmail", "hotmail", "i"),
+  t("Yahoo"),
+  t("Android"),
+  t("iPhone"),
+  t("iOS"),
+  t("Windows"),
+  t("macOS"),
+  t("Chrome"),
+  t("Safari"),
+  t("Firefox"),
+];
+
+const STRICT_TERMS: Array<[Term, Finding["level"]]> = [
+  ...FORBIDDEN.map((term): [Term, Finding["level"]] => [term, "prohibida"]),
+  ...COMPARISONS.map((term): [Term, Finding["level"]] => [term, "comparación"]),
+  ...INTEROP.map((term): [Term, Finding["level"]] => [term, "interoperabilidad"]),
+  ...LANDING_EXTRA.map((term): [Term, Finding["level"]] => [term, "interoperabilidad"]),
+];
+
+/** Revisa un texto visible con la regla estricta (sin zonas, pragmas ni BYOK). */
+export function strictTextFindings(text: string, file: string, line = 0): Finding[] {
+  const out: Finding[] = [];
+  for (const [term, level] of STRICT_TERMS) {
+    const m = term.pattern.exec(text);
+    if (!m) continue;
+    const at = Math.max(0, m.index - 40);
+    out.push({ file, line, term: term.name, level, excerpt: text.slice(at, m.index + m[0].length + 40).replace(/\s+/g, " ").trim() });
+  }
+  return out;
+}
+
+export function scanLandingStrict(file: string, source: string): Finding[] {
+  return extractTexts(source, file).flatMap((chunk) => strictTextFindings(chunk.text, file, chunk.line));
+}
+
 function walk(dir: string, acc: string[] = []): string[] {
   if (!fs.existsSync(dir)) return acc;
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -389,6 +456,24 @@ section("1. Autocomprobación del escáner");
   check("«Reemplazar por…» no es comparación; «reemplaza a Marca» sí", verbs.filter((f) => f.level === "comparación").length === 1, verbs);
   const types = scanSource("src/types/X.ts", 'type P = "chatgpt" | "claude"; const id = "whatsapp";');
   check("tipos literales e ids en minúsculas no cuentan", types.length === 0, types);
+
+  // Regla estricta de la portada: ni `brand-ok`, ni BYOK, ni proveedores de acceso.
+  const strict = scanLandingStrict(
+    "src/components/landing/X.tsx",
+    [
+      "// brand-ok: aquí no vale",
+      'const a = "Abrir en Google Calendar";',
+      'const b = "Se usa tu propia clave de Gemini";',
+      'const c = "Comenzar gratis con tu propia clave de API";',
+      "const d = signInWithGoogle; // identificador, no texto",
+      'const e = "Sin instalar nada en Windows";',
+    ].join("\n"),
+  );
+  const strictLines = strict.map((f) => `${f.line}:${f.term}`);
+  check("portada: `brand-ok` no exime de la regla estricta", strictLines.includes("2:Google"), strictLines);
+  check("portada: la excepción BYOK no aplica", strictLines.includes("3:Gemini"), strictLines);
+  check("portada: textos genéricos e identificadores no cuentan", !strictLines.some((n) => /^[45]:/.test(n)), strictLines);
+  check("portada: plataformas de terceros también se detectan", strictLines.includes("6:Windows"), strictLines);
 }
 
 // ----------------------------------------------------------------------------
@@ -456,9 +541,164 @@ section("4. Aviso de marcas e independencia");
   const footer = read("src/components/legal/SiteFooter.tsx");
   check("el pie de página muestra el aviso de marcas", /\{TRADEMARK_NOTICE\}/.test(footer));
   const landing = read("src/components/landing/LandingOverlay.tsx");
-  check("la portada incluye el pie de página legal", /<SiteFooter\b/.test(landing));
+  const landingFooter = read("src/components/landing/LandingFooter.tsx");
+  check("la portada incluye su pie de página corporativo", /<LandingFooter\b/.test(landing));
+  check("el pie de la portada muestra el aviso de marcas", /\{TRADEMARK_NOTICE\}/.test(landingFooter));
   const legalPage = read("src/components/legal/LegalPage.tsx");
   check("las páginas legales incluyen el pie de página", /<SiteFooter\b/.test(legalPage));
+}
+
+// ----------------------------------------------------------------------------
+// 5. Portada pública: regla estricta (Sprint 22)
+// ----------------------------------------------------------------------------
+
+section("5. Portada pública: regla estricta (Sprint 22)");
+{
+  const landingFiles = LANDING_ZONES.flatMap((z) => walk(path.join(ROOT, z)));
+  const strict: Finding[] = [];
+  let landingPragmas = 0;
+  for (const abs of landingFiles) {
+    const file = rel(abs);
+    const source = fs.readFileSync(abs, "utf8");
+    landingPragmas += (source.match(/brand-ok\s*:/g) ?? []).length;
+    strict.push(...scanLandingStrict(file, source));
+  }
+  const fmt = (f: Finding) => `${f.file}:${f.line} · ${f.term} · «${f.excerpt}»`;
+  console.log(`  · ${landingFiles.length} archivos de la portada`);
+  check("portada: 0 marcas, apps o proveedores de terceros en sus textos", strict.length === 0, strict.map(fmt));
+  check("portada: sin excepciones «brand-ok»", landingPragmas === 0, landingPragmas);
+
+  // Textos que la portada importa de otros módulos.
+  const imported: Array<[string, string]> = [
+    ["SITE_NAME", SITE_NAME],
+    ["SITE_TAGLINE", SITE_TAGLINE],
+    ["SITE_DESCRIPTION", SITE_DESCRIPTION],
+    ["TRADEMARK_NOTICE", TRADEMARK_NOTICE],
+    ...LEGAL_LINKS.map((l): [string, string] => [`LEGAL_LINKS ${l.href}`, l.label]),
+    ...[FREE_PLAN, PRO_PLAN].flatMap((p): Array<[string, string]> => [
+      [`${p.id}.name`, p.name],
+      [`${p.id}.price`, `${p.price} ${p.period} ${p.altPrice ?? ""}`],
+      [`${p.id}.tagline`, p.tagline],
+      ...p.features.map((f, i): [string, string] => [`${p.id}.features[${i}]`, f]),
+    ]),
+    ...PLAN_COMPARISON.map((r): [string, string] => [`PLAN_COMPARISON ${r.label}`, `${r.label} ${r.free ?? ""} ${r.pro}`]),
+  ];
+  const importedFindings = imported.flatMap(([name, text]) => strictTextFindings(text, name));
+  check("portada: planes, SEO y avisos que importa sin marcas de terceros", importedFindings.length === 0, importedFindings.map(fmt));
+
+  // SEO de portada: Open Graph y manifiesto con la regla estricta.
+  const seoStrict = ["src/app/opengraph-image.tsx", "src/app/manifest.ts"].flatMap((f) => scanLandingStrict(f, read(f)));
+  check("portada: imagen Open Graph y manifiesto sin marcas de terceros", seoStrict.length === 0, seoStrict.map(fmt));
+
+  // COMPANY_CONTACT: los únicos nombres de red son los perfiles propios de Andros.
+  const SOCIAL_LABELS = new Set(["instagramLabel", "linkedinLabel"]);
+  const OFFICIAL_EMAIL = "contacto.androshn@gmail.com";
+  const contactFindings = Object.entries(COMPANY_CONTACT)
+    .filter(([key, value]) => typeof value === "string" && !SOCIAL_LABELS.has(key))
+    .flatMap(([key, value]) =>
+      strictTextFindings(String(value), `COMPANY_CONTACT.${key}`).filter(
+        // Única excepción: el buzón oficial de Andros, solo en `email` y solo con ese valor.
+        (f) => !(key === "email" && value === OFFICIAL_EMAIL && f.term === "Gmail"),
+      ),
+    );
+  check("COMPANY_CONTACT: solo las etiquetas de redes propias nombran una red", contactFindings.length === 0, contactFindings.map(fmt));
+  const socialUrls = [COMPANY_CONTACT.instagramUrl, COMPANY_CONTACT.linkedinUrl];
+  check(
+    "COMPANY_CONTACT: enlaces de redes son placeholders «#…» o https:// reales",
+    socialUrls.every((u) => isPlaceholderLink(u) || /^https:\/\/\S+$/.test(u)),
+    socialUrls,
+  );
+  check(
+    "COMPANY_CONTACT: todos los campos del Sprint 22 presentes",
+    ["email", "instagramHandle", "instagramUrl", "linkedinLabel", "linkedinUrl", "supportChannel", "location", "businessHours", "legalEntity"].every(
+      (k) => typeof (COMPANY_CONTACT as Record<string, unknown>)[k] === "string" && String((COMPANY_CONTACT as Record<string, unknown>)[k]).trim() !== "",
+    ),
+  );
+
+  const landing = read("src/components/landing/LandingOverlay.tsx");
+  const footer = read("src/components/landing/LandingFooter.tsx");
+  const landingAll = landingFiles.map((f) => fs.readFileSync(f, "utf8")).join("\n");
+
+  // Controles retirados: tema y tipografía/animación de letras.
+  check("portada: sin botón de tema / Modo Noche", !/ThemeToggle|toggleTheme|\b(?:Sun|Moon)\b/.test(landingAll));
+  check(
+    "portada: sin controles para mezclar, pausar o fijar letras",
+    !/MutantAndrosLogo|shuffleSignal|\bShuffle\b|BlackHoleCanvas|Mezclar|[Pp]ausar|[Bb]loquear letras/.test(landingAll),
+  );
+  check(
+    "portada: estilo visual fijo (.andros-landing definido en globals.css)",
+    /\bandros-landing\b/.test(landing) && /\.andros-landing\s*\{/.test(read("src/app/globals.css")),
+  );
+
+  // Scroll vertical libre.
+  check("portada: sin h-screen ni overflow-hidden que bloqueen el scroll", !/\bh-screen\b|overflow-(?:y-)?hidden/.test(landingAll));
+  check("portada: el contenedor permite scroll vertical", /overflow-y-auto/.test(landing));
+
+  // Recorrido y CTA.
+  const sections = ["como-funciona", "capacidades", "planes", "mas-informacion"];
+  check("portada: secciones Cómo funciona, Capacidades, Planes y Más información", sections.every((id) => landing.includes(`id="${id}"`)));
+  check("portada: CTA «Comenzar gratis» e indicador «Conoce más»", /Comenzar gratis/.test(landing) && /Conoce más/.test(landing));
+  const steps = /const STEPS: Step\[\] = \[([\s\S]*?)\n\];/.exec(landing)?.[1] ?? "";
+  check("portada: tres pasos en «Cómo funciona»", (steps.match(/\btitle:/g) ?? []).length === 3);
+
+  // Planes: precios y límites solo desde plans.ts ← planLimits.ts.
+  check(
+    "portada: planes leídos de plans.ts (fuente: planLimits.ts)",
+    /from "@\/lib\/plans"/.test(landing) && /PLAN_LIMITS|PRO_PRICING/.test(read("src/lib/plans.ts")),
+  );
+  check("portada: sin precios escritos a mano", !/\$\d/.test(landingAll));
+
+  // Pie corporativo.
+  check("pie corporativo: datos desde COMPANY_CONTACT", /COMPANY_CONTACT\./.test(footer));
+  check("pie corporativo: enlaces legales y aviso de independencia", /LEGAL_LINKS/.test(footer) && /\{TRADEMARK_NOTICE\}/.test(footer));
+  check("pie corporativo: placeholders sin enlace (isPlaceholderLink)", /isPlaceholderLink\(/.test(footer) && /emailIsPlaceholder/.test(footer));
+  check(
+    "pie corporativo: enlaces a /privacidad, /terminos, /cookies y /reembolsos",
+    ["/privacidad", "/terminos", "/cookies", "/reembolsos"].every((href) => LEGAL_LINKS.some((l) => l.href === href)),
+  );
+}
+
+// ----------------------------------------------------------------------------
+// 6. (Sprint 23) Catálogo de plantillas y portada «mesa de estudio»
+// ----------------------------------------------------------------------------
+
+section("6. Librería de fichas y portada rediseñada (Sprint 23)");
+{
+  const fmt = (f: Finding) => `${f.file}:${f.line} · ${f.term} · «${f.excerpt}»`;
+  check("catálogo: al menos 20 plantillas", TEMPLATE_CATALOG.length >= 20, TEMPLATE_CATALOG.length);
+  // Regla ESTRICTA (la de la portada) sobre todo texto de las plantillas.
+  const catalogTexts: Array<[string, string]> = [
+    ...CATALOG_CATEGORIES.map((c): [string, string] => [`categoría ${c.id}`, `${c.label} ${c.short}`]),
+    ...TEMPLATE_CATALOG.flatMap((t): Array<[string, string]> => [
+      [`${t.id}.title`, t.title],
+      [`${t.id}.description`, t.description ?? ""],
+      [`${t.id}.area`, t.area],
+      ...t.fields.map((f): [string, string] => [`${t.id}.${f.fieldKey}`, [f.label, f.unit ?? "", ...(f.options ?? [])].join(" ")]),
+      ...Object.entries(t.prefill).map(([k, v]): [string, string] => [`${t.id}.prefill.${k}`, String(v)]),
+    ]),
+  ];
+  const catalogFindings = catalogTexts.flatMap(([name, text]) => strictTextFindings(text, name));
+  check("catálogo: 0 apps o marcas de terceros (regla estricta)", catalogFindings.length === 0, catalogFindings.map(fmt));
+  const catalogSource = scanLandingStrict("src/lib/forms/templateCatalog.ts", read("src/lib/forms/templateCatalog.ts"));
+  check("catálogo: textos del archivo fuente limpios", catalogSource.length === 0, catalogSource.map(fmt));
+  check("catálogo: sin pragmas «brand-ok»", !/brand-ok\s*:/.test(read("src/lib/forms/templateCatalog.ts")));
+
+  // «WhatsApp» en cualquier forma, incluidos comentarios e identificadores.
+  const sources = ["src", "electron"].flatMap((r) => walk(path.join(ROOT, r)));
+  const whatsapp = sources.filter((abs) => /whats\s?app/i.test(fs.readFileSync(abs, "utf8"))).map(rel);
+  check("«WhatsApp»: 0 apariciones en src/ y electron/ (código, comentarios e identificadores)", whatsapp.length === 0, whatsapp);
+  const seoFiles = ["src/app/layout.tsx", "src/app/manifest.ts", "src/app/opengraph-image.tsx", "src/lib/site.ts"];
+  const seoWhatsapp = seoFiles.filter((f) => /whats\s?app/i.test(read(f)));
+  check("layout, manifiesto, Open Graph y site.ts sin «WhatsApp»", seoWhatsapp.length === 0, seoWhatsapp);
+
+  // Portada: pieza visual de planificación, sin canvas pesado.
+  const landingAll = LANDING_ZONES.flatMap((z) => walk(path.join(ROOT, z))).map((f) => fs.readFileSync(f, "utf8")).join("\n");
+  check("portada: incluye la mesa de estudio (PlanningTable)", /<PlanningTable\b/.test(read("src/components/landing/LandingOverlay.tsx")));
+  check("portada: sin <canvas>, WebGL ni bucles de animación", !/<canvas\b|getContext\(|requestAnimationFrame|THREE\./.test(landingAll));
+  check("portada: tarjetas con @Diseño, @Obra y @Finanzas", ["Diseño", "Obra", "Finanzas"].every((a) => landingAll.includes(`"${a}"`)));
+  check("portada: cambio de estado Rojo → Verde", /Rojo · Pendiente/.test(landingAll) && /Verde · Resuelta/.test(landingAll));
+  check("portada: los datos de muestra se rotulan «Ejemplo»", (landingAll.match(/Ejemplo/g) ?? []).length >= 2);
+  check("portada: respeta el movimiento reducido", /useReducedMotion/.test(landingAll) && /prefers-reduced-motion[\s\S]{0,120}landing-draw/.test(read("src/app/globals.css")));
 }
 
 console.log(`\n${passed} correctas · ${failed} fallidas`);

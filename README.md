@@ -7,7 +7,7 @@ Se distribuye como web (PWA) y como app de escritorio para Windows (Electron).
 | Plan | Precio | Límites aplicados en código |
 | --- | --- | --- |
 | **Plan Básico** | $0 | 2 espacios · 3 participantes en vivo por espacio · 1 plantilla propia · 15 consultas IA/día (ilimitadas con clave propia) |
-| **Andros Pro** | $5.99 USD/mes o $49.99 USD/año | Espacios y plantillas ilimitados · 6 participantes en vivo · 150 consultas IA/día · Modo Experto completo |
+| **Andros Pro** | $5.99 USD/mes o $65.99 USD/año | Espacios y plantillas ilimitados · 6 participantes en vivo · 150 consultas IA/día · Modo Experto completo |
 
 La fuente única de precios y límites es [`src/lib/billing/planLimits.ts`](src/lib/billing/planLimits.ts); `npm run verify:billing` comprueba que la interfaz, el servidor, el SQL y los textos legales coinciden con ella.
 
@@ -88,7 +88,7 @@ Crea `.env.local` en la raíz para desarrollo y configura las mismas variables e
 | `LEMONSQUEEZY_API_KEY` | Servidor | Para cobrar | API de la pasarela (checkout y portal). |
 | `LEMONSQUEEZY_STORE_ID` | Servidor | Para cobrar | Id numérico de la tienda. |
 | `LEMONSQUEEZY_VARIANT_MONTHLY` | Servidor | Para cobrar | Id de la variante $5.99/mes. |
-| `LEMONSQUEEZY_VARIANT_ANNUAL` | Servidor | Para cobrar | Id de la variante $49.99/año. |
+| `LEMONSQUEEZY_VARIANT_ANNUAL` | Servidor | Para cobrar | Id de la variante $65.99/año. |
 | `LEMONSQUEEZY_WEBHOOK_SECRET` | Servidor | Para cobrar | Secreto de firma del webhook (≥ 16 caracteres). |
 | `RESEND_API_KEY` / `RESEND_FROM_EMAIL` | Servidor | No | Correos «te compartieron un espacio». |
 | `YOUTUBE_API_KEY` | Servidor | No | Metadatos de videos en la Biblioteca. |
@@ -104,7 +104,7 @@ Sin las variables `LEMONSQUEEZY_*`, `/api/billing/checkout` responde `503` y la 
 ### Activar los pagos
 
 1. Ejecuta `supabase/schema.sql` completo en el SQL Editor de Supabase (es idempotente).
-2. En Lemon Squeezy crea un producto con dos variantes de suscripción: $5.99/mes y $49.99/año.
+2. En Lemon Squeezy crea un producto con dos variantes de suscripción: $5.99/mes y $65.99/año.
 3. Crea un webhook hacia `https://<tu-dominio>/api/billing/webhook` con los eventos `subscription_created`, `subscription_updated`, `subscription_cancelled` y `subscription_expired`.
 4. Configura las cinco variables `LEMONSQUEEZY_*` y `SUPABASE_SERVICE_ROLE_KEY` en producción y vuelve a desplegar.
 

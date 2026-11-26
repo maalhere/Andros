@@ -187,7 +187,7 @@ export default function PrivacidadPage() {
       <h3>Suscripción a Andros Pro (pagos)</h3>
       <ul>
         <li>
-          <strong>Quién cobra</strong>: el pago de Andros Pro ($5.99 USD al mes o $49.99 USD al año)
+          <strong>Quién cobra</strong>: el pago de Andros Pro ($5.99 USD al mes o $65.99 USD al año)
           lo procesa Lemon Squeezy, que actúa como <em>Merchant of Record</em> (vendedor
           registrado): emite la factura, calcula y liquida los impuestos de tu país y custodia los
           datos de pago. Escribes tu tarjeta (u otro medio de pago) en su página, nunca en Andros.

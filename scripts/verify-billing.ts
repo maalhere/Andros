@@ -2,7 +2,8 @@
 // ANDROS — VERIFICACIÓN SPRINT 21: MONETIZACIÓN ($5.99/MES) Y LÍMITES REALES
 // Ejecuta: npm run verify:billing   (sin navegador, sin red, sin Supabase)
 //
-//   1. Precios coherentes: $5.99 USD/mes y $49.99 USD/año (ahorra 2 meses)
+//   1. Precios coherentes: $5.99 USD/mes y $65.99 USD/año ($5.50/mes,
+//      ahorra $5.89 = 8% al año)
 //      en la fuente única, en los textos de planes y en las páginas legales.
 //   2. Límites reales Plan Básico vs. Andros Pro (espacios, personas en vivo,
 //      plantillas, cuota IA y Modo Experto) y su aplicación en el código.
@@ -19,11 +20,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { NextRequest } from "next/server";
 import {
-  ANNUAL_MONTHS_SAVED,
+  ANNUAL_MONTHLY_EQUIVALENT,
+  ANNUAL_SAVINGS_PERCENT,
+  ANNUAL_SAVINGS_USD,
   PERIOD_GRACE_MS,
   PLAN_LIMITS,
   PRO_PRICING,
   PRO_STATUSES,
+  TWELVE_MONTHLY_TOTAL,
   UNLIMITED,
   aiDailyLimit,
   canCreateSpace,
@@ -41,7 +45,14 @@ import {
   signWebhookBody,
   verifyWebhookSignature,
 } from "@/lib/billing/lemonSqueezy";
-import { ANNUAL_SAVINGS_LABEL, FREE_PLAN, PLAN_COMPARISON, PRO_PLAN } from "@/lib/plans";
+import {
+  ANNUAL_MONTHLY_LABEL,
+  ANNUAL_SAVINGS_LABEL,
+  ANNUAL_SAVINGS_USD_LABEL,
+  FREE_PLAN,
+  PLAN_COMPARISON,
+  PRO_PLAN,
+} from "@/lib/plans";
 import { FREE_DAILY_LIMIT, PRO_DAILY_LIMIT, dailyLimitMessage } from "@/lib/ai/freeQuota";
 import { IP_FALLBACK_LIMIT, quotaForUser, serverQuotaAllows, serverQuotaConsume } from "@/lib/ai/serverQuota";
 import { MAX_SPACE_PARTICIPANTS, MAX_VOICE_PARTICIPANTS } from "@/types/collab";
@@ -92,20 +103,29 @@ async function main(): Promise<void> {
   for (const name of BILLING_ENV) delete process.env[name];
 
   // --------------------------------------------------------------------------
-  section("1. Precios ($5.99 USD/mes · $49.99 USD/año)");
+  section("1. Precios ($5.99 USD/mes · $65.99 USD/año)");
   check("mensual = 5.99", PRO_PRICING.monthly.amount === 5.99 && PRO_PRICING.monthly.label === "$5.99");
-  check("anual = 49.99", PRO_PRICING.annual.amount === 49.99 && PRO_PRICING.annual.label === "$49.99");
+  check("anual = 65.99", PRO_PRICING.annual.amount === 65.99 && PRO_PRICING.annual.label === "$65.99");
   check("periodos en USD", PRO_PRICING.monthly.period === "USD / mes" && PRO_PRICING.annual.period === "USD / año");
-  // 12 × $5.99 = $71.88; $49.99 al año ahorra $21.89 ≈ 3,65 mensualidades.
-  // La etiqueta se calcula con los precios reales: nunca promete de más.
-  const monthsSaved = (PRO_PRICING.monthly.amount * 12 - PRO_PRICING.annual.amount) / PRO_PRICING.monthly.amount;
-  check("el anual ahorra al menos 2 meses", monthsSaved >= 2, monthsSaved);
-  check("la etiqueta de ahorro es exacta («más de N meses», N = parte entera)",
-    ANNUAL_MONTHS_SAVED === Math.floor(monthsSaved) && ANNUAL_SAVINGS_LABEL === `ahorra más de ${ANNUAL_MONTHS_SAVED} meses` && monthsSaved > ANNUAL_MONTHS_SAVED,
-    { monthsSaved, ANNUAL_MONTHS_SAVED, ANNUAL_SAVINGS_LABEL });
+  // 12 × $5.99 = $71.88; $65.99 al año ahorra $5.89 (≈ 8,19 %) y equivale a
+  // $5.499… ≈ $5.50 al mes. Las etiquetas salen de los precios reales y se
+  // redondean a favor del cliente: nunca prometen de más.
+  check("12 mensualidades = $71.88", TWELVE_MONTHLY_TOTAL === 71.88, TWELVE_MONTHLY_TOTAL);
+  check("ahorro anual = $5.89 (al centavo)", ANNUAL_SAVINGS_USD === 5.89, ANNUAL_SAVINGS_USD);
+  const exactPercent = (ANNUAL_SAVINGS_USD / TWELVE_MONTHLY_TOTAL) * 100;
+  check("porcentaje de ahorro = 8 (parte entera de 8,19 %, nunca de más)",
+    ANNUAL_SAVINGS_PERCENT === 8 && ANNUAL_SAVINGS_PERCENT <= exactPercent && exactPercent < ANNUAL_SAVINGS_PERCENT + 1,
+    { exactPercent, ANNUAL_SAVINGS_PERCENT });
+  check("equivalente mensual = $5.50 (redondeo hacia arriba, nunca menor al real)",
+    ANNUAL_MONTHLY_EQUIVALENT === 5.5 && ANNUAL_MONTHLY_EQUIVALENT * 12 >= PRO_PRICING.annual.amount,
+    ANNUAL_MONTHLY_EQUIVALENT);
+  check("etiquetas exactas: «$5.50/mes», «ahorra 8% al año», «ahorras $5.89 al año»",
+    ANNUAL_MONTHLY_LABEL === "$5.50/mes" && ANNUAL_SAVINGS_LABEL === "ahorra 8% al año" && ANNUAL_SAVINGS_USD_LABEL === "ahorras $5.89 al año",
+    { ANNUAL_MONTHLY_LABEL, ANNUAL_SAVINGS_LABEL, ANNUAL_SAVINGS_USD_LABEL });
   check("el anual es más barato que 12 mensualidades", PRO_PRICING.annual.amount < PRO_PRICING.monthly.amount * 12);
   check("tarjeta Pro muestra $5.99 USD / mes", PRO_PLAN.price === "$5.99" && PRO_PLAN.period === "USD / mes", PRO_PLAN);
-  check("tarjeta Pro muestra $49.99 USD / año", PRO_PLAN.altPrice?.includes("$49.99 USD / año") === true, PRO_PLAN.altPrice);
+  check("tarjeta Pro muestra «o $65.99 USD / año ($5.50/mes · ahorra 8% al año)»",
+    PRO_PLAN.altPrice === "o $65.99 USD / año ($5.50/mes · ahorra 8% al año)", PRO_PLAN.altPrice);
   check("Plan Básico $0", FREE_PLAN.price === "$0" && FREE_PLAN.name === "Plan Básico");
 
   // Ningún texto viejo de precio o de «aún no cobramos» en src/.
@@ -113,13 +133,13 @@ async function main(): Promise<void> {
   const stale: string[] = [];
   for (const f of srcFiles) {
     const text = read(f);
-    if (/\$9(?![\d.,])|\b9 USD\b|Pro \$9|\$4\.99|\$12(?![\d.,])/.test(text)) stale.push(`${f}: precio antiguo`);
+    if (/\$9(?![\d.,])|\b9 USD\b|Pro \$9|\$4\.99|\$12(?![\d.,])|49\.99|ahorra más de \d+ meses/.test(text)) stale.push(`${f}: precio antiguo`);
     if (/Pro todavía no se cobra|Aún no cobramos|Acceso anticipado a Pro|abierta durante el acceso anticipado/.test(text)) stale.push(`${f}: «aún no se cobra»`);
   }
   check("sin precios antiguos ni «aún no se cobra» en src/", stale.length === 0, stale);
   for (const page of ["src/app/terminos/page.tsx", "src/app/reembolsos/page.tsx", "src/app/privacidad/page.tsx"]) {
     const text = read(page);
-    check(`${page} documenta $5.99 y $49.99`, text.includes("$5.99") && text.includes("$49.99"));
+    check(`${page} documenta $5.99 y $65.99`, text.includes("$5.99") && text.includes("$65.99"));
   }
   const terms = read("src/app/terminos/page.tsx");
   check("términos: Merchant of Record, renovación y cancelación", /Merchant of Record/.test(terms) && /Renovación/.test(terms) && /Cancelación/.test(terms));

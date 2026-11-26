@@ -39,6 +39,7 @@ import {
   uniqueFieldKeys,
 } from "./formSchema";
 import { compressPhoto, PhotoError } from "./imageCompress";
+import { instantiateCatalogTemplate, type CatalogTemplate } from "./templateCatalog";
 
 const ws = () => useWorkspaceStore.getState();
 
@@ -284,7 +285,15 @@ export function freeSlotsForSheets(heights: number[]): { x: number; y: number }[
 
 /** Crea en el lienzo una ficha vacía del formato elegido (1 clic, 0 ms, $0 API). */
 export function replicateTemplate(template: FormTemplate): string {
-  const { title, data } = instantiateTemplate(template);
+  return placeSheet(instantiateTemplate(template));
+}
+
+/** (Sprint 23) Plantilla del catálogo → ficha con guías prellenadas y área sugerida. */
+export function replicateCatalogTemplate(template: CatalogTemplate): string {
+  return placeSheet(instantiateCatalogTemplate(template));
+}
+
+function placeSheet({ title, data }: { title: string; data: FormSheetPayload }): string {
   const draft = buildSheetNode("tmp", title, data, { x: 0, y: 0 });
   const [position] = freeSlotsForSheets([estimateNodeHeight(draft)]);
   const id = ws().aiCreateNode({

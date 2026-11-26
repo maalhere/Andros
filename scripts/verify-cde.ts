@@ -51,7 +51,25 @@ import {
 import { buildLocalSetupPlan, sanitizeSetupTemplates, splitRequestedKinds } from "@/lib/cde/setup";
 import { buildSetupBoard } from "@/lib/cde/setupBoard";
 import { sanitizeChatMessage } from "@/lib/cde/chatModel";
-import { sanitizeFormSheet } from "@/lib/forms/formSchema";
+import {
+  BUILT_IN_TEMPLATES,
+  BUILT_IN_TEMPLATE_IDS,
+  FORM_MAX_FIELDS,
+  sanitizeFormSheet,
+  sanitizeTemplate,
+} from "@/lib/forms/formSchema";
+import {
+  CATALOG_CATEGORIES,
+  CATALOG_ID_PREFIX,
+  TEMPLATE_CATALOG,
+  catalogByCategory,
+  copyCatalogTemplate,
+  findCatalogTemplate,
+  instantiateCatalogTemplate,
+  isCatalogTemplateId,
+  searchCatalog,
+} from "@/lib/forms/templateCatalog";
+import { PLAN_LIMITS } from "@/lib/billing/planLimits";
 
 let passed = 0;
 let failed = 0;
@@ -413,6 +431,147 @@ check("El aviso de la sala solo pide releer (no guarda lo recibido)", cdeCode.in
 check("El navegador no manda autor ni área del mensaje", !/author_name:|author_area:|author_id:/.test(fs.readFileSync(path.join(root, "src/lib/cde/repository.ts"), "utf8")));
 check("Textos nuevos sin marcas de terceros", !/WhatsApp|Slack|Excel|Google Sheets|Outlook|Teams/.test(cdeCode));
 check("areaKey ignora tildes", areaKey("Logística") === areaKey("LOGISTICA"));
+
+// ----------------------------------------------------------------------------
+// 6. (Sprint 23) Catálogo de plantillas de la Librería de fichas
+// ----------------------------------------------------------------------------
+
+section("6. Librería de fichas: catálogo de plantillas (Sprint 23)");
+{
+  const VALID_CATEGORY_IDS = new Set(CATALOG_CATEGORIES.map((c) => c.id));
+  const VALID_CATEGORY_LABELS = new Set(CATALOG_CATEGORIES.map((c) => c.label));
+
+  check("Al menos 20 plantillas en el catálogo", TEMPLATE_CATALOG.length >= 20, TEMPLATE_CATALOG.length);
+  check("Exactamente 24 plantillas (Sprint 23)", TEMPLATE_CATALOG.length === 24, TEMPLATE_CATALOG.length);
+  check("6 categorías con nombre y etiqueta corta", CATALOG_CATEGORIES.length === 6 && CATALOG_CATEGORIES.every((c) => c.label.trim() && c.short.trim() && c.label.length <= 40));
+  const perCategory = CATALOG_CATEGORIES.map((c) => [c.id, catalogByCategory(c.id).length] as const);
+  check("4 plantillas por categoría", perCategory.every(([, n]) => n === 4), perCategory);
+
+  const ids = TEMPLATE_CATALOG.map((t) => t.id);
+  check("Ids únicos con prefijo «cat-»", new Set(ids).size === ids.length && ids.every((id) => id.startsWith(CATALOG_ID_PREFIX)));
+  check("Ningún id choca con los formatos iniciales", ids.every((id) => !BUILT_IN_TEMPLATE_IDS.has(id)));
+  check("Títulos únicos", new Set(TEMPLATE_CATALOG.map((t) => t.title)).size === TEMPLATE_CATALOG.length);
+
+  const bad: string[] = [];
+  for (const t of TEMPLATE_CATALOG) {
+    const where = t.id;
+    if (!t.title.trim() || t.title.length > 80) bad.push(`${where}: título`);
+    if (!t.description || t.description.trim().length < 30 || t.description.length > 200) bad.push(`${where}: descripción`);
+    if (!VALID_CATEGORY_IDS.has(t.catalogCategory) || !VALID_CATEGORY_LABELS.has(t.category)) bad.push(`${where}: categoría`);
+    if (normalizeAreaName(t.area) !== t.area || !t.area) bad.push(`${where}: área sugerida`);
+    if (t.fields.length < 6 || t.fields.length > FORM_MAX_FIELDS) bad.push(`${where}: ${t.fields.length} campos`);
+    if (new Set(t.fields.map((f) => f.fieldKey)).size !== t.fields.length) bad.push(`${where}: fieldKey repetido`);
+    if (t.fields.some((f) => !f.label.trim() || !/^[a-z][a-z0-9_]{0,39}$/.test(f.fieldKey))) bad.push(`${where}: campo sin nombre o clave inválida`);
+    if (t.fields.some((f) => f.type === "select" && (f.options?.length ?? 0) < 2)) bad.push(`${where}: lista sin opciones`);
+    if (Object.keys(t.prefill).length === 0) bad.push(`${where}: sin estructura prellenada`);
+    for (const [key, value] of Object.entries(t.prefill)) {
+      const field = t.fields.find((f) => f.fieldKey === key);
+      if (!field) bad.push(`${where}: prellenado de un campo inexistente (${key})`);
+      else if (field.type === "select" && !(field.options ?? []).includes(String(value))) bad.push(`${where}: opción inicial inválida (${key})`);
+    }
+    // Validación real: la plantilla sobrevive a la misma sanitización que la nube.
+    const clean = sanitizeTemplate(t);
+    if (!clean || clean.fields.length !== t.fields.length) bad.push(`${where}: no pasa sanitizeTemplate`);
+  }
+  check("Cada plantilla: título, descripción, categoría, área y campos útiles", bad.length === 0, bad);
+
+  // «Usar en el espacio» → ficha con guías y área, válida para la nube y la sala.
+  const instantiated = TEMPLATE_CATALOG.map((t) => ({ t, sheet: instantiateCatalogTemplate(t) }));
+  check(
+    "Ficha creada: mismos campos, área sugerida y guías aplicadas",
+    instantiated.every(
+      ({ t, sheet }) =>
+        sheet.data.fields.length === t.fields.length &&
+        sheet.data.area === t.area &&
+        sheet.data.templateId === t.id &&
+        Object.entries(t.prefill).every(([k, v]) => sheet.data.fields.find((f) => f.fieldKey === k)?.value === v),
+    ),
+  );
+  check(
+    "Ficha creada: pasa sanitizeFormSheet sin perder datos",
+    instantiated.every(({ sheet }) => {
+      const round = sanitizeFormSheet(JSON.parse(JSON.stringify(sheet.data)));
+      return round.fields.length === sheet.data.fields.length && round.area === sheet.data.area;
+    }),
+  );
+  const rfi = findCatalogTemplate("cat-riesgos-incidencias");
+  const riskSheet = rfi ? instantiateCatalogTemplate(rfi).data : null;
+  check(
+    "Bitácora de riesgos arranca en Rojo · Pendiente",
+    riskSheet?.fields.find((f) => f.fieldKey === "estado")?.value === "Rojo · Pendiente",
+  );
+
+  // «Copiar a mis formatos»: copia editable, id nuevo, sin tocar el catálogo.
+  const source = TEMPLATE_CATALOG[0];
+  const copy = copyCatalogTemplate(source);
+  check(
+    "Copia a Mis formatos: id nuevo y mismos campos",
+    copy.id !== source.id && !isCatalogTemplateId(copy.id) && copy.fields.length === source.fields.length && copy.title === source.title,
+  );
+  check("La copia no modifica el catálogo", findCatalogTemplate(source.id)?.fields[0].id === `${source.id}-f1`);
+
+  // Búsqueda rápida (sin tildes) y filtros.
+  check("Buscar «planos» encuentra la revisión de planos", searchCatalog("planos").some((t) => t.id === "cat-revision-planos"));
+  check("Buscar sin tildes («revision diseno»)", searchCatalog("revision diseno").some((t) => t.id === "cat-revision-diseno"));
+  check("Filtro por categoría + búsqueda", searchCatalog("", "obra").length === 4 && searchCatalog("tesis", "obra").length === 0);
+  check("Las 24 plantillas pedidas están presentes", [
+    "Arranque de proyecto (Kickoff)", "Reunión semanal y acuerdos", "Control de entregables por área", "Bitácora de riesgos e incidencias (Rojo/Verde)",
+    "Brief creativo y alcance", "Revisión de diseño y feedback visual", "Hoja de ruta de lanzamiento (Roadmap)", "Investigación con usuarios y hallazgos",
+    "Revisión de planos y observaciones", "Solicitud de información técnica (RFI)", "Lista de verificación en campo / inspección", "Control de presupuesto y materiales",
+    "Propuesta comercial para cliente", "Seguimiento de proveedores y compras", "Plan operativo mensual de PyME", "Incorporación de nuevo integrante (Onboarding)",
+    "Planificación de evento o feria", "Calendario editorial y campañas", "Producción audiovisual / pieza creativa", "Resumen post-evento y aprendizajes",
+    "Proyecto final o tesis en equipo", "Plan de estudio y entregas del periodo", "Investigación académica y fuentes", "Planificación semanal personal",
+  ].every((title) => TEMPLATE_CATALOG.some((t) => t.title === title)));
+
+  // Compatibilidad: la librería personal y el límite del Plan Básico no cambian.
+  check("Formatos iniciales de la librería personal intactos (4)", BUILT_IN_TEMPLATES.length === 4);
+  check("Plan Básico: sigue siendo 1 plantilla propia", PLAN_LIMITS.free.maxCustomTemplates === 1);
+  const storeSrc = fs.readFileSync(path.join(root, "src/store/useFormsLibraryStore.ts"), "utf8");
+  check("El catálogo no se guarda en la librería personal", !/templateCatalog|TEMPLATE_CATALOG/.test(storeSrc));
+
+  // Marcas de terceros: ni una en las plantillas (todos sus textos).
+  const BRANDS =
+    /whats\s?app|telegram|slack|discord|\bteams\b|skype|messenger|\bzoom\b|\bexcel\b|\bword\b|power\s?point|keynote|google|microsoft|drive|dropbox|notion|evernote|onenote|trello|\bmiro\b|asana|jira|clickup|airtable|figma|canva|calendly|chat\s?gpt|copilot|autocad|revit|solidworks|sketchup|procore|instagram|facebook|tiktok|twitter|linkedin|youtube/i;
+  const texts = TEMPLATE_CATALOG.flatMap((t) => [
+    t.title,
+    t.description ?? "",
+    t.category,
+    t.area,
+    ...t.fields.flatMap((f) => [f.label, f.unit ?? "", ...(f.options ?? [])]),
+    ...Object.values(t.prefill).map((v) => String(v)),
+  ]);
+  const hits = texts.filter((s) => BRANDS.test(s));
+  check("Plantillas: 0 apps o marcas de terceros", hits.length === 0, hits);
+  check("Categorías: 0 apps o marcas de terceros", CATALOG_CATEGORIES.every((c) => !BRANDS.test(`${c.label} ${c.short}`)));
+
+  // «WhatsApp» no aparece en NINGÚN archivo fuente (código, comentarios ni metadatos).
+  const everyFile: string[] = [];
+  const walkAll = (dir: string) => {
+    if (!fs.existsSync(dir)) return;
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        if (e.name !== "node_modules" && !e.name.startsWith(".")) walkAll(full);
+      } else if (/\.(ts|tsx|js|cjs|mjs|css|json|webmanifest)$/.test(e.name)) everyFile.push(full);
+    }
+  };
+  walkAll(path.join(root, "src"));
+  walkAll(path.join(root, "electron"));
+  walkAll(path.join(root, "public"));
+  const whatsapp = everyFile.filter((f) => /whats\s?app/i.test(fs.readFileSync(f, "utf8"))).map((f) => path.relative(root, f));
+  check(`«WhatsApp»: 0 apariciones en src/, electron/ y public/ (${everyFile.length} archivos)`, whatsapp.length === 0, whatsapp);
+  const landingDir = path.join(root, "src/components/landing");
+  const landingSources = [
+    ...fs.readdirSync(landingDir).map((f) => path.join(landingDir, f)),
+    path.join(root, "src/app/layout.tsx"),
+    path.join(root, "src/app/manifest.ts"),
+    path.join(root, "src/app/opengraph-image.tsx"),
+    path.join(root, "src/lib/site.ts"),
+    path.join(root, "src/lib/forms/templateCatalog.ts"),
+  ];
+  const landingHits = landingSources.filter((f) => /whats\s?app|telegram|slack|\bexcel\b|notion|revit/i.test(fs.readFileSync(f, "utf8")));
+  check("Portada, SEO y catálogo: sin «WhatsApp» ni apps de mensajería u ofimática", landingHits.length === 0, landingHits);
+}
 
 console.log(`\n${passed} correctas · ${failed} fallidas`);
 if (failed > 0) process.exit(1);

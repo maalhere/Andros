@@ -1,28 +1,42 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
   Cloud,
   CloudOff,
   Copy,
+  CopyPlus,
   LibraryBig,
   Pencil,
   Plus,
   RotateCcw,
+  Search,
   Sparkles,
   Trash2,
 } from "lucide-react";
+import { AreaBadge } from "@/components/cde/CdeBits";
+import {
+  CATALOG_CATEGORIES,
+  TEMPLATE_CATALOG,
+  catalogByCategory,
+  catalogSummary,
+  copyCatalogTemplate,
+  searchCatalog,
+  type CatalogCategoryId,
+  type CatalogTemplate,
+} from "@/lib/forms/templateCatalog";
 import { useFormsLibraryStore, type FormsLibraryTab } from "@/store/useFormsLibraryStore";
 import { useCloudStore } from "@/store/useCloudStore";
 import { useCanvasReadOnly } from "@/store/useCollabStore";
 import { toast } from "@/store/useToastStore";
-import { replicateTemplate } from "@/lib/forms/formActions";
+import { replicateCatalogTemplate, replicateTemplate } from "@/lib/forms/formActions";
 import {
   BUILT_IN_TEMPLATE_IDS,
   FORM_FIELD_TYPES,
   FORM_FIELD_TYPE_LABELS,
+  FORM_LIBRARY_MAX_TEMPLATES,
   FORM_MAX_FIELDS,
   FORM_MAX_OPTIONS,
   newFormId,
@@ -55,7 +69,7 @@ export const FormsLibraryModal: React.FC = () => {
       title="Librería de fichas"
       titleId="andros-forms-library-title"
       icon={<LibraryBig className="w-4 h-4 text-andros-accent-ink" aria-hidden="true" />}
-      description="Formatos replicables con campos tipados y fotos. Replica uno en el espacio actual o deja que la IA los llene con tu información."
+      description="Plantillas listas para planificar, revisar y dar seguimiento, más tus propios formatos. Usa una en el espacio actual o deja que la IA la llene con tu información."
       wide
     >
       {open && <LibraryBody tab={tab} onClose={close} />}
@@ -64,6 +78,7 @@ export const FormsLibraryModal: React.FC = () => {
 };
 
 const TABS: { id: FormsLibraryTab; label: string }[] = [
+  { id: "catalog", label: "Plantillas" },
   { id: "library", label: "Mis formatos" },
   { id: "autofill", label: "Llenar con IA" },
 ];
@@ -95,7 +110,9 @@ const LibraryBody: React.FC<{ tab: FormsLibraryTab; onClose: () => void }> = ({ 
         ))}
       </div>
 
-      {tab === "library" ? (
+      {tab === "catalog" ? (
+        <CatalogPanel onUsed={onClose} />
+      ) : tab === "library" ? (
         <TemplateList
           onEdit={setEditing}
           onNew={() =>
@@ -113,6 +130,207 @@ const LibraryBody: React.FC<{ tab: FormsLibraryTab; onClose: () => void }> = ({ 
         <AutoFillPanel onDone={onClose} />
       )}
     </div>
+  );
+};
+
+// ----------------------------------------------------------------------------
+// (Sprint 23) Catálogo: 24 plantillas en 6 categorías, con búsqueda y filtros
+// ----------------------------------------------------------------------------
+
+type CategoryFilter = CatalogCategoryId | "all";
+
+const FILTER_CHIP =
+  "min-h-11 md:min-h-8 px-3 rounded-lg border text-xs font-medium flex items-center gap-1.5 active:scale-[0.96] spring-micro";
+
+const CatalogPanel: React.FC<{ onUsed: () => void }> = ({ onUsed }) => {
+  const [category, setCategory] = useState<CategoryFilter>("all");
+  const [query, setQuery] = useState("");
+  const readOnly = useCanvasReadOnly();
+  const results = useMemo(() => searchCatalog(query, category), [query, category]);
+
+  const copyToMine = (template: CatalogTemplate) => {
+    const store = useFormsLibraryStore.getState();
+    if (store.templates.length >= FORM_LIBRARY_MAX_TEMPLATES) {
+      toast({ message: `Tu librería admite hasta ${FORM_LIBRARY_MAX_TEMPLATES} formatos. Borra uno para copiar esta plantilla.`, tone: "error" });
+      return;
+    }
+    store.upsertTemplate(copyCatalogTemplate(template));
+    toast({
+      message: `«${template.title}» copiada a Mis formatos. Ahí puedes editarla a tu manera.`,
+      tone: "success",
+      action: { label: "Ver", onAction: () => useFormsLibraryStore.getState().setLibraryTab("library") },
+    });
+  };
+
+  const filters: { id: CategoryFilter; label: string; count: number }[] = [
+    { id: "all", label: "Todas", count: TEMPLATE_CATALOG.length },
+    ...CATALOG_CATEGORIES.map((c) => ({ id: c.id, label: c.short, count: catalogByCategory(c.id).length })),
+  ];
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <label htmlFor="catalog-search" className="sr-only">
+          Buscar plantilla
+        </label>
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-andros-muted" aria-hidden="true" />
+          <input
+            id="catalog-search"
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Buscar: acta, planos, propuesta, tesis…"
+            className={`${INPUT} pl-9`}
+          />
+        </div>
+      </div>
+
+      <div role="group" aria-label="Filtrar plantillas por categoría" className="flex flex-wrap gap-1.5">
+        {filters.map((f) => {
+          const active = category === f.id;
+          return (
+            <button
+              key={f.id}
+              type="button"
+              aria-pressed={active}
+              onClick={() => setCategory(f.id)}
+              className={`${FILTER_CHIP} ${
+                active
+                  ? "border-andros-border-active bg-andros-card text-andros-primary shadow-sm"
+                  : "border-andros-border text-andros-muted hover:text-andros-primary"
+              }`}
+            >
+              {f.label}
+              <span className="font-mono tabular-nums text-[10px] text-andros-muted">{f.count}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <p aria-live="polite" className="text-[11px] text-andros-muted">
+        {category === "all" ? "Todas las categorías" : CATALOG_CATEGORIES.find((c) => c.id === category)?.label}
+        {" · "}
+        <span className="font-mono tabular-nums">{results.length}</span> {results.length === 1 ? "plantilla" : "plantillas"}
+      </p>
+
+      {results.length === 0 ? (
+        <div className="p-4 rounded-xl border border-dashed border-andros-border text-xs text-andros-muted">
+          No hay plantillas con «{query.trim()}». Prueba con otra palabra o{" "}
+          <button
+            type="button"
+            onClick={() => {
+              setQuery("");
+              setCategory("all");
+            }}
+            className="min-h-11 md:min-h-0 text-andros-accent-ink underline underline-offset-2"
+          >
+            ver todas
+          </button>
+          .
+        </div>
+      ) : (
+        <ul className="grid gap-2 sm:grid-cols-2">
+          {results.map((t) => (
+            <CatalogCard key={t.id} template={t} readOnly={readOnly} onUse={() => {
+              replicateCatalogTemplate(t);
+              onUsed();
+            }} onCopy={() => copyToMine(t)} />
+          ))}
+        </ul>
+      )}
+
+      <p className="text-[11px] leading-relaxed text-andros-muted">
+        Las plantillas no ocupan espacio en tu librería ni cuentan para el límite de tu plan. Cópialas a «Mis formatos» si
+        quieres cambiar sus campos.
+      </p>
+    </div>
+  );
+};
+
+const CatalogCard: React.FC<{
+  template: CatalogTemplate;
+  readOnly: boolean;
+  onUse: () => void;
+  onCopy: () => void;
+}> = ({ template: t, readOnly, onUse, onCopy }) => {
+  const summary = catalogSummary(t);
+  const category = CATALOG_CATEGORIES.find((c) => c.id === t.catalogCategory);
+  return (
+    <li className="p-3 rounded-xl border border-andros-border bg-andros-canvas flex flex-col gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-andros-muted truncate">{category?.short}</span>
+        <AreaBadge area={t.area} className="shrink-0" />
+      </div>
+      <div className="min-w-0">
+        <p className="text-sm font-semibold leading-snug text-andros-primary">{t.title}</p>
+        <p className="mt-1 text-xs leading-relaxed text-andros-muted">{t.description}</p>
+      </div>
+      <p className="text-[11px] text-andros-muted">
+        <span className="font-mono tabular-nums">{summary.fields}</span> campos
+        {summary.guided > 0 && (
+          <>
+            {" · "}
+            <span className="font-mono tabular-nums">{summary.guided}</span> con guía
+          </>
+        )}
+        {summary.photos > 0 ? " · con fotos" : ""}
+      </p>
+      <details className="group rounded-lg border border-andros-border bg-andros-card">
+        <summary className="cursor-pointer select-none px-2.5 min-h-11 md:min-h-8 flex items-center text-[11px] font-medium text-andros-primary">
+          Ver qué incluye
+        </summary>
+        <ul className="px-2.5 pb-2.5 space-y-1" aria-label={`Campos de «${t.title}»`}>
+          {t.fields.map((f) => {
+            const guide = t.prefill[f.fieldKey];
+            return (
+              <li key={f.id} className="flex items-baseline justify-between gap-2 text-[11px]">
+                <span className="min-w-0 text-andros-primary">
+                  {f.label}
+                  {f.unit ? <span className="text-andros-muted"> ({f.unit})</span> : null}
+                  {typeof guide === "string" && guide.trim() && f.type !== "select" && (
+                    <span className="block truncate text-andros-muted">{guide.split("\n").filter((l) => l.trim())[0]}</span>
+                  )}
+                  {f.type === "select" && f.options?.length ? (
+                    <span className="block truncate text-andros-muted">{f.options.join(" · ")}</span>
+                  ) : null}
+                </span>
+                <span className="shrink-0 text-andros-muted">{FORM_FIELD_TYPE_LABELS[f.type]}</span>
+              </li>
+            );
+          })}
+        </ul>
+      </details>
+      <div className="mt-auto flex gap-1.5 pt-0.5">
+        {!readOnly && (
+          <button type="button" onClick={onUse} className={`${BUTTON_PRIMARY} flex-1`}>
+            <Copy className="w-4 h-4" aria-hidden="true" />
+            Usar en el espacio
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onCopy}
+          aria-label={`Copiar «${t.title}» a Mis formatos para editarla`}
+          title="Copiar a Mis formatos"
+          className={`${BUTTON_SECONDARY} ${readOnly ? "flex-1" : "w-11 md:w-9 px-0"}`}
+        >
+          <CopyPlus className="w-4 h-4" aria-hidden="true" />
+          {readOnly && "Copiar a Mis formatos"}
+        </button>
+        {!readOnly && (
+          <button
+            type="button"
+            onClick={() => useFormsLibraryStore.getState().openLibrary("autofill", [t.id])}
+            aria-label={`Llenar «${t.title}» con IA`}
+            title="Llenar con IA"
+            className={`${BUTTON_SECONDARY} w-11 md:w-9 px-0`}
+          >
+            <Sparkles className="w-4 h-4 text-andros-accent-ink" aria-hidden="true" />
+          </button>
+        )}
+      </div>
+    </li>
   );
 };
 

@@ -94,7 +94,7 @@ export async function GET(request: NextRequest) {
 
   const { error } = await supabase.auth.exchangeCodeForSession(code);
   if (error) {
-    return redirectWithError(origin, "No se pudo completar el inicio de sesión con Google.");
+    return redirectWithError(origin, "No se pudo completar el inicio de sesión.");
   }
 
   return response;

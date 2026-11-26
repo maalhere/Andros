@@ -1569,13 +1569,13 @@ async function signInWithGoogleDesktop(
       },
     });
     if (error) throw error;
-    if (!data.url) throw new Error("Supabase no devolvió la dirección de Google.");
+    if (!data.url) throw new Error("no se recibió la dirección de acceso.");
 
     await auth.openInBrowser(data.url);
     useCloudStore.getState().setAuthNotice(DESKTOP_AUTH_NOTICE);
   } catch (error) {
     void auth.cancel().catch(() => undefined);
-    cloud.setStatus("signed-out", `No se pudo abrir Google en tu navegador: ${describeError(error)}`);
+    cloud.setStatus("signed-out", `No se pudo abrir el inicio de sesión en tu navegador: ${describeError(error)}`);
   }
 }
 
@@ -1587,7 +1587,7 @@ async function completeDesktopSignIn(
   const cloud = useCloudStore.getState();
   cloud.setAuthNotice(null);
   if (!result.code) {
-    cloud.setStatus(cloud.user ? cloud.status : "signed-out", `Inicio de sesión cancelado: ${result.error ?? "sin respuesta de Google"}`);
+    cloud.setStatus(cloud.user ? cloud.status : "signed-out", `Inicio de sesión cancelado: ${result.error ?? "sin respuesta del proveedor de acceso"}`);
     return;
   }
   cloud.setStatus("connecting", null);
@@ -1597,7 +1597,7 @@ async function completeDesktopSignIn(
       .getState()
       .setStatus(
         "signed-out",
-        `No se pudo completar el inicio de sesión con Google: ${error ? describeError(error) : "sin sesión"}`
+        `No se pudo completar el inicio de sesión: ${error ? describeError(error) : "sin sesión"}`
       );
     return;
   }
@@ -1636,7 +1636,7 @@ export async function signInWithGoogle(options: GoogleSignInOptions = {}): Promi
     },
   });
   if (error) {
-    cloud.setStatus("signed-out", `No se pudo abrir Google: ${describeError(error)}`);
+    cloud.setStatus("signed-out", `No se pudo abrir el inicio de sesión: ${describeError(error)}`);
   }
 }
 
@@ -1772,7 +1772,7 @@ export function openWorkspaceFromLink(workspaceId: string): void {
   const status = useCloudStore.getState().status;
   if (status === "signed-out" || status === "disabled") {
     useToastStore.getState().show({
-      message: "Inicia sesión con Google para abrir el espacio compartido.",
+      message: "Inicia sesión para abrir el espacio compartido.",
     });
   }
   void activeEngine?.consumeLink();

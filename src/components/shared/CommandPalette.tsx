@@ -209,10 +209,10 @@ const PaletteDialog: React.FC<{ reduced: boolean; onClose: () => void }> = ({ re
         id: "forms-library",
         group: "Acciones",
         label: "Librería de fichas",
-        hint: "Formatos replicables con campos y fotos",
-        keywords: "ficha fichas formato formulario plantilla historial clinico receta medicion registro logistica",
+        hint: "24 plantillas listas para usar y tus propios formatos",
+        keywords: "ficha fichas formato formulario plantilla plantillas catalogo kickoff reunion acta entregables riesgos brief roadmap planos rfi inspeccion presupuesto propuesta proveedores onboarding evento editorial tesis estudio semanal historial clinico receta medicion registro logistica",
         icon: <ClipboardList className="w-4 h-4" />,
-        run: () => useFormsLibraryStore.getState().openLibrary("library"),
+        run: () => useFormsLibraryStore.getState().openLibrary("catalog"),
       },
       {
         id: "forms-autofill",

@@ -14,7 +14,8 @@ import {
 // para que otro dispositivo no resucite el formato al sincronizar.
 // ============================================================================
 
-export type FormsLibraryTab = "library" | "autofill";
+/** `catalog`: las 24 plantillas listas para usar (Sprint 23). */
+export type FormsLibraryTab = "catalog" | "library" | "autofill";
 /** `setup`: falta la columna `form_library` en Supabase (se usa solo la copia local). */
 export type FormsCloudStatus = "local" | "synced" | "setup";
 
@@ -73,7 +74,7 @@ export const useFormsLibraryStore = create<FormsLibraryState>((set, get) => ({
   preselectTemplateIds: [],
   autofillOpen: false,
 
-  openLibrary: (tab = "library", preselect = []) =>
+  openLibrary: (tab = "catalog", preselect = []) =>
     set({ libraryOpen: true, libraryTab: tab, preselectTemplateIds: preselect }),
   closeLibrary: () => set({ libraryOpen: false, preselectTemplateIds: [] }),
   setLibraryTab: (tab) => set({ libraryTab: tab }),

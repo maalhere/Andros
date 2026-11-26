@@ -9,7 +9,7 @@
 //
 //   Plan Básico (gratis) → 2 espacios, 3 personas en vivo, 1 plantilla propia,
 //                          15 consultas IA/día (o ilimitadas con clave propia).
-//   Andros Pro           → $5.99 USD/mes o $49.99 USD/año: espacios y
+//   Andros Pro           → $5.99 USD/mes o $65.99 USD/año: espacios y
 //                          plantillas ilimitados, 6 personas en vivo,
 //                          150 consultas IA/día y Modo Experto completo.
 // ============================================================================
@@ -53,17 +53,33 @@ export const PLAN_LIMITS: Readonly<Record<PlanId, Readonly<PlanLimits>>> = {
 /** Precios públicos en USD (el proveedor de pagos añade impuestos locales). */
 export const PRO_PRICING = {
   monthly: { amount: 5.99, label: "$5.99", period: "USD / mes" },
-  annual: { amount: 49.99, label: "$49.99", period: "USD / año" },
+  annual: { amount: 65.99, label: "$65.99", period: "USD / año" },
 } as const satisfies Record<BillingCycle, { amount: number; label: string; period: string }>;
 
+/** Lo que costarían 12 mensualidades: 12 × $5.99 = $71.88. */
+export const TWELVE_MONTHLY_TOTAL = Math.round(PRO_PRICING.monthly.amount * 12 * 100) / 100;
+
 /**
- * Mensualidades completas que se ahorran con el pago anual: 12 × $5.99 =
- * $71.88 frente a $49.99 → $21.89 ≈ 3,65 meses. Se redondea HACIA ABAJO y
- * se muestra como «más de N meses», así la promesa siempre es cierta.
+ * Ahorro del pago anual en USD, al centavo: $71.88 − $65.99 = $5.89 al año.
+ * Se calcula en centavos enteros para evitar errores de coma flotante.
  */
-export const ANNUAL_MONTHS_SAVED = Math.floor(
-  (PRO_PRICING.monthly.amount * 12 - PRO_PRICING.annual.amount) / PRO_PRICING.monthly.amount
-);
+export const ANNUAL_SAVINGS_USD =
+  (Math.round(TWELVE_MONTHLY_TOTAL * 100) - Math.round(PRO_PRICING.annual.amount * 100)) / 100;
+
+/**
+ * Porcentaje ahorrado frente a 12 mensualidades: $5.89 / $71.88 ≈ 8,19 % → 8.
+ * Se redondea HACIA ABAJO, así la promesa «ahorra N%» siempre es cierta.
+ */
+export const ANNUAL_SAVINGS_PERCENT = Math.floor((ANNUAL_SAVINGS_USD / TWELVE_MONTHLY_TOTAL) * 100);
+
+/**
+ * Equivalente mensual del plan anual: $65.99 / 12 ≈ $5.499 → $5.50. Se
+ * redondea HACIA ARRIBA al centavo para nunca anunciar un precio menor al real.
+ */
+export const ANNUAL_MONTHLY_EQUIVALENT = Math.ceil((Math.round(PRO_PRICING.annual.amount * 100) / 12)) / 100;
+
+/** Importe en USD con dos decimales: 5.5 → «$5.50». */
+export const formatUsd = (amount: number): string => `$${amount.toFixed(2)}`;
 
 export const limitsFor = (plan: PlanId): Readonly<PlanLimits> => PLAN_LIMITS[plan] ?? PLAN_LIMITS.free;
 

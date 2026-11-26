@@ -4,7 +4,7 @@
 // Convierte las tarjetas de un espacio en un documento ejecutivo ordenado por
 // prioridad: Resumen → Cronograma → Presupuesto → Logística → Roles → resto
 // (por posición en el lienzo). Lo usan:
-//   · la exportación «Plan del Día» (PDF imprimible + resumen para WhatsApp),
+//   · la exportación «Plan del Día» (PDF imprimible + resumen para chats de grupo),
 //   · la Vista Invitado pública de solo lectura (`/ver/<token>`).
 // Los totales del presupuesto se recalculan con el motor de `sheet.ts`, así el
 // documento nunca muestra una cifra vieja aunque la tarjeta no se haya abierto.
@@ -77,7 +77,7 @@ export interface PlanFormula {
   latex: string;
   /** `\text{IMC} = \frac{82}{1.75^{2}}` o `null` si faltan datos. */
   substitutionLatex: string | null;
-  /** Expresión legible para WhatsApp: «m / h^2». */
+  /** Expresión legible para chats de grupo: «m / h^2». */
   expression: string;
   /** Sustitución en texto plano («82 / 1.75^2») para Word y PowerPoint, o `null` si faltan datos. */
   substitutionText?: string | null;
@@ -408,10 +408,10 @@ const SECTION_EMOJI: Record<PlanCategory, string> = {
   other: "📝",
 };
 
-/** Máximo de líneas por sección en WhatsApp (el resto se resume). */
-const WHATSAPP_MAX_LINES = 14;
+/** Máximo de líneas por sección en chats de grupo (el resto se resume). */
+const CHAT_SUMMARY_MAX_LINES = 14;
 
-/** Quita los caracteres que WhatsApp interpreta como formato dentro de un dato. */
+/** Quita los caracteres que los chats interpretan como formato dentro de un dato. */
 const plain = (text: string) => text.replace(/[*_~`]/g, "").replace(/\s+/g, " ").trim();
 
 function sectionLines(section: PlanSection): string[] {
@@ -435,15 +435,15 @@ function sectionLines(section: PlanSection): string[] {
     lines.push(`📷 ${section.images.length} foto${section.images.length === 1 ? "" : "s"} en el tablero`);
   }
   if (section.note && section.category !== "budget") lines.push(plain(section.note));
-  if (lines.length > WHATSAPP_MAX_LINES) {
-    const hidden = lines.length - (WHATSAPP_MAX_LINES - 1);
-    return [...lines.slice(0, WHATSAPP_MAX_LINES - 1), `… y ${hidden} más en el tablero`];
+  if (lines.length > CHAT_SUMMARY_MAX_LINES) {
+    const hidden = lines.length - (CHAT_SUMMARY_MAX_LINES - 1);
+    return [...lines.slice(0, CHAT_SUMMARY_MAX_LINES - 1), `… y ${hidden} más en el tablero`];
   }
   return lines;
 }
 
-/** Resumen ejecutivo listo para pegar en un grupo de WhatsApp. */
-export function planToWhatsApp(doc: PlanDocument): string {
+/** Resumen ejecutivo listo para pegar en un chat de grupo. */
+export function planToChatSummary(doc: PlanDocument): string {
   const out: string[] = [`📋 *${plain(doc.title)}*`, `Plan del día · ${formatPlanDate(doc.generatedAt)}`];
   if (doc.sections.length === 0) {
     out.push("", "El tablero todavía no tiene tarjetas con contenido.");

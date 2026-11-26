@@ -253,7 +253,7 @@ export function sanitizeAlertEntry(raw: unknown): ImpactAlertEntry | null {
   };
 }
 
-/** Mensaje corto listo para WhatsApp o para decirlo en la sala de voz. */
+/** Mensaje corto listo para chats de grupo o para decirlo en la sala de voz. */
 export function alertShareText(alert: ImpactAlertEntry): string {
   const parts = [
     `Aviso de Andros: cambió «${alert.sourceTitle}» y «${alert.targetTitle}» quedó por revisar.`,

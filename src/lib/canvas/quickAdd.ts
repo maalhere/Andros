@@ -73,7 +73,7 @@ export function quickAdd(kind: QuickAddKind, file?: File): string {
   if (kind === "forms") {
     ws.setActiveTool("pointer");
     ws.setActiveMobileSheet("none");
-    useFormsLibraryStore.getState().openLibrary("library");
+    useFormsLibraryStore.getState().openLibrary("catalog");
     return "";
   }
   if (kind === "resolution") {

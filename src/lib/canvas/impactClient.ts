@@ -178,7 +178,7 @@ export async function runImpactCheck(nodeId: string, { auto = false }: { auto?: 
   }
 }
 
-/** Copia el aviso corto al portapapeles (listo para WhatsApp o la sala de voz). */
+/** Copia el aviso corto al portapapeles (listo para chats de grupo o la sala de voz). */
 export async function copyAlertNotice(alert: ImpactAlertEntry): Promise<void> {
   const text = alertShareText(alert);
   try {

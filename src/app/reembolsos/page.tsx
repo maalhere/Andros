@@ -14,7 +14,7 @@ export default function ReembolsosPage() {
   return (
     <LegalPage
       title="Política de Reembolsos y Contacto"
-      summary="El Plan Básico es gratis. Andros Pro ($5.99 USD/mes o $49.99 USD/año) se cancela cuando quieras y tiene reembolso completo en los primeros 14 días."
+      summary="El Plan Básico es gratis. Andros Pro ($5.99 USD/mes o $65.99 USD/año) se cancela cuando quieras y tiene reembolso completo en los primeros 14 días."
     >
       <h2>1. Cómo se cobra</h2>
       <p>

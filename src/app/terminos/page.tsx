@@ -126,7 +126,7 @@ export default function TerminosPage() {
           los calendarios externos. No caduca.
         </li>
         <li>
-          <strong>Andros Pro</strong>: $5.99 USD al mes o $49.99 USD al año. Incluye espacios y
+          <strong>Andros Pro</strong>: $5.99 USD al mes o $65.99 USD al año. Incluye espacios y
           plantillas ilimitados, hasta 6 participantes en vivo por espacio (5 a la vez en el canal
           de voz), 150 consultas IA al día con la IA de Andros y el Modo Experto completo (visor
           3D, fórmulas, CodeLab e impresoras). El tope de personas en vivo de un espacio depende
